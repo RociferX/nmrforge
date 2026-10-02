@@ -11,8 +11,10 @@ from core.project import ExperimentStatus, ProjectManager
 from ui_support.i18n import tr
 from workflow.stepwise import (
     StepwiseError,
+    generate_3d_projections,
     generate_fid,
     generate_spectrum,
+    read_experiment,
 )
 
 
@@ -30,7 +32,7 @@ class _FakeBackend:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"x")
 
-    def convert_to_fid(self, experiment, data_dir, progress=None) -> dict:
+    def convert_to_fid(self, experiment, data_dir, progress=None, params=None) -> dict:
         self.experiment = experiment
         self.calls.append("convert_to_fid")
         if not self.success:
@@ -92,9 +94,7 @@ class _FakeBackend:
         self.calls.append("project_3d")
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        by_axis = {
-            dim.logical_axis: dim.nucleus for dim in self.experiment.dimensions
-        }
+        by_axis = {dim.logical_axis: dim.nucleus for dim in self.experiment.dimensions}
         pairs = {  # production-flow geometry (measured): xy=(F3,F1), xz=(F2,F1), yz=(F2,F3)
             "xy": (by_axis["F3"], by_axis["F1"]),
             "xz": (by_axis["F2"], by_axis["F1"]),
@@ -122,9 +122,7 @@ class _FakeBackend:
         }
 
 
-def _manager_with_data(
-    tmp_path: Path, source: Path
-) -> tuple[ProjectManager, str, str, Path]:
+def _manager_with_data(tmp_path: Path, source: Path) -> tuple[ProjectManager, str, str, Path]:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment(title="HSQC")
     data = manager.import_data(entry.id, str(source))
@@ -132,9 +130,7 @@ def _manager_with_data(
 
 
 def test_generate_fid_registers(tmp_path: Path, bruker_dir: Path) -> None:
-    manager, exp_id, data_id, work = _manager_with_data(
-        tmp_path, bruker_dir / "hsqc_2d"
-    )
+    manager, exp_id, data_id, work = _manager_with_data(tmp_path, bruker_dir / "hsqc_2d")
     backend = _FakeBackend(work)
     fid_path = generate_fid(manager, exp_id, data_id, backend)
     assert fid_path.endswith(".fid")
@@ -148,9 +144,7 @@ def test_generate_fid_registers(tmp_path: Path, bruker_dir: Path) -> None:
 
 
 def test_generate_spectrum_uniform(tmp_path: Path, bruker_dir: Path) -> None:
-    manager, exp_id, data_id, work = _manager_with_data(
-        tmp_path, bruker_dir / "hsqc_2d"
-    )
+    manager, exp_id, data_id, work = _manager_with_data(tmp_path, bruker_dir / "hsqc_2d")
     backend = _FakeBackend(work)
     generate_fid(manager, exp_id, data_id, backend)
     spectrum = generate_spectrum(manager, exp_id, data_id, backend, params={"phase_route": "none"})
@@ -166,13 +160,9 @@ def test_generate_spectrum_uniform(tmp_path: Path, bruker_dir: Path) -> None:
     assert manager.infer_status(exp_id) is ExperimentStatus.PROCESSED
 
 
-def test_generate_spectrum_passes_params(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_generate_spectrum_passes_params(tmp_path: Path, bruker_dir: Path) -> None:
     """The uniform branch passes params through to backend.process (G2B-006)."""
-    manager, exp_id, data_id, work = _manager_with_data(
-        tmp_path, bruker_dir / "hsqc_2d"
-    )
+    manager, exp_id, data_id, work = _manager_with_data(tmp_path, bruker_dir / "hsqc_2d")
     backend = _FakeBackend(work)
     generate_fid(manager, exp_id, data_id, backend)
     generate_spectrum(
@@ -186,9 +176,7 @@ def test_generate_spectrum_passes_params(
 
 
 def test_generate_spectrum_nus_uses_reconstruct(tmp_path: Path, bruker_dir: Path) -> None:
-    manager, exp_id, data_id, work = _manager_with_data(
-        tmp_path, bruker_dir / "nus_2d"
-    )
+    manager, exp_id, data_id, work = _manager_with_data(tmp_path, bruker_dir / "nus_2d")
     backend = _FakeBackend(work)
     generate_fid(manager, exp_id, data_id, backend)
     generate_spectrum(manager, exp_id, data_id, backend, params={"phase_route": "none"})
@@ -203,9 +191,7 @@ def test_generate_spectrum_3d_projections_new_naming(
     registration uses the fixed axis logical name; old names remain supported."""
     import workflow.phase_routes as phase_routes
 
-    manager, exp_id, data_id, work = _manager_with_data(
-        tmp_path, bruker_dir / "nus_3d"
-    )
+    manager, exp_id, data_id, work = _manager_with_data(tmp_path, bruker_dir / "nus_3d")
     backend = _FakeBackend(work)
     generate_fid(manager, exp_id, data_id, backend)
 
@@ -251,9 +237,7 @@ def test_generate_spectrum_3d_projections_fallback_old_naming(
     nuclei (legacy names remain supported)."""
     import workflow.phase_routes as phase_routes
 
-    manager, exp_id, data_id, work = _manager_with_data(
-        tmp_path, bruker_dir / "nus_3d"
-    )
+    manager, exp_id, data_id, work = _manager_with_data(tmp_path, bruker_dir / "nus_3d")
     backend = _FakeBackend(work)
     generate_fid(manager, exp_id, data_id, backend)
 
@@ -288,6 +272,138 @@ def test_generate_spectrum_3d_projections_fallback_old_naming(
     ]
 
 
+def _manager_3d(tmp_path: Path, bruker_dir: Path):
+    "Regression coverage:  manager 3d."
+    manager, exp_id, data_id, work = _manager_with_data(tmp_path, bruker_dir / "hnca_3d")
+    work.mkdir(parents=True, exist_ok=True)
+    return manager, exp_id, data_id, work
+
+
+class _ProjBackend:
+    "Regression coverage:  ProjBackend."
+
+    def __init__(self, *, fail: bool = False, fallback: bool = False) -> None:
+        self.fail = fail
+        self.fallback = fallback
+
+    def project_3d(self, spectrum_path, out_dir, *, prefix="proj", timeout=900, labels=None):
+        if self.fail:
+            raise RuntimeError("proj3D 挂了")
+        out = Path(out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        paths = {}
+
+        tags = ("F1", "F2", "F3") if self.fallback else ("xy", "xz", "yz")
+        for tag in tags:
+            path = out / f"{prefix}_{tag}.ft2"
+            path.write_bytes(b"x")
+            paths[tag] = str(path)
+        result = {
+            "paths": paths,
+            "labels": {"xy": "1H", "xz": "13C", "yz": "15N"},
+            "nuclei": {
+                "xy": ["1H", "13C"],
+                "xz": ["1H", "15N"],
+                "yz": ["13C", "15N"],
+            },
+        }
+        if self.fallback:
+            result["numpy_fallback"] = True
+        return result
+
+
+def test_generate_3d_projections_lands_under_spectra_and_reports(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    "Regression coverage: test generate 3d projections lands under spectra and reports."
+    manager, exp_id, data_id, work = _manager_3d(tmp_path, bruker_dir)
+    experiment = read_experiment(manager, exp_id, data_id)
+    spectrum = work / f"{data_id}.ft3"
+    spectrum.write_bytes(b"x")
+    lines: list[str] = []
+
+    out = generate_3d_projections(
+        manager,
+        exp_id,
+        data_id,
+        experiment,
+        spectrum,
+        _ProjBackend(),
+        progress=lines.append,
+    )
+
+    assert out and "error" not in out, out
+    spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
+    for path in out.values():
+        assert Path(path).is_file()
+        assert Path(path).parent == spectra_dir
+        assert Path(path).name.startswith(f"{data_id}_")
+    assert sorted(p.name for p in spectra_dir.glob(f"{data_id}_*.ft2")) == sorted(
+        Path(p).name for p in out.values()
+    )
+    assert lines, "投影应有进度输出"
+
+
+def test_generate_3d_projections_falls_back_to_logical_axis_names(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    "Regression coverage: test generate 3d projections falls back to logical axis names."
+    manager, exp_id, data_id, work = _manager_3d(tmp_path, bruker_dir)
+    experiment = read_experiment(manager, exp_id, data_id)
+
+    out = generate_3d_projections(
+        manager,
+        exp_id,
+        data_id,
+        experiment,
+        work / f"{data_id}.ft3",
+        _ProjBackend(fallback=True),
+    )
+
+    assert "error" not in out
+    spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
+    assert sorted(p.name for p in spectra_dir.glob(f"{data_id}_proj_F*.ft2")) == [
+        f"{data_id}_proj_F1.ft2",
+        f"{data_id}_proj_F2.ft2",
+        f"{data_id}_proj_F3.ft2",
+    ]
+
+
+def test_generate_3d_projections_failure_does_not_raise(tmp_path: Path, bruker_dir: Path) -> None:
+    "Regression coverage: test generate 3d projections failure does not raise."
+    manager, exp_id, data_id, work = _manager_3d(tmp_path, bruker_dir)
+    experiment = read_experiment(manager, exp_id, data_id)
+
+    out = generate_3d_projections(
+        manager,
+        exp_id,
+        data_id,
+        experiment,
+        work / f"{data_id}.ft3",
+        _ProjBackend(fail=True),
+    )
+
+    assert set(out) == {"error"} and "proj3D" in out["error"]
+
+
+def test_generate_3d_projections_without_backend_support_is_a_noop(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    "Regression coverage: test generate 3d projections without backend support is a noop."
+    manager, exp_id, data_id, work = _manager_3d(tmp_path, bruker_dir)
+    experiment = read_experiment(manager, exp_id, data_id)
+
+    class _NoProj:
+        pass
+
+    assert (
+        generate_3d_projections(
+            manager, exp_id, data_id, experiment, work / f"{data_id}.ft3", _NoProj()
+        )
+        == {}
+    )
+
+
 def test_generate_spectrum_defaults_to_unified_route(
     tmp_path: Path, bruker_dir: Path, monkeypatch
 ) -> None:
@@ -295,9 +411,7 @@ def test_generate_spectrum_defaults_to_unified_route(
     (complex preview + in-memory phase adjustment + final run)."""
     import workflow.phase_routes as phase_routes
 
-    manager, exp_id, data_id, work = _manager_with_data(
-        tmp_path, bruker_dir / "hsqc_2d"
-    )
+    manager, exp_id, data_id, work = _manager_with_data(tmp_path, bruker_dir / "hsqc_2d")
     backend = _FakeBackend(work)
     generate_fid(manager, exp_id, data_id, backend)
     seen = {}
@@ -337,34 +451,24 @@ def test_generate_spectrum_falls_back_when_replica_preview_fails(
     def failing_unified(
         experiment, backend_, plan=None, work_dir=None, base_params=None, progress=None
     ):
-        raise RuntimeError(
-            tr("Replica preview ({p0}) failed: {p1}", p0="F1", p1="broken pipe")
-        )
+        raise RuntimeError(tr("Replica preview ({p0}) failed: {p1}", p0="F1", p1="broken pipe"))
 
     monkeypatch.setattr(phase_routes, "unified_route", failing_unified)
     spectrum = generate_spectrum(manager, exp_id, data_id, backend)
     assert spectrum.endswith("d_001.ft2")
 
 
-def test_generate_spectrum_unknown_route_raises(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_generate_spectrum_unknown_route_raises(tmp_path: Path, bruker_dir: Path) -> None:
     """The old simple/advanced dispatch is gone; an unknown phase_route raises."""
-    manager, exp_id, data_id, work = _manager_with_data(
-        tmp_path, bruker_dir / "hsqc_2d"
-    )
+    manager, exp_id, data_id, work = _manager_with_data(tmp_path, bruker_dir / "hsqc_2d")
     backend = _FakeBackend(work)
     generate_fid(manager, exp_id, data_id, backend)
     with pytest.raises(StepwiseError, match="未知 phase_route"):
-        generate_spectrum(
-            manager, exp_id, data_id, backend, params={"phase_route": "advanced"}
-        )
+        generate_spectrum(manager, exp_id, data_id, backend, params={"phase_route": "advanced"})
 
 
 def test_generate_fid_failure_raises(tmp_path: Path, bruker_dir: Path) -> None:
-    manager, exp_id, data_id, work = _manager_with_data(
-        tmp_path, bruker_dir / "hsqc_2d"
-    )
+    manager, exp_id, data_id, work = _manager_with_data(tmp_path, bruker_dir / "hsqc_2d")
     backend = _FakeBackend(work, success=False)
     with pytest.raises(StepwiseError, match="转换失败"):
         generate_fid(manager, exp_id, data_id, backend)
@@ -377,10 +481,7 @@ def _score_from_path(path: str) -> tuple[float, dict[str, float]]:
     return 100.0 - abs(p1 - 30.0) - 0.02 * abs(p0), {"snr": 0.0}
 
 
-
-def test_read_experiment_prefers_raw_copy(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_read_experiment_prefers_raw_copy(tmp_path: Path, bruker_dir: Path) -> None:
     """When raw_dir exists, the in-project copy is read first."""
     from workflow.import_workflow import import_data
     from workflow.stepwise import _read_experiment
@@ -392,6 +493,7 @@ def test_read_experiment_prefers_raw_copy(
     raw_dir = manager.data(entry.id, result.data_id).raw_dir
     assert exp.source_path == manager.root / raw_dir
     assert read_dataset(Path(result.raw_dir)).ndim == 2
+
 
 def test_rewrite_duplicate_nucleus_labels(tmp_path: Path) -> None:
     """0.2.199-patch29af: unique labels for double 15N (HNN/NNH) --
@@ -502,6 +604,7 @@ def test_rewrite_duplicate_nucleus_labels_2d(tmp_path: Path) -> None:
     assert rdic.get("FDF1LABEL") == "1Hy"  # indirect dimension F1 → Hy (1 dropped when displayed)
     assert rdic.get("FDF2LABEL") == "1Hx"  # direct dimension F2 → Hx (1 dropped when displayed)
 
+
 def test_rewrite_duplicate_nucleus_labels_3d_triple(tmp_path: Path) -> None:
     """0.2.199-patch29ah: unique labels for a triple homonuclear 3D (1H-1H-1H) --
     direct dimension F3→1Hx, F2(acqu2)→1Hy, F1(acqu3)→1Hz."""
@@ -570,9 +673,7 @@ def test_generate_spectrum_cleans_intermediates_on_error(
     """
     import workflow.phase_routes as phase_routes
 
-    manager, exp_id, data_id, work = _manager_with_data(
-        tmp_path, bruker_dir / "hsqc_2d"
-    )
+    manager, exp_id, data_id, work = _manager_with_data(tmp_path, bruker_dir / "hsqc_2d")
     backend = _FakeBackend(work)
     generate_fid(manager, exp_id, data_id, backend)
     proc = manager.data_dir(exp_id, data_id, "process")
@@ -630,4 +731,3 @@ def test_generate_spectrum_cleans_intermediates_on_error(
     assert not (proc / "_intermediate").exists()
     # kept items are unaffected (the fid is written to process/ by generate_fid)
     assert (proc / f"{data_id}.fid").exists()
-

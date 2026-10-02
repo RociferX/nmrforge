@@ -1,98 +1,78 @@
 # 选峰与定位
 
-选峰跑在已处理的谱上,产出峰表。检测与定位是两个阶段,各自都留档做了什么。
+选峰在最终处理谱上检测局部峰顶，精修坐标并写出峰表；它不修改谱图，也不完成蛋白指认。
+本页描述当前源码。旧峰表不会自动改写，更新检测规则后需重新选峰。
 
-## 检测
+## 检测与强度口径
 
-`workflow/pick_peaks.py::pick_peaks` 在已处理的谱上检测峰,写出 POKY 风格的 `.list` 表,
-并登记一条 `WorkflowRun`。
+`workflow/pick_peaks.py::pick_peaks` 写出 POKY 风格 `.list`、逐峰定位附件和运行记录。
 
 | 参数 | 含义 |
 | --- | --- |
-| `sigma_multiplier` | 以噪声估计倍数表示的阈值(缺省 35σ)。显式给值时,实际使用的值连同来源一起留档。 |
-| `edge_margin_ppm` | 谱边缘的排除边距,以**物理宽度(ppm)**表示(缺省:该核线宽的三倍)。 |
-| `edge_margin_points` | 以点数为单位的口子。不推荐:不同数字分辨率下不可比。 |
-| `localization_method` | `"parabolic"`(缺省)或 `"gaussian"`(仅 2D)。 |
-| `gaussian_roi_f1_ppm`、`gaussian_roi_f2_ppm` | Gaussian 拟合 ROI 半径(间接维 / 直接维),以物理宽度表示;缺省取配置里的 `peaks.localization`。 |
-| `ref_peaks`、`ref_nuclei`、`tolerance_ppm` | 按参考峰表限定或匹配(见下)。 |
+| `sigma_multiplier` | 噪声倍数阈值，默认 35σ；实际值及来源留档。 |
+| `edge_margin_ppm` | 显式人工排除边距，单位 ppm；默认不设置无条件边带遮罩。 |
+| `edge_margin_points` | 显式人工点数边距；填零改变点距，不宜用于跨分辨率比较。 |
+| `localization_method` | 仅接受 `parabolic`；已删除的方法会明确报错。 |
+| `ref_peaks`、`ref_nuclei`、`tolerance_ppm` | 可选参考峰表约束，见下节。 |
 
-为什么边距按 ppm 定义、运行时再换算成点:填零会改变点距但不改变物理宽度,所以按 ppm 定义的
-边距在填零前后覆盖同一段谱区;按点定义则会默默缩水。
+噪声使用稳健估计，阈值、峰高与 S/N 相对谱数组的全局中位数背景；这只是度量口径，
+不是空间变化的基线校正。非有限谱值拒绝选峰，不会静默返回空表。
+半格点造成的紧凑等高峰顶合并为一个候选；长脊与宽平台不当作真实局部峰顶。
 
-### 带参考峰表约束的选峰
+### 轴峰筛查
 
-给了参考峰表时,只保留核种能对上的峰。2D 要求所有核种都对上;拿 2D 参考去选 3D 谱时第三维是
-自由的,所以一个参考峰可能对上多个检出峰。这才让「跟着同一个峰看参数扫描」有意义,而不是
-只举一两个例子。
+自动筛查先核对实验类型、核组合和采集参数；仅在先验允许时检查最终谱的原始边缘。
+实际排除还需要大量、窄、分散且对齐的候选峰证据，不能凭“有峰靠近边缘”就删除。
+少量孤立边缘峰、内部载频峰、未知类型、参数冲突或无法确认的裁剪边界均保留。
+该规则是启发式筛查，不证明某个峰一定是伪影；判据、排除数和未筛查原因会留档。
+GUI 选峰、SMILE 评估与 API 组合复用同一判据。显式边距属于人工覆盖，报告与自动筛查分开记录。
 
-## 定位
+### 峰的符号
 
-检测找的是采样点上最大的那个点;定位估计峰真正落在采样点之间的哪里。
+自动模式依据实验模板；相敏 COSY、NOESY/ROESY 等 mixed 模板保留正负候选。
+未知或低置信度类型可用强双符号证据兜底，不强制只保留多数符号。
+API 显式指定 `positive`、`negative`、`both` 或 `dominant` 时按请求执行，并记录来源。
+这里的“同号/mixed”是峰符号，不是 uniform/NUS 采样类型。
 
-| 方法 | 做法 | 维度 |
-| --- | --- | --- |
-| `parabolic` | 逐轴独立的三点抛物线精修 | 任意(缺省) |
-| `gaussian` | 以抛物线结果为初值的二维高斯最小二乘拟合 | **仅 2D** |
+## 参考峰表约束与“对齐参考”
 
-值得依赖的行为:
+对齐参考估计当前峰表与参考峰表之间的整体化学位移偏移，用于容差内匹配；
+它不移动谱图、不改变处理参数，也不是谱图相似性或指认正确性的证明。
 
-- **对 1D/3D 谱要求 Gaussian 拟合是报错,不是静默回退。** 请求的方法与实际使用的方法都留档,
-  所以「替换」永远不会看起来像你要的那套分析;
-- **拟合失败退回抛物线**,并记录回退原因;
-- **拟合是有意设上限的。** 逐轴拟合窗口半径可以封顶
-  (`peaks.localization.gaussian_roi_max_points`),每次拟合的函数求值次数也封顶
-  (`gaussian_max_nfev`)。这样细填零的网格不会把选峰变成无界优化;
-- **两种方法跑在同一个检出候选上**,所以用 `localization: both` 时结果可直接比较。
+- 共有轴按核种和逻辑 F 轴身份匹配；同核轴不能互换，重复核坐标需保留 `核名:F轴` 身份。
+- 对齐可靠时，参考约束只保留匹配候选。2D 参考约束 3D 时，未共有的第三维自由，
+  因此一个参考峰可以保留多个三维峰；这不是一对一指认。
+- 无共有坐标、轴身份歧义或对齐质量低于门槛（当前 60%）时跳过自动过滤，保留候选并提示原因。
+- 参考少于 5 峰时不估计全局对齐，直接用原始坐标匹配；非有限坐标或非法容差明确失败。
 
-每次定位都在峰表旁边写一份附件 `<峰表>.localization.json`,里面有 `requested_method`、
-`actual_method`、`fallback_reason` 与逐峰记录。run 记录在 `params['localization']` 下带同样的信息。
+“对齐后导出”另行对输出峰表施加整体偏移；同样不修改源谱图。请核对参考是否来自可比较条件。
 
-## 峰表格式
+## 三点抛物线定位
 
-默认交换格式是 POKY 风格的 `.list`:
+逐轴使用局部三点抛物线估计亚格点顶点，适用于 2D/3D；界面不再提供定位方法选择。
+抛物线是确定性闭式解，没有迭代收敛或高斯拟合预算。
 
-```text
-label    F2_ppm    F1_ppm    height    ...
-```
+定位记录里的 `success` 与峰表的 `fit_success` 含义不同：前者表示定位已执行，
+后者表示有限等效线宽可计算；贴边或非凹三点模板可能没有有效线宽。
+`boundary_hit` 表示顶点偏移达到 ±0.5 点边界。等效线宽是局部曲率估计，不替代完整线形拟合。
+`fallback` / `fallback_reason` 保留为兼容字段，不虚报算法切换。
 
-导入导出由 `core/peaks/peak_table.py` 处理,它同时写出轴单位与从谱头推导的核种标签
-(`core/peaks/axis_units.py`)。核种归属取自 NMRPipe 头槽位,不靠顺序猜。
+附件 `<峰表>.localization.json` 保存请求/实际方法与逐峰记录；运行参数也保留定位信息。
+旧接口的 `gaussian` / `both` 请求明确报错，不静默回退。
 
-## 怎么用
+## 峰表与使用
 
-GUI:谱生成之后,流水线里的「峰挑选」步骤。峰出现在右侧表里,点一行查看器就跳到那个峰。
+峰表列保留逻辑 F 轴坐标、核标签与单位，轴身份按 NMRPipe `FDDIMORDER` 解释，
+不按核名猜存储顺序。空 3D 峰表仍保留三维化学位移表头。
 
-Python:
+GUI：生成谱图后运行“峰挑选”，点峰表行可定位谱图。Python：
 
 ```python
 from workflow.pick_peaks import pick_peaks
 
-result = pick_peaks(
-    manager,
-    "exp_001",
-    "data_001",
-    localization_method="gaussian",
-)
-print(result["peak_count"], result["peak_path"], result["localization"])
+result = pick_peaks(manager, "exp_001", "data_001", sigma_multiplier=35)
+print(result["peak_count"], result["peak_path"])
 ```
 
-脚本接口:峰定位按组合选择 `localization="parabolic" | "gaussian" | "both"` —— 见
-[external-api/03-api-reference.md](external-api/03-api-reference.md)。
-
-## 配置
-
-```yaml
-peaks:
-  localization:
-    method: parabolic            # parabolic(缺省)| gaussian(仅 2D)
-    gaussian_roi_f1_ppm: 1.5     # 间接维 ROI 半径
-    gaussian_roi_f2_ppm: 0.25    # 直接维 ROI 半径
-    gaussian_roi_max_points: 0   # 0 = 不封顶;正数封顶 ROI 半宽
-    gaussian_max_nfev: 200       # 每次拟合函数求值上限
-```
-
-## 边界
-
-- 选峰需要已处理的谱,所以需要 NMRPipe;解析与导出已有峰表不需要;
-- Gaussian 定位只支持 2D 是模型本身如此,不是漏做:现在的拟合就是二维模型;
-- 缺省阈值是约定,不是测量结果。如果发表要依赖某个特定阈值,请显式写出来,这样留档的才是你要的值。
+API 见 [接口参考](external-api/03-api-reference.md)。解析/导出已有峰表不需要 NMRPipe；
+从原始数据生成处理谱需要外部引擎。发表时请明确阈值、符号模式、人工边距、参考约束和软件版本。

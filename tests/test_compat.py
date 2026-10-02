@@ -98,9 +98,7 @@ def test_golden_vector_matches_the_declaration(tmp_path: Path) -> None:
     result = check_conformance(workdir=tmp_path / "golden")
     assert result["name"] == GOLDEN_NAME
     assert result["items"]["spectrum_sha256"], "黄金谱哈希不一致(行为或配方变了)"
-    assert result["items"]["peak_table_sha256"], (
-        "黄金峰表哈希不一致(行为、峰表列序或格式化变了)"
-    )
+    assert result["items"]["peak_table_sha256"], "黄金峰表哈希不一致(行为、峰表列序或格式化变了)"
     assert result["items"]["n_peaks"], "黄金向量检出峰数变了"
 
 
@@ -115,14 +113,16 @@ def test_manifest_contracts_match_the_code() -> None:
     assert contracts["peak_table_columns"] == list(PEAK_TABLE_COLUMNS)
     assert contracts["records"] == dict(RECORD_SCHEMAS)
     assert contracts["error_codes"] == list(errors_module.__all__)
-    assert "gaussian_fallback" in contracts["warning_codes"]
+
+    assert "boundary_hit" in contracts["warning_codes"]
+    assert "gaussian_fallback" not in contracts["warning_codes"]
     assert "no_spectrum_change" in contracts["warning_codes"]
     # fingerprint scope: the four code trees + data shipped with the package
     sources = behavior_sources()
     for name in BEHAVIOR_ROOTS:
         assert name in sources
     assert manifest["defaults"]["threshold_semantics"] == "reference-locked"
-    assert manifest["defaults"]["edge_margin"].endswith("×linewidth")
+    assert "no blanket mask" in manifest["defaults"]["edge_margin"]
 
 
 def test_resume_fingerprint_schema_matches_the_code() -> None:

@@ -32,20 +32,20 @@ def _as_float(value: Any, label: str) -> float:
     try:
         number = float(str(value).strip())
     except (TypeError, ValueError) as exc:
-        raise SweepError(tr(
-            "direct-dimension range {p0} is not a number: "
-            "{p1!r}",
-            p0=label,
-            p1=value,
-        )) from exc
+        raise SweepError(
+            tr(
+                "direct-dimension range {p0} is not a number: {p1!r}",
+                p0=label,
+                p1=value,
+            )
+        ) from exc
     if not (-1e6 < number < 1e6):
         raise SweepError(
             tr(
-            "direct-dimension range {p0} is outside a sensible ppm range: "
-            "{p1!r}",
-            p0=label,
-            p1=value,
-        )
+                "direct-dimension range {p0} is outside a sensible ppm range: {p1!r}",
+                p0=label,
+                p1=value,
+            )
         )
     return number
 
@@ -124,7 +124,8 @@ def parse_direct_range(
     Returns
     -------
     DirectRange | None
-        The normalised range (``high``/``low`` as ppm strings), or None if no source supplied one.
+        The normalised range (``high``/``low`` as ppm strings), or None if no source supplied
+        one.
 
     Raises
     ------
@@ -179,20 +180,17 @@ def parse_direct_range(
     lo, hi = (second, first) if swapped else (first, second)
     # P1-4: record the origin - an explicit entry point vs the legacy params spelling
     source = (
-        "explicit"
-        if (value is not None or ext_lo is not None or ext_hi is not None)
-        else "params"
+        "explicit" if (value is not None or ext_lo is not None or ext_hi is not None) else "params"
     )
-    return DirectRange(
-        lo=lo, hi=hi, requested=(first, second), swapped=swapped, source=source
-    )
+    return DirectRange(lo=lo, hi=hi, requested=(first, second), swapped=swapped, source=source)
 
 
 def resolved_ext_range(
     effective: Mapping[str, Any] | None,
 ) -> tuple[float, float] | None:
     """The direct-dimension range in the effective params (``ext_lo/ext_hi``, else
-    ``final_ext_*``)."""
+    ``final_ext_*``).
+    """
     if not effective:
         return None
     for lo_key, hi_key in (("ext_lo", "ext_hi"), ("final_ext_lo", "final_ext_hi")):
@@ -229,26 +227,21 @@ def direct_range_record(
     resolved = resolved_ext_range(effective)
     if resolved is not None:
         payload["ext_lo"], payload["ext_hi"] = resolved
-    payload["warning"] = (
-        tr(
-            "the reference mode was not given an explicit direct-dimension range (direct_range= / "
-            "ext_lo= / ext_hi=): the backend/config default is in use, and the frozen record "
-            "cannot tell an explicitly written default from an omission - write the default out "
-            "explicitly if that is what you "
-            "want",
-        )
+    payload["warning"] = tr(
+        "the reference mode was not given an explicit direct-dimension range (direct_range= / "
+        "ext_lo= / ext_hi=): the backend/config default is in use, and the frozen record "
+        "cannot tell an explicitly written default from an omission - write the default out "
+        "explicitly if that is what you "
+        "want",
     )
     return payload
 
 
-def direct_matches_ext(
-    direct: DirectRange, ext: tuple[float, float] | None
-) -> bool:
+def direct_matches_ext(direct: DirectRange, ext: tuple[float, float] | None) -> bool:
     """Whether ``direct`` equals ``(ext_lo, ext_hi)`` (1e-6 tolerance; None -> False)."""
     if ext is None:
         return False
     return abs(ext[0] - direct.lo) < 1e-6 and abs(ext[1] - direct.hi) < 1e-6
-
 
 
 __all__ = [

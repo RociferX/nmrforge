@@ -70,13 +70,14 @@ def _private_trunk() -> bool:
     """True in the private trunk (it keeps docs/manager and .codex), False publicly."""
     return (ROOT / "docs" / "manager").is_dir() or (ROOT / ".codex").is_dir()
 
+
 # Runtime packages: developer-machine absolute paths must not appear.
 RUNTIME_PACKAGES = ["core", "backend", "workflow", "gui", "viewer", "nmrforge_api"]
 
 ABSOLUTE_PATH_PATTERNS = [
-    re.compile(r"[A-Za-z]:\\\\?Users\\\\?"),          # drive-letter user paths (both separators)
+    re.compile(r"[A-Za-z]:\\\\?Users\\\\?"),  # drive-letter user paths (both separators)
     re.compile(r"/home/(?!nmrforge\b)[A-Za-z0-9_.-]+/"),
-    re.compile(r"/Users/[A-Za-z0-9_.-]+/"),          # macOS home
+    re.compile(r"/Users/[A-Za-z0-9_.-]+/"),  # macOS home
     re.compile(r"OneDrive", re.IGNORECASE),
     re.compile(r"~/Desktop"),
     re.compile(r"/mnt/[a-z]/"),
@@ -163,6 +164,7 @@ def _shipped_paths(root: Path) -> set[str] | None:
             ["git", "-C", str(root), "ls-files", "-z"],
             capture_output=True,
             text=True,
+            errors="replace",
             check=True,
         )
     except (OSError, subprocess.CalledProcessError):
@@ -187,6 +189,7 @@ def _ignored_paths(root: Path, targets: set[str]) -> set[str]:
             input="\0".join(sorted(targets)),
             capture_output=True,
             text=True,
+            errors="replace",
             check=False,
         )
     except OSError:
@@ -245,12 +248,10 @@ def test_public_docs_do_not_reference_documents_that_are_not_shipped() -> None:
             (where, target) for where, target in references if target.casefold() not in shipped
         ]
         ignored = _ignored_paths(public, {target for _, target in missing})
-        missing = [
-            (where, target) for where, target in missing if target.casefold() not in ignored
-        ]
+        missing = [(where, target) for where, target in missing if target.casefold() not in ignored]
     offenders = [f"{where} -> {target}" for where, target in missing]
-    assert not offenders, (
-        "公开文档引用了不随公开快照发布的文件: " + "; ".join(sorted(set(offenders))[:8])
+    assert not offenders, "公开文档引用了不随公开快照发布的文件: " + "; ".join(
+        sorted(set(offenders))[:8]
     )
 
 
@@ -266,7 +267,6 @@ def _marker(*parts: bytes) -> bytes:
 PRIVATE_MARKERS = (
     # public data (BMRB timedomain entries) is cited under its real name; sample names are no longer
     # redacted terms (2026-09-22, user decision)
-
     _marker(b"/home/", b"nmr"),
     _marker(b"nmrforge-test-", b"artifacts"),
     _marker(b"~/NMRForge/", b"nmrforge"),
@@ -382,8 +382,7 @@ def test_wheel_ships_every_fingerprinted_file() -> None:
             elif not any(fnmatch.fnmatch(relative, pattern) for pattern in declared):
                 missing.append(f"{package}/{relative}")
     assert not missing, (
-        "指纹覆盖的文件没进 wheel(装机态的 behavior_digest 会和声明不一致): "
-        + "; ".join(missing)
+        "指纹覆盖的文件没进 wheel(装机态的 behavior_digest 会和声明不一致): " + "; ".join(missing)
     )
     tooling = {"source.json", "converted.json"}
     locales = packaged.get("ui_support", ())
@@ -395,9 +394,9 @@ def test_wheel_ships_every_fingerprinted_file() -> None:
     ]
     assert not undeclared, "运行期语言包没进 wheel: " + ", ".join(undeclared)
     for name in sorted(tooling):
-        assert not any(
-            fnmatch.fnmatch(f"locales/{name}", pattern) for pattern in locales
-        ), f"翻译工具清单 locales/{name} 不该进产物"
+        assert not any(fnmatch.fnmatch(f"locales/{name}", pattern) for pattern in locales), (
+            f"翻译工具清单 locales/{name} 不该进产物"
+        )
 
 
 def test_example_scripts_compile_and_expose_main() -> None:
@@ -411,8 +410,11 @@ def test_example_scripts_compile_and_expose_main() -> None:
 
 def test_licence_state_is_explicit() -> None:
     licence_file = next(
-        (ROOT / name for name in ("LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING")
-         if (ROOT / name).is_file()),
+        (
+            ROOT / name
+            for name in ("LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING")
+            if (ROOT / name).is_file()
+        ),
         None,
     )
     options = _read("LICENSE_OPTIONS.md")
@@ -512,6 +514,7 @@ def test_examples_are_referenced_by_the_readme() -> None:
     assert "examples/quickstart.py" in readme
     assert "examples/make_synthetic_dataset.py" in readme
 
+
 def test_run_provenance_records_the_git_commit_when_available() -> None:
     """A run record must be traceable to the code state that produced it."""
     from core.version import git_commit, tool_versions
@@ -550,7 +553,10 @@ def test_benchmark_output_schema_columns_are_documented() -> None:
 @pytest.mark.parametrize("mode", ["2d", "3d", "all"])
 @pytest.mark.parametrize("explicit_root", [False, True])
 def test_zero_fill_validation_cli_routes_output_and_datasets(
-    tmp_path, monkeypatch, mode, explicit_root,
+    tmp_path,
+    monkeypatch,
+    mode,
+    explicit_root,
 ) -> None:
     """Exercise main(), not just --help: missing Namespace fields must be caught."""
     from scripts import vm_validate_zero_fill as script
@@ -601,9 +607,14 @@ def test_release_documents_the_appimage_and_its_language_switch() -> None:
     assert "AppImage" in release_note
     assert "releases" in release_note.lower()
     claims = "\n".join(
-        _read(name) for name in (
-            "README.md", "docs/getting-started.md", "docs/installation.md",
-            "docs/gui.md", "docs/faq.md", "docs/cli.md",
+        _read(name)
+        for name in (
+            "README.md",
+            "docs/getting-started.md",
+            "docs/installation.md",
+            "docs/gui.md",
+            "docs/faq.md",
+            "docs/cli.md",
         )
     )
     stale_claims = (

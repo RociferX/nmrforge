@@ -5,6 +5,9 @@ typical session from importing data all the way to a peak table. Menu and button
 text the program shows (the interface language can be changed under `Settings → Software settings`,
 and this document follows it).
 
+This guide follows the current source tree. The published Linux AppImage is v1.0.1 and has not been
+rebuilt with the newer interface details described here.
+
 ## 1. What the program does
 
 - **Reads Bruker data**: works out the experiment type, the sampling mode (uniform / NUS) and the
@@ -13,8 +16,8 @@ and this document follows it).
   functions and zero filling are chosen by the program;
 - **Optimises parameters**: SMILE parameter scan and ranking (2D NUS only), ranked by "net true
   peaks" or by "hold-out residual";
-- **Picks peaks and writes peak tables**: automatic detection with parabolic / 2D Gaussian
-  sub-grid localisation, POKY-style `.list` export, UCSF export for spectra;
+- **Picks peaks and writes peak tables**: automatic detection with three-point parabolic sub-grid
+  localisation (the only method), POKY-style `.list` export, UCSF export for spectra;
 - **Quality control**: FID / sampling / spectrum checks with a per-item report when a run ends;
 - **Projects and provenance**: every data set keeps its working directory, generated scripts, run
   records and logs inside your project directory;
@@ -35,6 +38,10 @@ and this document follows it).
 
 Top menu: `File`, `Experiment`, `View`, `Tools`, `Settings`, `Help` (Usage tutorial, and About - the
 tutorial is this document).
+
+The single, segmented and batch import forms stay inline on the experiment page; scroll that page
+to reach them. Dataset, group and global logs are saved separately: individual member runs go to
+the member log, while whole-group runs go to the group log.
 
 The line at the top of column 2 is a **guide**: depending on the current state it reads "Next step:
 Generate spectrum", "Next step: rerun Peak picking", "Optional: SMILE optimisation" or "All steps
@@ -57,9 +64,10 @@ the data itself.
 
 ### (3) Import data
 
-**Right-click the experiment node in column 1 → "Import sample data..."**, then pick the **Bruker
-data directory** (the one holding `acqus`). Only directories with Bruker parameter files are
-accepted; picking the wrong one is reported straight away.
+Use the single-import form on the experiment page, or **right-click the experiment node in column
+1 → "Import sample data..."**. Pick the **Bruker data directory** (the one holding `acqus`). Only
+directories with Bruker parameter files are accepted; picking the wrong one is reported straight
+away.
 
 When the data is a **segmented acquisition** or **repeated experiments to be averaged**, use the
 entry in section 7 instead; to process **several 2D data sets** at once, use the batch import in
@@ -103,13 +111,18 @@ rerunning is usually faster than staring at the contours.
 
 ### (7) Look at the spectrum
 
-A **"Display spectrum"** button appears on the spectrum step row; clicking it opens the current final
-spectrum in column 4. In the viewer:
+Selecting a sample dataset automatically shows its current spectrum in column 4; after a short
+debounce, large files load in the background. A 3D spectrum opens on the F3-F2 plane. In the viewer:
 
 - **wheel to zoom**, **middle button to pan**, an **intensity slider** for the contour levels;
 - **several spectra can be overlaid** for comparison; clicking a **row in the peak table** jumps to
   that peak;
 - 3D data can be inspected slice by slice with projections.
+
+In expanded comparison, the reference is on the left and the current spectrum is in the centre;
+the two viewers have independent controls and equal-height plot areas. Numeric labels and units sit
+outside their step arrows. Type a value and press Enter to apply it; arrow buttons and keys still
+adjust by the configured step. The aspect-ratio field accepts decimals such as `0.8`; `0` means free.
 
 ### (8) Optional: change the spectrum centre / flip an indirect dimension / any other custom edit
 
@@ -118,11 +131,10 @@ point, before picking peaks.**
 
 **Case 1 - change the spectrum centre (the carrier, CAR)**
 
-Use the **manual entry on Generate FID**: open that step's script, edit the `-xCAR` (direct
-dimension) / `-yCAR` (indirect dimension) entries directly, then run it. By default the program
-writes CAR as the dimension's acqus `O1/BF1` (the centre the operator set); **keys you edited by hand
-belong to you** and the program will not rewrite them, and the change is recorded. After changing CAR
-**Generate FID and Generate spectrum become "expired"** - rerun them.
+Open the manual script in the **Generate spectrum** step and edit `CAR`, then run it. The report
+identifies the current CAR source; the default carrier is configured from acquisition information.
+To use another reference, edit CAR manually in this step. The script difference is recorded and
+affected processing steps expire.
 
 **Case 2 - flip an indirect dimension**
 
@@ -147,9 +159,10 @@ data the direct dimension is rerun too, so follow what the prompt tells you.
 **Case 3 - any other custom edit**
 
 Use the **manual** entry: open the relevant step's script, change whatever you like, and run it.
-Editing a script is a **deliberate override** - **manual runs are recorded separately from automatic
-ones** so the two can be compared. When a step has failed, its row offers **"View log"** to jump to
-the matching part of the log.
+Successful manual runs list command and parameter differences from the last successful script in
+the step report. Failed runs label those differences as attempted changes, not successful results.
+When a step has failed, its row offers **"View log"** to jump to the matching part of the log. A
+successful rerun or optimisation refreshes the target spectrum without changing the selected dataset.
 
 ### (9) Peak picking
 
@@ -161,16 +174,19 @@ Run **Peak picking**: automatic detection with intensity and S/N estimates.
    friends) and rerun the step;
 2. **set a reference spectrum and pick again** - click **"Reference spectrum"** on the Peak picking
    step row and pick a data set that **already has a peak table**; peak picking will then **keep only
-   the peaks that match the reference peak table**. This suits picking **the same set of peaks**
-   across a series of related samples so they can be compared; the **"Clear"** button next to it
+  the peaks that match the reference peak table** when the reference is usable; if it is unreliable
+  or has no common nuclei, filtering is skipped and the detected peaks are kept. This suits picking
+  **the same set of peaks** across related samples; the **"Clear"** button next to it
    removes the constraint.
 
 ### (10) Export the peak table and the spectra
 
 - **Export the POKY-style peak table**: click **`Export peaks`** in the spectrum panel. Either
   **export directly** (original coordinates) or **export after alignment** (overall translation onto
-  the selected reference peak table); the format is POKY / Sparky `.list`, which other software reads
-  directly. `Import peaks` reads a peak table back from a `.list`.
+  a selected reference peak table); the format is POKY / Sparky `.list`, which other software reads
+  directly. `Import peaks` reads a peak table back from a `.list`. Alignment changes only the
+  exported peak table, not the spectrum file. If too few peaks match, the interface warns and skips
+  aligned export, leaving the peak table and spectrum unchanged.
 - **Find the processed spectra**: in the **`spectra` folder inside that data set's working
   directory** - the NMRPipe final spectra (`.ft2` / `.ft3`) are there, and the **exported UCSF
   spectra** go into the same `spectra` folder, with the same name as the final spectrum and a
@@ -182,7 +198,8 @@ Run **Peak picking**: automatic detection with intensity and S/N estimates.
 
 Converts the raw Bruker data with the generated `fid.com` (it calls `bruker -AUTO` internally).
 **This step needs NMRPipe on the machine.** For 3D data the program decides whether the output is a
-single file or slices. **Changing CAR, or any conversion parameter, happens in this step's script.**
+single file or slices. The FID conversion script is generated from acquisition parameters and
+usually needs no edits; **view or change CAR manually in the Generate spectrum step**.
 
 ### Generate spectrum
 
@@ -199,9 +216,9 @@ processes normally, but this scan is not offered in the interface.
 
 ### Peak picking
 
-Automatic detection with intensity and S/N estimates; 2D Gaussian refinement can be restricted to
-selected peaks, and a **reference spectrum** can constrain it to matching peaks only. Peak tables
-export to the POKY style.
+Automatic detection with intensity and S/N estimates; localisation uses three-point parabolic
+refinement only, with no method chooser. A **reference spectrum** can constrain results when the
+reference is usable; if it is not, the filter is skipped safely. Peak tables export to the POKY style.
 
 ### Status and "expired"
 

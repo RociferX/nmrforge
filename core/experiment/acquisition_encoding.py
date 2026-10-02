@@ -9,13 +9,16 @@ the dimension changes.
 
     Layer A  pulse-sequence physics      pulse program + phase table + FnMODE
              |                            => what quadrature this experiment was designed for
-                                          (encoding family, quadrature phase +-90, the phase that
+                                          (encoding family, quadrature phase +-90, the phase
+                                          that
                                           is stepped)
     Layer B  Bruker storage convention   FnMODE + TD + dimension order + 3D unfolding
-             |                            => how this pair is laid out in ser (R/I order, whether
+             |                            => how this pair is laid out in ser (R/I order,
+             whether
                                           it is interleaved)
     Layer C  NMRPipe convention          A + B
-                                          => whether ``-alt`` / ``-neg`` is needed before FT (the
+                                          => whether ``-alt`` / ``-neg`` is needed before FT
+                                          (the
                                           ``-N`` keyword corresponds to ALT 16/18)
 
 This module only does **the layering and the decision entry points**, never the cross-layer
@@ -96,7 +99,8 @@ def _family_conflicts_with_fnmode(fnmode: int | None, family: str | None) -> boo
     => hand it to the user, never silently decide "do not add").
 
     ``F1EA`` should go with ``FnMODE=6`` and ``F1QF`` with ``1/2`` (the magnitude kinds);
-    ``F1PH`` is the umbrella kind for quadrature (the States family) and on its own cannot decide
+    ``F1PH`` is the umbrella kind for quadrature (the States family) and on its own cannot
+    decide
     QSEQ/TPPI/States/States-TPPI, so it **does not count as a contradiction**. A missing
     ``FnMODE`` leaves nothing to contradict either (the caller treats that case as "undefined").
     """
@@ -125,11 +129,14 @@ def simple_neg_rule(
     Rules (all judged from "which indirect dimension + acquisition family + AQSEQ", never from
     the sequence name):
 
-    * **E/A family** (``F1EA`` / FnMODE=6 in agreement) => do not add (truth: the E/A dimension of
+    * **E/A family** (``F1EA`` / FnMODE=6 in agreement) => do not add (truth: the E/A dimension
+    of
       the Echo-AntiEcho one is ``FT``);
-    * **QF family** (``F1QF`` / FnMODE 1/2 in agreement) => do not add (real part/magnitude only,
+    * **QF family** (``F1QF`` / FnMODE 1/2 in agreement) => do not add (real part/magnitude
+    only,
       so the notion of a sign does not exist);
-    * **States family** (``F1PH`` / FnMODE 2/3/4/5) and it is the **first indirect dimension of a
+    * **States family** (``F1PH`` / FnMODE 2/3/4/5) and it is the **first indirect dimension of
+    a
       3D** (NMRPipe ``y``, fixed by AQSEQ) => **add** ``-neg``;
     * **States family + the second indirect dimension of a 3D** (``z``) => do not add;
     * everything else (States in 2D, undefined FnMODE, unknown AQSEQ so that y/z cannot be told
@@ -229,14 +236,17 @@ def storage_encoding(
 ) -> tuple[str, list[str]]:
     """Layer B: how Bruker stores this quadrature pair in ser.
 
-    The modelled part (deterministic, from ``acquisition_loop``): the 1D-FID write order fixed by
+    The modelled part (deterministic, from ``acquisition_loop``): the 1D-FID write order fixed
+    by
     ``AQSEQ``, which **Bruker dimension** it turns into NMRPipe's ``y``/``z`` (=> the
-    ``-yMODE/-zMODE`` and ``-yN/-zN`` options must follow it), and whether that dimension's States
+    ``-yMODE/-zMODE`` and ``-yN/-zN`` options must follow it), and whether that dimension's
+    States
     partner is the **adjacent** or a **separated** 1D FID.
 
     **The part that is not modelled/decided (stated by the user on 2026-09-25)**: the
     *permutation* of the storage order itself **does not produce conjugation** (NMRPipe's
-    acquisition-mode/sign-adjustment semantics are axis-independent, and ``-neg`` is a property of
+    acquisition-mode/sign-adjustment semantics are axis-independent, and ``-neg`` is a property
+    of
     the ``-N`` acquisition mode); handedness still comes from the Layer A pathway solution.
     """
     from core.experiment.acquisition_loop import acquisition_model
@@ -274,7 +284,8 @@ def ft_neg_decision(
     """Layer C: whether this dimension's FT needs ``-neg`` (simple rule + "hand it to the user
     when it cannot be judged").
 
-    Decision order (the user, 2026-09-25: "we let the user check it themselves anyway, so use the
+    Decision order (the user, 2026-09-25: "we let the user check it themselves anyway, so use
+    the
     rule with the lowest error probability"):
 
     1. fid.com already uses a canonical ``-N`` variant => **add** (a Layer C fact of its own);
@@ -316,9 +327,7 @@ def ft_neg_decision(
     from core.experiment.acquisition_loop import acquisition_model
 
     aqseq = acquisition_model(experiment, data_dir=data_dir).aqseq
-    decision, why = simple_neg_rule(
-        int(experiment.ndim), logical_axis, fnmode, pulse.family, aqseq
-    )
+    decision, why = simple_neg_rule(int(experiment.ndim), logical_axis, fnmode, pulse.family, aqseq)
     if decision == NEG_ASK:
         ask = tr(
             "automatic -neg decision skipped for this dimension (reason: {p0}); the simple rule "

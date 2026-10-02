@@ -75,7 +75,6 @@ def test_open_project_by_name_and_path(tmp_path: Path) -> None:
     assert by_path.root == by_name.root
 
 
-
 def test_rename_project_updates_dir_and_name(tmp_path: Path) -> None:
     manager = WorkspaceManager(tmp_path / "ws")
     manager.create_project("alpha")
@@ -98,9 +97,7 @@ def test_rename_project_conflicts_and_validation(tmp_path: Path) -> None:
         manager.rename_project("nope", "gamma")
 
 
-def test_delete_project_trash_moves(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_delete_project_trash_moves(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """0.2.199-patch29ex: deletion moves the project to a (fake) trash; once moved back into
     the workspace it becomes visible again."""
     import shutil

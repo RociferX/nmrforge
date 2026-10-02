@@ -31,7 +31,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from backend.config import load_config, resolve_ext_hi, resolve_ext_lo
+from backend.config import load_config, resolve_ext_window
 from ui_support.i18n import tr
 
 DEFAULT_POLICY = "auto"
@@ -49,7 +49,8 @@ INTERMEDIATE_SUBDIR = "_intermediate"
 
 def intermediate_memory_policy(config: dict[str, Any] | None = None) -> str:
     """Ramdisk policy for intermediate spectra (auto/off; an invalid value falls
-    back to auto)."""
+    back to auto).
+    """
     cfg = load_config(config)
     processing = cfg.get("processing") or {}
     policy = str(processing.get("intermediate_memory", DEFAULT_POLICY)).strip().lower()
@@ -58,7 +59,8 @@ def intermediate_memory_policy(config: dict[str, Any] | None = None) -> str:
 
 def memory_disk_path(config: dict[str, Any] | None = None) -> Path | None:
     """Ramdisk root: an explicit setting wins; Linux defaults to /dev/shm (tmpfs)
-    and Windows has none."""
+    and Windows has none.
+    """
     cfg = load_config(config)
     processing = cfg.get("processing") or {}
     explicit = str(processing.get("memory_disk_path", "")).strip()
@@ -75,7 +77,8 @@ def memory_disk_path(config: dict[str, Any] | None = None) -> Path | None:
 
 def system_available_bytes() -> int | None:
     """Currently available system memory (Linux /proc/meminfo; Windows
-    GlobalMemoryStatusEx)."""
+    GlobalMemoryStatusEx).
+    """
     if os.name == "nt":
         try:
             import ctypes
@@ -109,27 +112,24 @@ def system_available_bytes() -> int | None:
     return None
 
 
-def _ext_window(params: dict[str, Any] | None) -> tuple[str, str]:
+def _ext_window(experiment: Any, params: dict[str, Any] | None) -> tuple[str, str]:
     """Direct-dimension EXT window for this run: an explicit ext_lo/hi wins;
     otherwise, when "apply this range to the optimisation" is on (the default),
     final_ext_lo/final_ext_hi are used; failing that, the configured or built-in
-    defaults (see resolve_ext_* in backend.config)."""
+    defaults (see resolve_ext_* in backend.config).
+    """
     p = dict(params or {})
     ext_lo = p.get("ext_lo")
     ext_hi = p.get("ext_hi")
-    apply_opt = str(p.get("apply_ext_to_opt", "1")).strip().lower() in (
-        "1", "true", "yes", "on"
-    )
+    apply_opt = str(p.get("apply_ext_to_opt", "1")).strip().lower() in ("1", "true", "yes", "on")
     if ext_lo is None and apply_opt:
         ext_lo = p.get("final_ext_lo")
     if ext_hi is None and apply_opt:
         ext_hi = p.get("final_ext_hi")
-    return resolve_ext_lo(ext_lo), resolve_ext_hi(ext_hi)
+    return resolve_ext_window(experiment, ext_lo, ext_hi)
 
 
-def estimate_intermediate_peak(
-    experiment: Any, params: dict[str, Any] | None = None
-) -> int | None:
+def estimate_intermediate_peak(experiment: Any, params: dict[str, Any] | None = None) -> int | None:
     """Estimate the intermediate-spectrum peak in bytes for one spectrum
     generation (final-spectrum complex point count x safety factor).
 
@@ -158,7 +158,7 @@ def estimate_intermediate_peak(
         )
         if direct_axis is None and experiment.dimensions:
             direct_axis = experiment.dimensions[0].logical_axis
-        ext_lo, ext_hi = _ext_window(params)
+        ext_lo, ext_hi = _ext_window(experiment, params)
         total = 1
         for axis in axes:
             size = int((plan.get(axis) or {}).get("size") or 0)
@@ -170,9 +170,7 @@ def estimate_intermediate_peak(
             if not size:
                 return None
             if axis == direct_axis:
-                size = direct_points_after_ext(
-                    experiment, size, ext_lo, ext_hi
-                )
+                size = direct_points_after_ext(experiment, size, ext_lo, ext_hi)
             total *= size
         sampling = getattr(getattr(experiment, "sampling", None), "mode", None)
         factor = NUS_PEAK_FACTOR if str(sampling) == "nus" else UNIFORM_PEAK_FACTOR
@@ -198,10 +196,9 @@ def _memory_conditions(
     if peak < MIN_PEAK_BYTES:
         return False, (
             tr(
-            "The middle spectrum peak is too small ({p0:.0f}MB < 32MB, not worth "
-            "it)",
-            p0=peak / 1e6,
-        )
+                "The middle spectrum peak is too small ({p0:.0f}MB < 32MB, not worth it)",
+                p0=peak / 1e6,
+            )
         )
     try:
         free = shutil.disk_usage(root).free
@@ -239,7 +236,8 @@ def selection_reason(
     params: dict[str, Any] | None = None,
 ) -> str:
     """Fallback-reason text (an empty string when the conditions hold), for log
-    messages."""
+    messages.
+    """
     ok, reason = _memory_conditions(experiment, config, params)
     return "" if ok else reason
 
@@ -250,7 +248,8 @@ def select_memory_dir(
     params: dict[str, Any] | None = None,
 ) -> Path | None:
     """Create a temporary directory on the ramdisk when memory allows; returns
-    None when any condition fails."""
+    None when any condition fails.
+    """
     ok, _reason = _memory_conditions(experiment, config, params)
     if not ok:
         return None
@@ -265,7 +264,8 @@ def select_memory_dir(
 
 def _remove_link_or_dir(path: Path) -> None:
     """Delete a symbolic link (the link alone) or a real directory (the whole
-    tree)."""
+    tree).
+    """
     if path.is_symlink():
         try:
             path.unlink()
@@ -304,7 +304,8 @@ def prepare_intermediate(
 
 def teardown_intermediate(work: Path, memory_dir: Path | None) -> None:
     """End of a run: delete _intermediate (only the link when it is one) and the
-    memory directory."""
+    memory directory.
+    """
     root = work / INTERMEDIATE_SUBDIR
     _remove_link_or_dir(root)
     if memory_dir is not None:

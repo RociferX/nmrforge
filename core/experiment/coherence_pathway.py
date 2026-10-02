@@ -93,9 +93,7 @@ class Term:
         return replace(self, phase_signature=tuple(sorted(found.items())))
 
 
-def _orders_from_operators(
-    operators: tuple[tuple[str, str], ...]
-) -> tuple[tuple[str, int], ...]:
+def _orders_from_operators(operators: tuple[tuple[str, str], ...]) -> tuple[tuple[str, int], ...]:
     """Derive the coherence-order vector from the operator characters (``+``/``-`` => +-1)."""
     found: dict[str, int] = {}
     for channel, symbol in operators:
@@ -160,7 +158,8 @@ def apply_hard_pulse(
       transverse ``+-`` convert into each other) => two branches, each of which books ``phase``
       into the phase signature as ``-dp*phi`` (phi comes from the phase cycle; only the
       "coefficient" is accumulated here);
-    * 180 degrees: ``p -> -p`` (the longitudinal part is unchanged) => no branching; it is booked
+    * 180 degrees: ``p -> -p`` (the longitudinal part is unchanged) => no branching; it is
+    booked
       into the phase signature the same way (``-dp*phi``);
     * any other flip angle / anything that is not 90/180 => :class:`UnsupportedPhysicsError`
       (the first version only supports ideal 90/180).
@@ -255,9 +254,7 @@ def apply_free_precession(terms: Sequence[Term], channel: str) -> list[Term]:
     return list(terms)
 
 
-def apply_j_evolution(
-    terms: Sequence[Term], channel_a: str, channel_b: str
-) -> list[Term]:
+def apply_j_evolution(terms: Sequence[Term], channel_a: str, channel_b: str) -> list[Term]:
     """Weak-coupling ``IzSz``-type J evolution (the standard product-operator rules):
 
     * the ``cos(pi*J*tau)`` branch: the operator characters are unchanged;
@@ -330,7 +327,8 @@ def apply_transfer_map(
     transverse + source-channel longitudinal.
 
     Only the standard premises are allowed (ideal pulses / weak coupling / standard topology);
-    the phase dependence of INEPT is **kept**: the phase signature of the pulses inside the macro
+    the phase dependence of INEPT is **kept**: the phase signature of the pulses inside the
+    macro
     is supplied by the caller from ``mapping``'s actual phase programs (see
     :func:`apply_inept_block`).
     """
@@ -436,7 +434,8 @@ def pathway_weight(
     """``W = sum_s exp(i*Phi(s))``, ``Phi(s) = -sum_j dp_j*phi_j(s) - phi_rec(s)``.
 
     ``delta_p_by_phase`` uses **channel-decomposed** keys such as ``"H:ph1"`` (channel + phase
-    program); ``delta_p_total`` is the total order change (for the audit record only, it does not
+    program); ``delta_p_total`` is the total order change (for the audit record only, it does
+    not
     enter the sum -- the phases contribute per channel).
     """
     total = 0.0 + 0.0j
@@ -451,9 +450,7 @@ def pathway_weight(
         total += cmath.exp(1j * phi)
     magnitude = abs(total)
     kept = magnitude > WEIGHT_EPS * max(1, len(cycle))
-    return PathwayWeight(
-        total_order_change=int(delta_p_total), weight=total, kept=kept
-    )
+    return PathwayWeight(total_order_change=int(delta_p_total), weight=total, kept=kept)
 
 
 def cycle_projector(
@@ -464,8 +461,7 @@ def cycle_projector(
     |W| descending).
     """
     weights = [
-        pathway_weight(delta_p_by_phase, total, cycle)
-        for delta_p_by_phase, total in candidates
+        pathway_weight(delta_p_by_phase, total, cycle) for delta_p_by_phase, total in candidates
     ]
     return sorted(weights, key=lambda item: item.magnitude, reverse=True)
 
@@ -749,9 +745,7 @@ class ResetPhasePointers:
 # --------------------------------------------------------------------------- #
 #: Comments look like ``;p1 : f1 channel -  90 degree high power pulse`` /
 #: ``;sp2: f2 channel - shaped pulse  90 degree  (C=O on resonance)``.
-_PULSE_COMMENT_RE = re.compile(
-    r"^\s*;\s*(?P<label>[A-Za-z]+\d*)\s*:\s*(?P<rest>.*)$"
-)
+_PULSE_COMMENT_RE = re.compile(r"^\s*;\s*(?P<label>[A-Za-z]+\d*)\s*:\s*(?P<rest>.*)$")
 _CHANNEL_RE = re.compile(r"\bf(?P<num>\d)\s*channel\b", re.IGNORECASE)
 _ANGLE_RE = re.compile(r"\b(?P<angle>\d{1,3})\s*degree\b", re.IGNORECASE)
 
@@ -807,10 +801,12 @@ def lower_hard_pulse(
     """Lower one pulse statement into a :class:`HardPulse`; ``None`` when it cannot be judged (the
     caller treats that as unknown).
 
-    It must determine **all** of: the RF channel (explicit ``:fN`` or the comment), that channel's
+    It must determine **all** of: the RF channel (explicit ``:fN`` or the comment), that
+    channel's
     nucleus (the RF channel map), the flip angle (comment + the ``pN*n`` scaling), the phase
     program and the hard-pulse power context. The condition is that ``explicit syntax`` + the
-    comment semantics + the power context of the same channel agree; a shaped pulse (``:spX``) is
+    comment semantics + the power context of the same channel agree; a shaped pulse (``:spX``)
+    is
     not a hard pulse => ``None`` (handed to :class:`OpaquePhysics`); a comment that contradicts
     the explicit channel => ``None`` (no guess).
     """
@@ -857,7 +853,8 @@ def is_spectator_safe(
     identities in **all** surviving terms (neither ``+-`` nor ``z``) **and** (2) it has no
     coupling semantics with a later transfer block (``coupling_context=False``). Otherwise it is
     never ignorable (=> ``unsupported_physics``).
-    A pulse on another nucleus often changes the antiphase operator (``2I_xS_z``), so it must not
+    A pulse on another nucleus often changes the antiphase operator (``2I_xS_z``), so it must
+    not
     be ignored just "because it is not the nucleus evolving right now".
     """
     if opaque.affects_relevant_pathway is True:

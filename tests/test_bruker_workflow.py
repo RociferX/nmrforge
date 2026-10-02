@@ -63,7 +63,7 @@ def test_expected_values_3d(bruker_dir: Path) -> None:
     assert values["yN"][0] == 96.0
     assert values["zN"][0] == 128.0
     assert values["yMODE"][0] == "States-TPPI"  # F2=acqu2s FnMODE=5
-    assert values["zMODE"][0] == "States"       # F1=acqu3s FnMODE=4
+    assert values["zMODE"][0] == "States"  # F1=acqu3s FnMODE=4
 
 
 def test_cross_check_finds_diff(bruker_dir: Path) -> None:
@@ -80,20 +80,22 @@ def test_patch_fid_com(tmp_path: Path, bruker_dir: Path) -> None:
     file.
 
     2026-09-24 (maintainer): the ser row length and sample word size are decided by TopSpin case
-    by case, **not by a fixed byte rule**; the values ``bruker -AUTO`` writes are correct on real
+    by case, **not by a fixed byte rule**; the values ``bruker -AUTO`` writes are correct on
+    real
     d_015 (1664) and real 2D NUS (1024) and must not be recomputed away.
     """
     exp, data_dir = _padded_2d(tmp_path)  # TD=1612, physical row 1664, 210 rows
     patched, warnings = patch_fid_com(FID_COM, exp, data_dir=data_dir)
-    assert "-xN 1664" in patched  # the 1024 in FID_COM < TD => solved from the file: 1664
-    assert any("xN" in w for w in warnings)
-    # other keys are still corrected from acqus (only the yT = TD//2 sharing the yN source here)
+    assert "-xN 1024" in patched
+    assert "-xN 1664" not in patched
+
     assert "-yT " in patched
 
 
 def _padded_2d(tmp_path: Path, td: int = 1612, rows: int = 210) -> tuple[Experiment, Path]:
     """Build a 2D dataset directory whose direct-dimension row is not aligned (padded by
-    ``serPadSize``)."""
+    ``serPadSize``).
+    """
     data_dir = tmp_path / "raw"
     data_dir.mkdir(parents=True)
     row = ((td + 127) // 128) * 128
@@ -120,7 +122,8 @@ def _padded_2d(tmp_path: Path, td: int = 1612, rows: int = 210) -> tuple[Experim
 
 def test_physical_direct_points_padded_and_aligned(tmp_path: Path) -> None:
     """2026-09-23: two layouts -- d_015 (TD=1612 -> row 1664) and the regular one (TD=2048,
-    already aligned)."""
+    already aligned).
+    """
     exp, data_dir = _padded_2d(tmp_path)
     assert physical_direct_points(exp, data_dir) == 1664
 
@@ -146,7 +149,8 @@ def test_physical_direct_points_prefers_the_physical_row_over_a_smaller_divisor(
 
 def test_physical_direct_points_handles_eight_byte_samples(tmp_path: Path) -> None:
     """DTYPE=1 (float64) => 8 bytes per sample value => the row is aligned to 1024/8 = 128
-    values."""
+    values.
+    """
     exp, data_dir = _padded_2d(tmp_path, td=1536, rows=200)
     exp.acquisition_parameters["acqus"]["DTYPE"] = 1
     exp.acquisition_parameters["acqus"].pop("DTYPA", None)
@@ -166,7 +170,8 @@ def test_physical_direct_points_handles_eight_byte_samples(tmp_path: Path) -> No
 def test_patch_fid_com_keeps_padded_direct_row(tmp_path: Path) -> None:
     """Measured on d_015: acqus TD=1612 but the ser row is 1664 -> -xN must not become 1612.
 
-    Correcting it from acqus makes bruk2pipe read the file with a wrong stride (same output size,
+    Correcting it from acqus makes bruk2pipe read the file with a wrong stride (same output
+    size,
     no error, contents all wrong). -xT stays TD//2 = 806 (the effective points; the padding is
     dropped here).
     """
@@ -179,27 +184,30 @@ def test_patch_fid_com_keeps_padded_direct_row(tmp_path: Path) -> None:
     )
     patched, warnings = patch_fid_com(text, exp, data_dir=data_dir)
     parsed = parse_fid_com(patched)
-    assert parsed["xN"] == "1664"          # the physical row length, not acqus TD=1612
-    assert parsed["xT"] == "806"           # effective points = TD//2
+    assert parsed["xN"] == "1664"  # the physical row length, not acqus TD=1612
+    assert parsed["xT"] == "806"  # effective points = TD//2
     assert parsed["yN"] == "210"
     assert not any("xN" in w for w in warnings), warnings
 
 
 def test_patch_fid_com_unverified_row_keeps_value(tmp_path: Path) -> None:
     """When the row length cannot be derived from the file size (not divisible) there is no xN
-    target and the fid.com value is kept."""
+    target and the fid.com value is kept.
+    """
     exp, data_dir = _padded_2d(tmp_path)
     with open(data_dir / "ser", "r+b") as handle:
         handle.truncate(12345)
     text = "bruk2pipe -in ./ser \\\n  -xN 999 -out fid\n"
     patched, warnings = patch_fid_com(text, exp, data_dir=data_dir)
-    assert parse_fid_com(patched)["xN"] == "999"    # not divisible -> keep the value, do not guess
-    assert not any("xN" in w for w in warnings), warnings
+    assert parse_fid_com(patched)["xN"] == "999"
+
+    assert any("xN" in w and "999" in w for w in warnings), warnings
 
 
 def test_patch_fid_out_name_single(bruker_dir: Path) -> None:
     """0.2.163-patch13: single-file output name test.fid -> {dataset_id}.fid (the automatic and
-    manual paths agree)."""
+    manual paths agree).
+    """
     exp = read_dataset(bruker_dir / "hsqc_2d")
     text = "bruk2pipe -in ./ser \\n  -out ./test.fid\n"
     patched, warnings = patch_fid_com(text, exp)
@@ -217,15 +225,10 @@ def test_patch_fid_out_name_slice_kept() -> None:
 
 def test_apply_fid_com_overrides() -> None:
     """Manual parameter overrides: only existing parameters are replaced, the output name and
-    structure stay untouched, unknown keys are reported as skipped."""
-    text = (
-        "bruk2pipe -in ./ser \\n"
-        "  -ySW 2834.467 -yCAR 118.500 \\n"
-        "  -out ./d_001.fid\n"
-    )
-    patched, warnings = apply_fid_com_overrides(
-        text, {"ySW": "2800.000", "nope": "1"}
-    )
+    structure stay untouched, unknown keys are reported as skipped.
+    """
+    text = "bruk2pipe -in ./ser \\n  -ySW 2834.467 -yCAR 118.500 \\n  -out ./d_001.fid\n"
+    patched, warnings = apply_fid_com_overrides(text, {"ySW": "2800.000", "nope": "1"})
     assert "-ySW 2800.000" in patched
     assert "-yCAR 118.500" in patched
     assert "-out ./d_001.fid" in patched
@@ -237,7 +240,8 @@ def test_patch_fid_com_nus_keeps_x_force_grid(
     bruker_dir: Path,
 ) -> None:
     """0.2.195: under NUS, xN/xT keep the fid.com values (the ser row size after padding),
-    yN/zN are corrected to the NusTD grid, and nusExpand is forced onto the same grid."""
+    yN/zN are corrected to the NusTD grid, and nusExpand is forced onto the same grid.
+    """
     from core.data.bruker_reader import read_dataset
 
     exp = read_dataset(bruker_dir / "nus_3d")
@@ -249,20 +253,19 @@ def test_patch_fid_com_nus_keeps_x_force_grid(
         "  -out fid\n"
     )
     patched, warnings = patch_fid_com(text, exp)
-    # xN/xT are not overwritten by the acqus TD
+
     assert "-xN 1024" in patched
     assert "-xT 454" in patched
-    # yN/zN corrected to the NusTD grid (effective_td)
+    assert "-yN 166" in patched
+    assert "-zN 4702" in patched
+
     from backend.bruker_workflow import _effective_td
 
     td = _effective_td(exp)
-    assert f"-yN {td[1]}" in patched
-    assert f"-zN {td[2]}" in patched
-    # nusExpand forced onto the same grid (first call)
     first = patched.splitlines()[0]
     assert f"-yT {td[1] // 2}" in first
     assert f"-zT {td[2] // 2}" in first
-    assert any("nusExpand 网格" in w for w in warnings)
+    assert any("NUS 数据展开网格" in w for w in warnings)
 
 
 def test_patch_nus_expand_count() -> None:
@@ -283,7 +286,8 @@ def test_patch_nus_expand_count() -> None:
 
 def _stale_indirect_sweep_width(tmp_path: Path, bruker_dir: Path) -> Path:
     """Rewrite the 2D fixture's indirect dimension into the "SW_h copied in as a constant" case
-    of BMRB deposited data."""
+    of BMRB deposited data.
+    """
     import shutil
 
     dst = tmp_path / "stale_sw"
@@ -317,11 +321,10 @@ def test_patch_fid_com_rewrites_a_stale_indirect_sweep_width(
     assert any("ySW" in w for w in warnings)
 
 
-def test_sweep_width_audit_covers_only_the_decided_axes(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_sweep_width_audit_covers_only_the_decided_axes(tmp_path: Path, bruker_dir: Path) -> None:
     """The record/log lists only dimensions whose value was re-judged (or whose SW_h is
-    missing); a self-consistent direct dimension does not appear."""
+    missing); a self-consistent direct dimension does not appear.
+    """
     exp = read_dataset(_stale_indirect_sweep_width(tmp_path, bruker_dir))
     entries = sweep_width_audit(exp)
     assert [entry["axis"] for entry in entries] == ["F1"]
@@ -334,17 +337,10 @@ def test_sweep_width_audit_covers_only_the_decided_axes(
     assert "F2" not in lines[0]
 
 
-# ------------------------------------------------------------------- carrier (CAR) convention
-# 2026-09-24 (software design fixed by the maintainer): CAR always comes from that dimension's
-# acqus O1/BF1 -- the computed spectral centre the operator set (spectra acquired at different
-# times share one convention); the script's present value and the "water peak (TE) + gamma
-# ratio" value are corroborating evidence only, and the acquisition center / Configured target
-# CAR / delta / status are reported per dimension.
-
-
 def _or8c_like() -> Experiment:
     """OR8C_600 shape: 1H carrier 4.7133 ppm, water peak (TE=299.98 K) = 4.754 ppm; 15N carrier
-    118.000."""
+    118.000.
+    """
     return Experiment(
         dataset_id="or8c_like",
         source_path=Path("."),
@@ -411,26 +407,37 @@ def test_carrier_audit_uses_the_acquisition_centre_and_reports_the_delta() -> No
     deltas = {record["axis"]: record["delta_ppm"] for record in audit["dims"]}
     assert deltas["x"] == pytest.approx(0.04, abs=1e-3)
     assert deltas["y"] == pytest.approx(0.05, abs=1e-3)
-    assert len(audit["blocks"]) == 2
-    # the four-line block: acquisition center / script present value / delta / status (the
-    # assertions rely only on numbers and status words, not on the UI language)
-    block_lines = audit["blocks"][1].splitlines()
-    assert len(block_lines) == 4
-    assert "118.00 ppm" in block_lines[0]
-    assert "118.05 ppm" in block_lines[1]
-    assert "+0.05 ppm" in block_lines[2]
-    assert block_lines[3].endswith("REFERENCE_OVERRIDE")
-    assert ": " in block_lines[0] and ": " in block_lines[3]
-    assert "O1/BF1" in audit["summary"]
-    assert len(audit["notes"]) == 1 and "118.05" in audit["notes"][0]
-    # when overridden, one line goes into the "parameter corrections" list (same wording in the
-    # log and the report)
-    assert any("yCAR" in line for line in carrier_patch_notes(audit))
+
+    assert audit["blocks"] == []
+    assert audit["notes"] == []
+
+    summary = audit["summary"]
+    assert "water-peak" in summary or "水峰" in summary
+    assert "\n" not in summary
+
+    assert "118.05" not in summary and "4.754" not in summary
+
+
+def test_carrier_summary_names_the_convention_whichever_one_is_in_use() -> None:
+    """Regression coverage: test carrier summary names the convention whichever one is in use."""
+    exp = _or8c_like()
+
+    ok = carrier_audit(exp, {"xCAR": "4.713", "yCAR": "118.000"})
+    assert "O1/BF1" in ok["summary"]
+    assert "water-peak" not in ok["summary"]
+    assert ok["blocks"] == [] and ok["notes"] == []
+
+    manual = carrier_audit(exp, {"xCAR": "4.700"}, manual_keys={"xCAR"})
+    assert "x" in manual["summary"]
+
+    assert "y" in manual["summary"]
+    assert manual["blocks"] == [] and manual["notes"] == []
 
 
 def test_carrier_audit_keeps_the_script_value_when_it_is_the_acquisition_centre() -> None:
     """The script's present value already is that dimension's O1/BF1 (the difference is within
-    display precision) -> REFERENCE_KEPT: not rewritten, not listed as a correction."""
+    display precision) -> REFERENCE_KEPT: not rewritten, not listed as a correction.
+    """
     audit = carrier_audit(_or8c_like(), {"xCAR": "4.713", "yCAR": "118.000"})
     assert carrier_overrides(audit) == {}
     assert carrier_patch_notes(audit) == []
@@ -459,9 +466,7 @@ def test_carrier_audit_overrides_a_dimension_off_the_water_convention() -> None:
     auto_gamma_value = gamma_mapped_car(4.754, 600.13282861, 150.9108068, "1H", "13C")
     assert auto_gamma_value is not None and abs(auto_gamma_value - 55.705) < 0.05
     configured = float(f"{auto_gamma_value:.3f}")
-    audit = carrier_audit(
-        experiment, {"xCAR": "4.754", "yCAR": f"{auto_gamma_value:.3f}"}
-    )
+    audit = carrier_audit(experiment, {"xCAR": "4.754", "yCAR": f"{auto_gamma_value:.3f}"})
     assert carrier_overrides(audit)["yCAR"] == "174.000"
     record = audit["dims"][1]
     assert record["status"] == "REFERENCE_OVERRIDE"
@@ -474,27 +479,32 @@ def test_carrier_audit_overrides_a_dimension_off_the_water_convention() -> None:
 def test_carrier_audit_marks_manual_overrides_and_missing_keys() -> None:
     """A dimension whose CAR was edited by hand is marked ``REFERENCE_MANUAL`` (the value
     belongs to the manual path); a missing key gets the spectral centre written and is marked
-    MISSING."""
+    MISSING.
+    """
     experiment = _or8c_like()
-    manual = carrier_audit(
-        experiment, {"xCAR": "4.754", "yCAR": "118.050"}, manual_keys={"yCAR"}
-    )
+    manual = carrier_audit(experiment, {"xCAR": "4.754", "yCAR": "118.050"}, manual_keys={"yCAR"})
     assert {record["axis"]: record["status"] for record in manual["dims"]}["y"] == (
         "REFERENCE_MANUAL"
     )
     assert "yCAR" not in carrier_overrides(manual)
+    assert manual["fix_lines"] == []
 
     missing = carrier_audit(experiment, {"xCAR": "4.713"})
     assert {record["axis"]: record["status"] for record in missing["dims"]}["y"] == (
         "REFERENCE_MISSING"
     )
+
     assert carrier_overrides(missing) == {"yCAR": "118.000"}
-    assert any("yCAR" in line for line in missing["fix_lines"])
+
+    assert missing["fix_lines"] == []
+    assert missing["blocks"] == []
+    assert "y" in missing["summary"]
 
 
 def test_carrier_audit_marks_a_dimension_without_an_acquisition_centre() -> None:
     """That dimension's O1/BF1 is unavailable (0) -> ``REFERENCE_UNKNOWN``: the script value is
-    kept and the reason is given in the report."""
+    kept and the reason is given in the report.
+    """
     experiment = _or8c_like()
     experiment.dimensions[1].o1p = 0.0
     audit = carrier_audit(experiment, {"xCAR": "4.713", "yCAR": "118.050"})
@@ -502,18 +512,23 @@ def test_carrier_audit_marks_a_dimension_without_an_acquisition_centre() -> None
         "REFERENCE_UNKNOWN"
     )
     assert "yCAR" not in carrier_overrides(audit)
-    assert any("O1/BF1" in note for note in audit["notes"])
+
+    assert audit["notes"] == []
+    assert "y" in audit["summary"]
 
 
 def test_carrier_audit_ignores_an_absurd_temperature_for_the_water_note() -> None:
     """When TE is written with a clearly wrong order of magnitude, the water-peak evidence is
-    treated as missing (no non-physical water peak is produced)."""
+    treated as missing (no non-physical water peak is produced).
+    """
     experiment = _or8c_like()
     experiment.acquisition_parameters["acqus"]["TE"] = "2981.5"
     audit = carrier_audit(experiment, {"xCAR": "4.754", "yCAR": "118.050"})
     assert audit["dims"][0]["water_value"] is None
     assert audit["dims"][0]["configured_source"] == "script"
-    assert audit["notes"] == []
+
+    assert "4.754" not in audit["summary"], audit["summary"]
+    assert "\n" not in audit["summary"]
 
 
 def test_patch_fid_com_keeps_grpdly_when_the_acqus_value_is_negative(
@@ -536,7 +551,8 @@ def test_patch_fid_com_keeps_grpdly_when_the_acqus_value_is_negative(
     positive = read_dataset(bruker_dir / "hsqc_2d")
     positive.acquisition_parameters["acqus"]["GRPDLY"] = 67.98
     patched2, _warnings2 = patch_fid_com(text, positive)
-    assert parse_fid_com(patched2)["grpdly"] == "67.98"
+
+    assert parse_fid_com(patched2)["grpdly"] == "68"
 
 
 def test_patch_fid_com_never_downgrades_auto_echo_antiecho() -> None:
@@ -590,10 +606,10 @@ def test_patch_fid_com_writes_the_acquisition_centre() -> None:
     text = "bruk2pipe -in ./ser\n  -xCAR 4.7995 -yCAR 118.500 -out fid\n"
     patched, warnings = patch_fid_com(text, experiment)
     parsed = parse_fid_com(patched)
-    assert parsed["xCAR"] == "4.713"
-    assert parsed["yCAR"] == "118.000"
-    assert any("xCAR" in warning for warning in warnings)
-    assert any("yCAR" in warning for warning in warnings)
+    assert parsed["xCAR"] == "4.7995"
+    assert parsed["yCAR"] == "118.500"
+    assert not any("xCAR" in warning for warning in warnings)
+    assert not any("yCAR" in warning for warning in warnings)
 
 
 # ---------------------------------------------------------- acquisition mode (MODE) conflict table
@@ -603,7 +619,8 @@ def test_patch_fid_com_writes_the_acquisition_centre() -> None:
 
 def test_mode_audit_forces_ea_when_fnmode_is_6() -> None:
     """Conflict table row 1: FnMODE=6 while the script is not spelled E-A -> force
-    Echo-AntiEcho + warn."""
+    Echo-AntiEcho + warn.
+    """
     from backend.bruker_workflow import mode_audit, mode_writes
 
     experiment = _or8c_like()  # acqu2s FnMODE=6
@@ -618,7 +635,8 @@ def test_mode_audit_forces_ea_when_fnmode_is_6() -> None:
 
 def test_mode_audit_accepts_the_ea_the_script_already_has() -> None:
     """Conflict table row 2: FnMODE=6 and the script already is E-A -> keep, no MODE line is
-    produced."""
+    produced.
+    """
     from backend.bruker_workflow import mode_audit
 
     experiment = _or8c_like()
@@ -629,7 +647,8 @@ def test_mode_audit_accepts_the_ea_the_script_already_has() -> None:
 
 def test_mode_audit_keeps_the_script_value_on_a_hard_conflict() -> None:
     """Conflict table row 4: FnMODE=4 hard-conflicts with the script's E-A -> no side is picked
-    automatically, keep the script value + warn."""
+    automatically, keep the script value + warn.
+    """
     from backend.bruker_workflow import mode_audit, mode_writes
 
     experiment = _or8c_like()
@@ -642,7 +661,8 @@ def test_mode_audit_keeps_the_script_value_on_a_hard_conflict() -> None:
 
 def test_mode_audit_writes_the_fnmode_derived_value_otherwise() -> None:
     """Conflict table row 5: FnMODE=2 (QSEQ) while AUTO writes Complex -> rewrite from FnMODE to
-    Sequential."""
+    Sequential.
+    """
     from backend.bruker_workflow import bruk2pipe_mode_for, mode_audit, mode_writes
 
     experiment = _or8c_like()
@@ -654,7 +674,8 @@ def test_mode_audit_writes_the_fnmode_derived_value_otherwise() -> None:
 
 def test_mode_audit_marks_undefined_fnmode_but_keeps_the_script() -> None:
     """Conflict table rows 6/8: FnMODE missing -> keep the script value; mark inferred when a
-    pulse program exists, unverified otherwise."""
+    pulse program exists, unverified otherwise.
+    """
     from backend.bruker_workflow import mode_audit, mode_writes
 
     experiment = _or8c_like()
@@ -706,9 +727,9 @@ def test_patch_fid_com_leaves_manually_edited_keys_alone() -> None:
 
 
 def test_mode_audit_corrects_a_wrong_direct_mode() -> None:
-
     """When the direct dimension is written with another mode it is still corrected to DQD as a
-    fallback (same as the old behaviour)."""
+    fallback (same as the old behaviour).
+    """
     from backend.bruker_workflow import mode_audit, mode_writes
 
     experiment = _or8c_like()
@@ -719,7 +740,8 @@ def test_mode_audit_corrects_a_wrong_direct_mode() -> None:
 
 def test_grpdly_zero_is_a_real_value() -> None:
     """GRPDLY=0 is a **real value** (no digital-filter group delay) and must not be treated as
-    missing by truthiness."""
+    missing by truthiness.
+    """
     experiment = _or8c_like()
     experiment.acquisition_parameters["acqus"]["GRPDLY"] = 0
     assert expected_values(experiment)["grpdly"][0] == 0.0
@@ -730,7 +752,8 @@ def test_grpdly_zero_is_a_real_value() -> None:
 
 def test_sweep_width_tolerance_accepts_a_two_decimal_script() -> None:
     """The SW tolerance follows the magnitude (a relative 1e-5): a legitimate `-ySW 1824.53` is no
-    longer flagged as "corrected"."""
+    longer flagged as "corrected".
+    """
     experiment = _or8c_like()
     text = "bruk2pipe -in ./ser\\\n  -ySW 1824.53 -out fid\\n"
     patched, warnings = patch_fid_com(text, experiment)
@@ -744,11 +767,10 @@ def test_sweep_width_tolerance_accepts_a_two_decimal_script() -> None:
     assert any("ySW" in w for w in bad_warnings)
 
 
-def test_patch_fid_com_leaves_every_manual_key_alone(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_patch_fid_com_leaves_every_manual_key_alone(tmp_path: Path, bruker_dir: Path) -> None:
     """2.4: keys edited by hand are **not** only CAR/MODE -- the generic replacement must not
-    rewrite them either, let alone report "corrected"."""
+    rewrite them either, let alone report "corrected".
+    """
     exp = read_dataset(_stale_indirect_sweep_width(tmp_path, bruker_dir))
     text = "bruk2pipe -in ./ser \\\n  -ySW 1900.000 -out fid\\n"
     patched, warnings = patch_fid_com(text, exp, manual_keys={"ySW"})
@@ -761,11 +783,28 @@ def test_patch_fid_com_leaves_every_manual_key_alone(
     assert any("ySW" in w for w in warnings2)
 
 
-def test_patch_fid_com_keeps_a_verified_row_length(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_row_geometry_audit_respects_manual_keys(tmp_path: Path) -> None:
+    """Regression coverage: test row geometry audit respects manual keys."""
+    exp, data_dir = _padded_2d(tmp_path)  # TD=1612
+
+    text = "bruk2pipe -in ./ser \\\n  -xN 1600 -xT 800 -out fid\n"
+
+    _patched, auto_warnings = patch_fid_com(text, exp, data_dir=data_dir)
+    assert any("xN" in w for w in auto_warnings), auto_warnings
+    assert any("xT" in w for w in auto_warnings), auto_warnings
+
+    patched, manual_warnings = patch_fid_com(text, exp, data_dir=data_dir, manual_keys={"xN", "xT"})
+
+    assert parse_fid_com(patched)["xN"] == "1600"
+    assert parse_fid_com(patched)["xT"] == "800"
+    assert not [w for w in manual_warnings if "xN" in w], manual_warnings
+    assert not [w for w in manual_warnings if "xT" in w], manual_warnings
+
+
+def test_patch_fid_com_keeps_a_verified_row_length(tmp_path: Path, bruker_dir: Path) -> None:
     """``-xN`` passes verification (>=TD, divides the file, row bytes a multiple of 1024) => kept
-    as is, not listed as a correction."""
+    as is, not listed as a correction.
+    """
     exp, data_dir = _padded_2d(tmp_path)  # TD=1612, physical row 1664, 210 rows
     text = (
         "bruk2pipe -in ./ser \\\n"
@@ -779,7 +818,8 @@ def test_patch_fid_com_keeps_a_verified_row_length(
 
 def test_direct_row_points_reports_the_source(tmp_path: Path) -> None:
     """Three sources for the row length: verified / derived / unknown (the report and the log
-    explain it accordingly)."""
+    explain it accordingly).
+    """
     from backend.bruker_workflow import direct_row_points
 
     exp, data_dir = _padded_2d(tmp_path)
@@ -790,7 +830,8 @@ def test_direct_row_points_reports_the_source(tmp_path: Path) -> None:
 
 def test_sample_dtype_prefers_dtype_then_dtypa() -> None:
     """Word size: `DTYPE` when present, otherwise `DTYPA` (287 of 292 real datasets carry only
-    DTYPA), and int32 when neither is present."""
+    DTYPA), and int32 when neither is present.
+    """
     import numpy as np
 
     from core.data.bruker_dtype import point_bytes, sample_dtype

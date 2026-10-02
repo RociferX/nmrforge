@@ -18,9 +18,7 @@ _UI_STATE_VERSION = 1
 
 def data_log_path(manager: Any, exp_id: str, data_id: str) -> Path:
     """D_xxx The log record file (0.2.199-patch29ge) under the data file folder report/."""
-    return (
-        manager.data_base(exp_id, data_id) / "report" / DATA_LOG_FILENAME
-    )
+    return manager.data_base(exp_id, data_id) / "report" / DATA_LOG_FILENAME
 
 
 def group_log_path(manager: Any, exp_id: str, group_id: str) -> Path:
@@ -29,14 +27,7 @@ def group_log_path(manager: Any, exp_id: str, group_id: str) -> Path:
     root = manager.root
     if root is None:
         raise ValueError(tr("project not loaded"))
-    return (
-        Path(root)
-        / exp_id
-        / "groups"
-        / group_id
-        / "report"
-        / DATA_LOG_FILENAME
-    )
+    return Path(root) / exp_id / "groups" / group_id / "report" / DATA_LOG_FILENAME
 
 
 def ui_state_path(manager: Any, exp_id: str, data_id: str) -> Path:
@@ -69,9 +60,7 @@ def data_is_trashed(manager: Any, exp_id: str, data_id: str) -> bool:
     return bool(getattr(node, "trashed", False))
 
 
-def load_ui_state(
-    manager: Any, exp_id: str, data_id: str
-) -> dict[str, Any]:
+def load_ui_state(manager: Any, exp_id: str, data_id: str) -> dict[str, Any]:
     """Read ui_state;Missing/Damage returns empty structure. of this data."""
     path = ui_state_path(manager, exp_id, data_id)
     try:

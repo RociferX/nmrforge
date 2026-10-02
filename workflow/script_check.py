@@ -1,9 +1,10 @@
-r"""Manual script pre-run detector (0.2.199-patch29h): detects common errors and prompts.
+"""Manual script pre-run detector (0.2.199-patch29h): detects common errors and prompts.
 Motivation: The user manually modifies the script and then runs it and reports a
-UnicodeDecodeError -- mistyped characters after the end-of-line continuation character `\` (such
-as `\h`), the csh pipeline breaks, and the binary spectrum data leaks to stdout and is decoded
+UnicodeDecodeError -- mistyped characters after the end-of-line continuation character `\\` (such
+as `\\h`), the csh pipeline breaks, and the binary spectrum data leaks to stdout and is decoded
 as text. The detector scans common problems before running and gives clear prompts instead of
-strange errors during runtime."""
+strange errors during runtime.
+"""
 
 from __future__ import annotations
 
@@ -15,11 +16,47 @@ from ui_support.i18n import tr
 # or silent, prompting in advance.
 KNOWN_FUNCTIONS = frozenset(
     {
-        "SP", "ZF", "FT", "PS", "EXT", "TP", "ZTP", "POLY", "MC", "REV",
-        "EM", "GM", "HT", "SINE", "GAUSS", "LP", "NUS", "SMILE", "MAC",
-        "ADD", "SUB", "MULT", "MUL", "DIV", "SQRT", "EXP", "LOG", "ABS", "STAT",
-        "WRITE", "READ", "CUBE", "PROJ", "SUM", "ALTP", "COMPLEX", "REAL",
-        "FILTER", "DIM", "COPY", "NUSExpand",
+        "SP",
+        "ZF",
+        "FT",
+        "PS",
+        "EXT",
+        "TP",
+        "ZTP",
+        "POLY",
+        "MC",
+        "REV",
+        "EM",
+        "GM",
+        "HT",
+        "SINE",
+        "GAUSS",
+        "LP",
+        "NUS",
+        "SMILE",
+        "MAC",
+        "ADD",
+        "SUB",
+        "MULT",
+        "MUL",
+        "DIV",
+        "SQRT",
+        "EXP",
+        "LOG",
+        "ABS",
+        "STAT",
+        "WRITE",
+        "READ",
+        "CUBE",
+        "PROJ",
+        "SUM",
+        "ALTP",
+        "COMPLEX",
+        "REAL",
+        "FILTER",
+        "DIM",
+        "COPY",
+        "NUSExpand",
     }
 )
 
@@ -28,7 +65,8 @@ def check_script(content: str, script_name: str = "") -> list[str]:
     """Scan the script and return the warning list (empty = no problem found). Pure function, no
     side effects; Check line continuation character by line/CRLF/BOM/output write/unknown
     function/ Common parameter rationality. Warnings are not blocked, and the caller decides
-    whether to prompt and continue."""
+    whether to prompt and continue.
+    """
     warnings: list[str] = []
     if not content.strip():
         return [tr("The script content is empty and cannot be run")]
@@ -58,11 +96,12 @@ def check_script(content: str, script_name: str = "") -> list[str]:
 
 
 def _check_continuations(lines: list[str], warnings: list[str]) -> None:
-    r"""Line continuation character check: The pipeline line must end with `\`; there must be no
-    extra characters after `\`. Comment lines (starting with `#`) are skipped transparently:
-    Generate `#| nmrPipe... \` comments that are common in scripts and do not affect the csh
+    """Line continuation character check: The pipeline line must end with `\\`; there must be no
+    extra characters after `\\`. Comment lines (starting with `#`) are skipped transparently:
+    Generate `#| nmrPipe... \\` comments that are common in scripts and do not affect the csh
     continuation flow. Hanging line continuations are only reported for the last line of the
-    script."""
+    script.
+    """
     pipeline_lines: list[tuple[int, str]] = []
     for idx, line in enumerate(lines):
         stripped = line.rstrip("\r").rstrip()
@@ -71,14 +110,12 @@ def _check_continuations(lines: list[str], warnings: list[str]) -> None:
         pipeline_lines.append((idx, stripped))
     for pos, (idx, stripped) in enumerate(pipeline_lines):
         n = idx + 1
-        is_pipeline = any(
-            token in stripped for token in ("|", "xyz2pipe", "pipe2xyz")
-        )
+        is_pipeline = any(token in stripped for token in ("|", "xyz2pipe", "pipe2xyz"))
         if is_pipeline and stripped:
             token = stripped.split()[-1]
             bs = token.rfind("\\")
             if 0 <= bs < len(token) - 1:
-                tail = token[bs + 1:]
+                tail = token[bs + 1 :]
                 warnings.append(
                     tr(
                         "No. {p0} Line: There are extra characters after the line continuation "
@@ -89,9 +126,9 @@ def _check_continuations(lines: list[str], warnings: list[str]) -> None:
                         p1=tail,
                     )
                 )
-        next_is_pipe = pos + 1 < len(pipeline_lines) and pipeline_lines[
-            pos + 1
-        ][1].lstrip().startswith("|")
+        next_is_pipe = pos + 1 < len(pipeline_lines) and pipeline_lines[pos + 1][
+            1
+        ].lstrip().startswith("|")
         if next_is_pipe and not stripped.endswith("\\"):
             last = stripped[-1]
             warnings.append(
@@ -103,11 +140,7 @@ def _check_continuations(lines: list[str], warnings: list[str]) -> None:
                     p1=last,
                 )
             )
-        if (
-            pos == len(pipeline_lines) - 1
-            and stripped.endswith("\\")
-            and is_pipeline
-        ):
+        if pos == len(pipeline_lines) - 1 and stripped.endswith("\\") and is_pipeline:
             warnings.append(
                 tr(
                     "line {p0}: the script ends with a trailing `\\` (dangling continuation),and "
@@ -121,10 +154,9 @@ def _check_continuations(lines: list[str], warnings: list[str]) -> None:
 def _check_output_write(content: str, warnings: list[str]) -> None:
     """Output write check: data leaks to stdout when pipe script is missing -out/pipe2xyz -out.
     Only checked if script appears to be processing pipe (xyz2pipe/pipe2xyz/| nmrPipe), Avoid
-    plain text/False positive for non-pipeline content."""
-    looks_pipeline = any(
-        token in content for token in ("xyz2pipe", "pipe2xyz", "| nmrPipe")
-    )
+    plain text/False positive for non-pipeline content.
+    """
+    looks_pipeline = any(token in content for token in ("xyz2pipe", "pipe2xyz", "| nmrPipe"))
     if not looks_pipeline:
         return
     # `-out` often sits on the continuation line (fid.com: `| nmrPipe -fn MULT -c ... \\`
@@ -149,8 +181,7 @@ def _check_functions(lines: list[str], warnings: list[str]) -> None:
             if fn.upper() not in KNOWN_FUNCTIONS:
                 warnings.append(
                     tr(
-                        "No. {p0} Row: Unknown nmrPipe function {p1!r}(-fn spell "
-                        "check)",
+                        "No. {p0} Row: Unknown nmrPipe function {p1!r}(-fn spell check)",
                         p0=i + 1,
                         p1=fn,
                     )

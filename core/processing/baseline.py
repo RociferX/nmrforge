@@ -28,7 +28,6 @@ class BaselineParams:
     np_axis: int | None = None
 
 
-
 def _edge_values(arr: np.ndarray, axis: int, edge_fraction: float = 0.08):
     n = arr.shape[axis]
     edge = max(int(n * edge_fraction), 2)
@@ -39,7 +38,8 @@ def _edge_values(arr: np.ndarray, axis: int, edge_fraction: float = 0.08):
 
 def detect(data: Any) -> dict[str, float]:
     """Return the baseline problem metrics (slope/curvature/drift/offset), evaluated along
-    the last axis."""
+    the last axis.
+    """
     arr = np.real(np.asarray(data))
     axis = arr.ndim - 1
     left, right = _edge_values(arr, axis)
@@ -105,9 +105,7 @@ def apply(data: Any, params: BaselineParams) -> np.ndarray:
     idea as the robust baseline estimate of NMRPipe POLY -auto).
     """
     arr = np.asarray(data)
-    axis = params.np_axis if params.np_axis is not None else axis_index(
-        params.axis, arr.ndim
-    )
+    axis = params.np_axis if params.np_axis is not None else axis_index(params.axis, arr.ndim)
 
     n = arr.shape[axis]
     if n <= params.order + 1:

@@ -64,9 +64,7 @@ def sample_dtype(acqus: Mapping[str, Any] | None) -> np.dtype:
     elif params.get("DTYPA") not in (None, ""):
         code = _int_param(params, "DTYPA", 0)
         if code not in BRUKER_DTYPA_CODES:
-            raise UnknownBrukerDtype(
-                tr("Unknown Bruker DTYPA={p0}(0/1=int32, 2=float64)", p0=code)
-            )
+            raise UnknownBrukerDtype(tr("Unknown Bruker DTYPA={p0}(0/1=int32, 2=float64)", p0=code))
         kind = BRUKER_DTYPA_CODES[code]
     else:
         kind = BRUKER_DTYPE_CODES[0]

@@ -28,23 +28,25 @@ python -m nmrforge_api reference --study ~/studies/s1 --params auto.yaml
 (ext_lo 高端 / ext_hi 低端),与已建参考不一致时自动重建参考谱。输出冻结谱/
 参考脚本路径与 SHA-256、相位来源、采样方式、该条件是否支持参数组合。
 
-`--rebuild-peak-tables` 只重算两张参考峰表(用已有的冻结参考谱 + `reference.list`,不动谱与
+`--rebuild-peak-tables` 只重算参考峰表(用已有的冻结参考谱 + `reference.list`,不动谱与
 峰身份,调用前后断言 SHA-256 不变),并**刷新记录里的 `software_version` / `software_commit`
 与研究级聚合 `records/reference.json`**(2026-09-19 修:此前升级过的研究根仍写着旧版本号
 与空 commit,聚合里还挂着旧峰表 SHA)。
 
-## peaks — 参考峰表(身份 + 两张统一峰表)
+## peaks — 参考峰表(身份 + 一张统一峰表)
 
 ```bash
 python -m nmrforge_api peaks --study ~/studies/s1
 python -m nmrforge_api peaks --study ~/studies/s1 --sigma 25 --max-peaks 60
 python -m nmrforge_api peaks --study ~/studies/s1 --peak-table external.list
-python -m nmrforge_api peaks --study ~/studies/s1 --localization gaussian \
-    --gaussian-roi-f1-ppm 1.5 --gaussian-roi-f2-ppm 0.25
 ```
 
 主条件自动选峰(或登记外部峰表)建立 `reference.list`;其他条件共享同一峰身份;
-随后写两张参考峰表。输出峰表路径/哈希/来源/峰数 + 两张表的摘要与定位 QC。
+随后写一张参考峰表 `reference_peak_table_parabolic.csv`(峰定位只有三点抛物线一种
+方法,2026-09-26 起二维高斯拟合算法已删除,`--localization` /
+`--localize-peaks-gaussian` / `--localize-peaks-parabolic` /
+`--gaussian-roi-f1-ppm` / `--gaussian-roi-f2-ppm` 选项一并取消)。输出峰表路径/
+哈希/来源/峰数 + 峰表摘要与定位 QC。
 
 `--sigma N` 是**选峰阈值**(噪声 σ 倍数,缺省 35σ):在参考峰表**尚未生成**时
 指定 = 生成参考时选阈值;参考已冻结后再指定不同阈值会被拒绝(退出码 2,
@@ -61,13 +63,13 @@ python -m nmrforge_api sweep --study ~/studies/s1 \
     --reference ~/studies/s1#B --grid grid.yaml
 python -m nmrforge_api sweep --study ~/studies/s1 \
     --reference ~/studies/s1/study/reference/exp_001_d_001/reference.json \
-    --combos design.csv --localization both --no-resume
+    --combos design.csv --no-resume
 python -m nmrforge_api sweep --study ~/studies/s1 \
     --reference ~/studies/s1 --combos design.csv \
-    --localization gaussian --localize-peaks truth_peaks.csv
+    --localize-peaks truth_peaks.csv
 ```
 
-参考模式 = `reference`(参考谱/脚本)+ `peaks`(两张参考峰表)两个命令;参考不存在时 `sweep` 会报错并提示先跑这两个命令。
+参考模式 = `reference`(参考谱/脚本)+ `peaks`(参考峰表)两个命令;参考不存在时 `sweep` 会报错并提示先跑这两个命令。
 
 | 选项 | 含义 |
 | --- | --- |
@@ -77,16 +79,15 @@ python -m nmrforge_api sweep --study ~/studies/s1 \
 | `--direct-range` | 直接维范围 `HIGH_PPM LOW_PPM`(覆盖本批 workflow 基值;与参考冻结范围不一致时报错,见下行) |
 | `--allow-ext-override` | 允许本批 `--direct-range` 与参考冻结范围不一致(留 run 级警告码 `direct_range_override`);缺省不一致即报错,不静默换窗口 |
 | `--max-runs` | 组合数上限(缺省 256) |
-| `--localization` | 峰位精修方式:`parabolic`(默认)/ `gaussian`(仅 2D)/ `both`(两张表都出) |
-| `--localize-peaks` | **限定峰的定位**:只精修 CSV(至少含 `peak_id` 列)里的峰;检出、行数、`peak_id` 编号不变,未列入的峰保留(位置取检出阶段抛物线);缺省 = 全谱。CSV 可带 `condition` 列(**多条件研究**:每个条件只取自己的行,缺行报错;一个文件即可服务 A/B) |
-| `--localize-peaks-gaussian` / `--localize-peaks-parabolic` | **逐方法**限定(覆盖 `--localize-peaks`):常用「parabolic 全谱 + 只对真值峰做 gaussian」;同样支持 `condition` 列 |
-| `--edge-margin-ppm` | 选峰排除边缘轴峰的物理宽度(ppm;缺省 3×该轴核素线宽) |
-| `--gaussian-roi-f1-ppm` / `--gaussian-roi-f2-ppm` | 高斯 ROI 物理半径(ppm) |
+| `--localize-peaks` | **限定峰的定位**:只精修 CSV(至少含 `peak_id` 列)里的峰;检出、行数、`peak_id` 编号不变,未列入的峰保留(位置取检出阶段的整数格极大值);缺省 = 全谱。CSV 可带 `condition` 列(**多条件研究**:每个条件只取自己的行,缺行报错;一个文件即可服务 A/B) |
+| `--edge-margin-ppm` | 人工覆盖选峰边缘排除宽度(ppm);缺省依据采集先验与原始边缘候选证据保守筛查,不设固定边缘遮罩 |
 | `--no-resume` | 不跳过已完成 workflow |
 
 `--combos` 与 `--grid` 必须且只能给一个。每个组合 = 一个 `workflow_id`
 (`W0001`…);对全部条件跑处理,再在**该组合自己的谱**上用参考锁定阈值独立选峰,
-按 `--localization` 输出峰表(parabolic 默认;`both` 出两张)+ 完整日志 + 参数三层
+做三点抛物线精修出一张 `peak_table_parabolic.csv`(峰定位只有这一种方法;
+`--localization`、`--localize-peaks-gaussian` / `--localize-peaks-parabolic` 与
+`--gaussian-roi-*` 已于 2026-09-26 删除)+ 完整日志 + 参数三层
 + 版本。阈值键(`sigma_multiplier`/`min_snr`/`threshold_sigma`/
 `detection.sigma_multiplier`)写进组合表会直接报错(阈值锁定在参考)。
 `--direct-range` 与参考冻结范围不一致时默认**报错**(退出码 2):参考谱不会重建,
@@ -101,7 +102,7 @@ python -m nmrforge_api sweep --study ~/studies/s1 \
 python -m nmrforge_api report --study ~/studies/s1
 ```
 
-重新拼装 `study/records/`(长表/manifest/workflows/runs/measurement),
+重新拼装 `study/records/`(长表 `peak_table_parabolic.csv`/manifest/workflows/runs/measurement),
 不调用后端;**并刷新 `records/reference.json` 参考聚合**(版本/提交/峰表 SHA 取磁盘现状,
 2026-09-19)。输出 workflow 数与状态计数。
 

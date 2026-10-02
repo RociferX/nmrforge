@@ -96,29 +96,35 @@ class SpectrumWindow(QMainWindow):
         self._aspect_actions: list[QAction] = []
         for label, ratio in _ASPECT_CHOICES:
             action = QAction(label, self, checkable=True)
-            action.triggered.connect(
-                lambda _checked=False, r=ratio: self._set_aspect(r)
-            )
+            action.triggered.connect(lambda _checked=False, r=ratio: self._set_aspect(r))
             aspect_menu.addAction(action)
             self._aspect_actions.append(action)
         self._aspect_actions[0].setChecked(True)  # Default free.
 
         peak_menu = self.menuBar().addMenu(tr("&Peaks"))
         self._peak_actions: list[QAction] = []
-        for label, mode in ((
-            tr(
-            "Select "
-            "peak",
-        ), "select"), (tr(
-            "Add peak",
-        ), "add"), (tr(
-            "delete "
-            "peak",
-        ), "delete")):
+        for label, mode in (
+            (
+                tr(
+                    "Select peak",
+                ),
+                "select",
+            ),
+            (
+                tr(
+                    "Add peak",
+                ),
+                "add",
+            ),
+            (
+                tr(
+                    "delete peak",
+                ),
+                "delete",
+            ),
+        ):
             action = QAction(label, self, checkable=True)
-            action.triggered.connect(
-                lambda _checked=False, m=mode: self._set_peak_mode(m)
-            )
+            action.triggered.connect(lambda _checked=False, m=mode: self._set_peak_mode(m))
             peak_menu.addAction(action)
             self._peak_actions.append(action)
         self._peak_actions[0].setChecked(True)
@@ -213,9 +219,7 @@ class SpectrumWindow(QMainWindow):
         self.recent_menu.clear()
         for path in self._recent:
             action = self.recent_menu.addAction(path)
-            action.triggered.connect(
-                lambda _checked=False, p=path: self.load_spectrum(Path(p))
-            )
+            action.triggered.connect(lambda _checked=False, p=path: self.load_spectrum(Path(p)))
 
     # ------------------------------------------------------------- view
 
@@ -226,15 +230,26 @@ class SpectrumWindow(QMainWindow):
 
     def _set_peak_mode(self, mode: str) -> None:
         self.viewer.set_peak_click_mode(mode)
-        choices = ((tr(
-            "Select "
-            "peak",
-        ), "select"), (tr(
-            "Add peak",
-        ), "add"), (tr(
-            "delete "
-            "peak",
-        ), "delete"))
+        choices = (
+            (
+                tr(
+                    "Select peak",
+                ),
+                "select",
+            ),
+            (
+                tr(
+                    "Add peak",
+                ),
+                "add",
+            ),
+            (
+                tr(
+                    "delete peak",
+                ),
+                "delete",
+            ),
+        )
         for action, (_, m) in zip(self._peak_actions, choices):
             action.setChecked(m == mode)
 

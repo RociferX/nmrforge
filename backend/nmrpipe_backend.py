@@ -19,7 +19,8 @@ Important design (verified on real data, 0.2.199-patch16 single-file):
   merged/{dataset_id}.fid, then a single SMILE pass reconstructs; an optional
   per-segment frequency shift (-rs Hz, guards against field drift) is supported. Since
   2026-09-23 multi-segment conversions also **check the inter-part field drift
-  automatically** (reference = part 1, criterion |d| > 1.5 Hz; ppm is recorded only): when a part
+  automatically** (reference = part 1, criterion |d| > 1.5 Hz; ppm is recorded only): when a
+  part
   is over the threshold its PS -rs is inserted before MULT -c in fid.com and the part is
   re-converted, and the residual is re-checked before merging (see
   workflow/field_drift.py).
@@ -28,6 +29,7 @@ Important design (verified on real data, 0.2.199-patch16 single-file):
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 from collections.abc import Callable
@@ -50,8 +52,7 @@ from backend.bruker_workflow import (
     sweep_width_log_lines,
 )
 from backend.config import (
-    resolve_ext_hi,
-    resolve_ext_lo,
+    resolve_ext_window,
     resolve_nthread,
     resolve_points_per_line,
 )
@@ -74,9 +75,15 @@ from backend.script_generator import (
     zero_fill_plan,
     zero_fill_report,
 )
-from core.audit.qc_audit import QcAction, QcAuditLog
+from core.audit.qc_audit import SOURCE_CLEAN_ACTION, QcAction, QcAuditLog
 from core.data.internal_data_model import Experiment, SamplingMode
-from core.data.nus_reader import read_nuslist
+from core.data.nus_reader import (
+    find_schedule_file,
+    read_nuslist,
+    scan_whole_trace_zeros,
+    schedule_columns_for_ndim,
+    schedule_grid_shape,
+)
 from core.data.raw_fingerprint import raw_dir_fingerprint
 from core.experiment.pulse_pathways import mode_symbol_audit
 from core.optimization.phase_search import (
@@ -90,6 +97,7 @@ from core.planning.processing_plan import ProcessingPlan
 from core.project.manager import atomic_write_text
 from ui_support.i18n import tr
 from workflow.direct_diagnostics import (
+    detect_part_count,
     format_fid_step_report,
     load_or_run_direct_diagnostics,
     read_carrier_audit,
@@ -99,16 +107,8 @@ from workflow.direct_diagnostics import (
     read_sweep_width_audit,
 )
 from workflow.field_drift import (
-    DRIFT_HZ_MIN,
-    DRIFT_POINTS_MIN,
-    DRIFT_PPM_THRESHOLD,
-    MAX_ROUNDS,
-    GroupDriftResult,
     check_segment_consistency,
     consistency_report_lines,
-    criterion_rule_text,
-    detect_group_drift,
-    direct_axis_hz,
     insert_ps_shift,
     read_field_drift_record,
     write_field_drift_record,
@@ -117,7 +117,8 @@ from workflow.field_drift import (
 
 def _slice_candidates(directory: Path, dataset_id: str) -> list[Path]:
     """Slice fid candidates in a directory: prefer the new {dataset_id}*.fid naming,
-    keeping the legacy test*.fid compatible."""
+    keeping the legacy test*.fid compatible.
+    """
     if not directory.is_dir():
         return []
     new_style = sorted(directory.glob(f"{dataset_id}*.fid"))
@@ -128,7 +129,8 @@ def _slice_candidates(directory: Path, dataset_id: str) -> list[Path]:
 
 def _sidecar_paths(work: Path | str, suffix: str) -> list[Path]:
     """Conversion sidecar (``*.<suffix>``): the main working directory plus each
-    segment directory (every part of a multi-part conversion writes its own)."""
+    segment directory (every part of a multi-part conversion writes its own).
+    """
     root = Path(work)
     paths = sorted(root.glob(f"*.{suffix}"))
     for seg in sorted(root.glob("seg_*")):
@@ -139,7 +141,8 @@ def _sidecar_paths(work: Path | str, suffix: str) -> list[Path]:
 
 def carrier_record_paths(work: Path | str) -> list[Path]:
     """CAR archive files: the main working directory plus each segment directory
-    (every part of a multi-part conversion writes its own)."""
+    (every part of a multi-part conversion writes its own).
+    """
     return _sidecar_paths(work, "carrier.json")
 
 
@@ -199,7 +202,8 @@ def read_fid_com_correction_records(work: Path | str) -> list[str]:
 
 def _slice_in_file(directory: Path, dataset_id: str) -> str | None:
     """in_file pattern of the slice stream in a directory (fid/test%03d.fid or
-    fid/{dataset_id}%03d.fid)."""
+    fid/{dataset_id}%03d.fid).
+    """
     slices = _slice_candidates(directory, dataset_id)
     if not slices:
         return None
@@ -216,12 +220,8 @@ def _nus_grid_bounds(experiment: Experiment) -> list[int] | None:
     3D: the nuslist columns hold complex-point indices, bounded by NusTD//2
     (cc indexes F2 up to 84 with NusTD 170).
     """
-    td = effective_td(experiment)
-    if experiment.ndim == 2 and len(td) > 1:
-        return [int(td[1])]
-    if experiment.ndim >= 3 and len(td) > 2:
-        return [int(td[1]) // 2, int(td[2]) // 2]
-    return None
+    shape = schedule_grid_shape(experiment)
+    return list(shape) if shape else None
 
 
 def _validate_nus_points(
@@ -229,7 +229,8 @@ def _validate_nus_points(
     experiment: Experiment,
 ) -> tuple[list[tuple[int, ...]], list[tuple[int, ...]], dict[tuple[int, ...], list[str]]]:
     """Bad-point check for NUS sampling points: out-of-range plus duplicated
-    points. Returns (valid points, bad points, reasons per bad point)."""
+    points. Returns (valid points, bad points, reasons per bad point).
+    """
     from collections import Counter
 
     counts = Counter(points)
@@ -240,14 +241,28 @@ def _validate_nus_points(
     seen: set[tuple[int, ...]] = set()
     for raw_point in points:
         point = tuple(raw_point)
-        oob = bounds is not None and any(
-            point[i] >= bounds[i] for i in range(min(len(point), len(bounds)))
+        wrong_arity = bounds is None or len(point) != len(bounds)
+        negative = any(value < 0 for value in point)
+        oob = bool(
+            bounds is not None
+            and not wrong_arity
+            and any(point[i] >= bounds[i] for i in range(len(bounds)))
         )
         dup = counts[point] > 1
-        if oob or dup:
+        if wrong_arity or negative or oob or dup:
             if point not in bad:
                 bad.append(point)
                 r: list[str] = []
+                if wrong_arity:
+                    r.append(
+                        tr(
+                            "coordinate column count {p0} does not match the expected {p1}",
+                            p0=len(point),
+                            p1=len(bounds or []),
+                        )
+                    )
+                if negative:
+                    r.append(tr("contains a negative index"))
                 if oob:
                     r.append(tr("out of bounds(grid {p0})", p0=bounds))
                 if dup:
@@ -325,11 +340,16 @@ def apply_final_ext_params(params: dict[str, Any]) -> str | None:
     if not mapped:
         return None
     return (
-        tr(
-        "direct dimension range: final run range has been used for optimisation/refactoring "
-        "(",
+        (
+            tr(
+                "direct dimension range: final run range has been used for "
+                "optimisation/refactoring "
+                "(",
+            )
+        )
+        + ", ".join(mapped)
+        + ")"
     )
-    ) + ", ".join(mapped) + ")"
 
 
 def direct_phase_override(params: dict[str, Any]) -> tuple[float, float] | None:
@@ -366,6 +386,10 @@ def _nus_grid_from_points(
     if not points:
         return None
     n_cols = len(points[0])
+    if n_cols not in (1, 2) or any(
+        len(point) != n_cols or any(value < 0 for value in point) for point in points
+    ):
+        return None
     if n_cols == 1:
         return [max(p[0] for p in points) + 1]
     if n_cols == 2:
@@ -395,16 +419,11 @@ def _record_source_clean(
     audit.record(
         QcAction(
             issue_detected=tr(
-                "bad point in the NUS sampling table (out of range / duplicate "
-                "coordinate)",
+                "bad point in the NUS sampling table (out of range / duplicate coordinate)",
             ),
             location=",".join(str(Path(d) / "ser") + " + nuslist" for d in raw_dirs),
             detection_rule=tr("_validate_nus_points(nuslist versus experiment sampling grid)"),
-            action_taken=(
-                tr("removed_from_source_ser_and_nuslist")
-                if removed
-                else tr("reported_only")
-            ),
+            action_taken=(SOURCE_CLEAN_ACTION if removed else "reported_only"),
             before_state={
                 "sampling_points": int(valid_count) + len(bad_points),
                 "bad_points": len(bad_points),
@@ -449,27 +468,27 @@ def _apply_nus_grid_after_clean(
             block["NusTD"] = new
             logs.append(
                 tr(
-                "Grid adjustment after sampling bad point removal: acqu2s NusTD {p0} → "
-                "{p1}",
-                p0=old,
-                p1=new,
-            ))
+                    "Grid adjustment after sampling bad point removal: acqu2s NusTD {p0} → {p1}",
+                    p0=old,
+                    p1=new,
+                )
+            )
             if audit is not None:
                 audit.record(
                     QcAction(
                         issue_detected=(
                             tr(
-                            "After the sampling bad point is removed, the declared NusTD is "
-                            "inconsistent with the actual sampling "
-                            "range",
-                        )
+                                "After the sampling bad point is removed, the declared NusTD is "
+                                "inconsistent with the actual sampling "
+                                "range",
+                            )
                         ),
                         location="acqu2s.NusTD",
                         detection_rule=(
                             tr(
-                            "_nus_grid_from_points(nuslist after cleaning) = max+1 per "
-                            "dimension",
-                        )
+                                "_nus_grid_from_points(nuslist after cleaning) = max+1 per "
+                                "dimension",
+                            )
                         ),
                         action_taken="nus_td_shrunk",
                         before_state={"NusTD": old},
@@ -486,12 +505,12 @@ def _apply_nus_grid_after_clean(
                 block["NusTD"] = new
                 logs.append(
                     tr(
-                    "Grid adjustment after sampling bad point removal: {p0} NusTD {p1} → "
-                    "{p2}",
-                    p0=key,
-                    p1=old,
-                    p2=new,
-                ))
+                        "Grid adjustment after sampling bad point removal: {p0} NusTD {p1} → {p2}",
+                        p0=key,
+                        p1=old,
+                        p2=new,
+                    )
+                )
                 if audit is not None:
                     audit.record(
                         QcAction(
@@ -520,11 +539,13 @@ def _apply_nus_grid_after_clean(
 
 def zf_summary(plan: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Zero-fill plan summary (used in WorkflowRun params): {axis: {"mode",
-    "size"}}."""
+    "size"}}.
+    """
     return {
         axis: {"mode": str(cfg.get("mode", "auto")), "size": cfg.get("size")}
         for axis, cfg in plan.items()
     }
+
 
 def _effective_params_base(
     extract: bool,
@@ -568,46 +589,41 @@ def _segment_kind_info(segments: list[Path | str]) -> tuple[str | None, list[str
     try:
         kind = classify_segment_kind(list(segments))
     except Exception as exc:  # noqa: BLE001 - a failed classification must not block the conversion
-        return None, [(
-            tr(
-            "⚠ Multi-segment type recognition failed ({p0}), merged according to "
-            "segmented",
-            p0=exc,
-        )
-        )]
+        return None, [
+            (
+                tr(
+                    "⚠ Multi-segment type recognition failed ({p0}), merged according to segmented",
+                    p0=exc,
+                )
+            )
+        ]
     label = {
         "repeat_uniform": tr("repeated experiment (uniform, identical parameter)"),
         "repeat_nus": tr("repeated experiment (NUS, identical sampling points)"),
         "segmented_nus": tr("segmented (NUS, complementary sampling points)"),
     }.get(kind, kind)
     if kind == "repeat_uniform":
-        detail = (
-            tr(
-                "identified as {p0}: {p1} FID parts follow the TopSpin fidadd convention: "
-                "point-by-point summation in the time domain (co-addition; addNMR does not "
-                "normalise) to raise the "
-                "SNR",
-                p0=label,
-                p1=len(segments),
-            )
+        detail = tr(
+            "identified as {p0}: {p1} FID parts follow the TopSpin fidadd convention: "
+            "point-by-point summation in the time domain (co-addition; addNMR does not "
+            "normalise) to raise the "
+            "SNR",
+            p0=label,
+            p1=len(segments),
         )
     elif kind == "repeat_nus":
-        detail = (
-            tr(
-                "identified as {p0}: all parts share the same sampling points, so they are summed "
-                "on one grid and reconstructed once (TopSpin fidadd semantics; addNMR does not "
-                "normalise)",
-                p0=label,
-            )
+        detail = tr(
+            "identified as {p0}: all parts share the same sampling points, so they are summed "
+            "on one grid and reconstructed once (TopSpin fidadd semantics; addNMR does not "
+            "normalise)",
+            p0=label,
         )
     elif kind == "segmented_nus":
-        detail = (
-            tr(
-                "identified as {p0}: the sampling points of the parts are complementary, so the "
-                "nuslists are merged to complete the grid and reconstructed in one "
-                "pass",
-                p0=label,
-            )
+        detail = tr(
+            "identified as {p0}: the sampling points of the parts are complementary, so the "
+            "nuslists are merged to complete the grid and reconstructed in one "
+            "pass",
+            p0=label,
         )
     else:
         detail = tr("Multi-segment type: {p0}", p0=label)
@@ -632,7 +648,8 @@ def _first_dir(raw_dirs: Any) -> Path | None:
 @dataclass
 class NMRPipeBackend:
     """NMRPipe implementation (Linux: bruker -AUTO + fid.com + NMRPipe pipeline,
-    SMILE, multi-segment merge)."""
+    SMILE, multi-segment merge).
+    """
 
     nmrpipe_bin: str = ""
     work_dir: str = ""
@@ -648,6 +665,89 @@ class NMRPipeBackend:
             # processing (see backend/nmrpipe_version.py).
             register_nmrpipe_versions(bin_dir)
         return bin_dir
+
+    def _resolve_schedule_file(
+        self, raw_dir: Path, experiment: Experiment, logs: list[str]
+    ) -> tuple[Path | None, str]:
+        """Find an NUS schedule from an explicit source with the expected dimensional shape.
+
+        Accept only the standard ``nuslist`` file or a filename explicitly named by
+        ``acqus.NUSLIST``. Require one column for 2D or two columns for 3D; never scan the
+        directory and guess that an arbitrary integer file is a schedule.
+
+        Returns
+        -------
+        tuple[Path | None, str]
+            ``(schedule_path, explanation)``. If no schedule is found, the path is ``None`` and
+            the explanation includes the candidates and reasons for a caller warning.
+        """
+        acqus = (experiment.acquisition_parameters or {}).get("acqus", {})
+        path, source = find_schedule_file(
+            Path(raw_dir),
+            acqus=acqus,
+            expected_columns=schedule_columns_for_ndim(experiment.ndim),
+        )
+        if path is not None:
+            logs.append(
+                tr(
+                    "NUS sampling schedule: {p0} ({p1})",
+                    p0=path.name,
+                    p1=source,
+                )
+            )
+        return path, source
+
+    def _recover_dense_nus(
+        self,
+        raw_dir: Path,
+        experiment: Experiment,
+        logs: list[str],
+        fid_file: Path | None = None,
+    ) -> list[int] | None:
+        """Recover sampled coordinates without a schedule when the data supports it.
+
+        In 2D, :meth:`_recover_dense_2d_nus` recovers complex-point indices only when the
+        declared full grid has an observable zero-trace pattern. If every row is nonzero and the
+        schedule is missing, a compact random order with 100% NUS cannot be ruled out, so the
+        input must be rejected.
+
+        There is no equivalent full-grid scanner for 3D: ``scan_dense_2d`` is specific to one
+        indirect dimension. Return ``None`` so the caller blocks processing when the schedule is
+        unavailable. Do not synthesize a 3D schedule from row counts. A measured rectangular
+        schedule with 18 by 19 coordinates had 342 sampled points, while its ``ser`` file had
+        1,476 nonzero rows; the ratio was not an integer. Nonzero rows show how many traces have
+        data, not which grid coordinates were acquired. Guessing would invent positions and can
+        produce a plausible-looking but incorrect spectrum.
+        """
+        if int(getattr(experiment, "ndim", 0) or 0) == 2:
+            return self._recover_dense_2d_nus(raw_dir, experiment, logs, fid_file=fid_file)
+        acqus = (experiment.acquisition_parameters or {}).get("acqus", {})
+        dimensions = list(getattr(experiment, "dimensions", []) or [])
+        direct = next(
+            (
+                dim
+                for dim in dimensions
+                if str(getattr(getattr(dim, "role", ""), "value", "")).startswith("direct")
+            ),
+            None,
+        )
+        direct_points = int(getattr(direct, "td", 0) or 0) if direct is not None else 0
+        if direct_points > 0:
+            scan = scan_whole_trace_zeros(Path(raw_dir), acqus=acqus, direct_points=direct_points)
+            if scan["kind"] == "whole_trace_scanned" and int(scan["zero_rows"]) > 0:
+                logs.append(
+                    tr(
+                        "{p0}: {p1} row(s), {p2} whole-trace zero row(s), {p3} sampled row(s) in "
+                        "{p4} contiguous block(s) - compact sampling, but the positions cannot be "
+                        "recovered without a schedule",
+                        p0=scan["source"],
+                        p1=int(scan["nonzero_rows"]) + int(scan["zero_rows"]),
+                        p2=int(scan["zero_rows"]),
+                        p3=int(scan["nonzero_rows"]),
+                        p4=len(scan["blocks"]),
+                    )
+                )
+        return None
 
     def _recover_dense_2d_nus(
         self,
@@ -674,9 +774,6 @@ class NMRPipeBackend:
         from core.data.nus_reader import indirect_grid_2d, scan_dense_2d
 
         acqus = (experiment.acquisition_parameters or {}).get("acqus", {})
-        # Note: effective_td can no longer be used -- fully sampled data is already
-        # downgraded to uniform when read, and effective_td only folds complex
-        # points when mode=NUS; a mode-independent grid is used here.
         grid_complex, mult, x_n = indirect_grid_2d(experiment)
         rows_declared = mult * grid_complex
         if grid_complex <= 0 or mult <= 0 or x_n <= 0:
@@ -699,14 +796,15 @@ class NMRPipeBackend:
         kind = str(scan["kind"])
         rows = int(scan["rows"])
         if kind in ("bad_layout", "unknown_dtype"):
-            logs.append(tr("2D NUS Judgment:{p0}", p0=scan['detail']))
+            logs.append(tr("2D NUS Judgment:{p0}", p0=scan["detail"]))
             return None
         if kind == "missing":
             logs.append(
                 tr(
-                "2D NUS Determination: There is neither ser nor converted fid, so dense model "
-                "cannot be determined",
-            ))
+                    "2D NUS Determination: There is neither ser nor converted fid, so dense model "
+                    "cannot be determined",
+                )
+            )
             return None
         if kind == "sparse":
             logs.append(
@@ -714,7 +812,7 @@ class NMRPipeBackend:
                     "2D NUS Judgment:{p0} only {p1} row < declare grid {p2} Row -> sparse file "
                     "(sampling location agnostic), requires nuslist sampling "
                     "schedule",
-                    p0=scan['source'],
+                    p0=scan["source"],
                     p1=rows,
                     p2=rows_declared,
                 )
@@ -726,7 +824,7 @@ class NMRPipeBackend:
                     "2D NUS judgment: {p0} {p1} rows != the declared grid of {p2} rows -> the "
                     "metadata disagrees with the file, cannot "
                     "decide",
-                    p0=scan['source'],
+                    p0=scan["source"],
                     p1=rows,
                     p2=rows_declared,
                 )
@@ -735,36 +833,37 @@ class NMRPipeBackend:
         if kind == "all_zero":
             logs.append(
                 tr(
-                "2D NUS Judgment: full grid data is all zero, sampling point cannot be "
-                "restored",
-            ))
+                    "2D NUS Judgment: full grid data is all zero, sampling point cannot be "
+                    "restored",
+                )
+            )
             return None
-        points = [int(point) for point in scan["points"]]
         if kind == "full":
             logs.append(
                 tr(
-                    "2D NUS judgment: the full grid has {p0} rows and no zero rows (NusAMOUNT "
-                    "marks NUS, but the data are fully sampled) -> reconstructing from the "
-                    "full-sampling table ({p1} complex "
-                    "points)",
+                    "2D NUS judgment: the full grid has {p0} rows and no zero rows, but without "
+                    "the sampling schedule it is impossible to distinguish canonical dense order "
+                    "from a compact 100% NUS random order ({p1} complex points); recovery was "
+                    "refused",
                     p0=rows,
                     p1=grid_complex,
                 )
             )
-        else:
-            logs.append(
-                tr(
-                    "2D NUS Determination: dense model (full grid {p0}/{p1} rows, {p2}), "
-                    "recovering from the zero pattern {p3}/{p4} sampled complex "
-                    "points({p5:.1f}%)",
-                    p0=rows,
-                    p1=rows_declared,
-                    p2=scan['dtype'],
-                    p3=len(points),
-                    p4=grid_complex,
-                    p5=100.0 * len(points) / grid_complex,
-                )
+            return None
+        points = [int(point) for point in scan["points"]]
+        logs.append(
+            tr(
+                "2D NUS Determination: dense model (full grid {p0}/{p1} rows, {p2}), "
+                "recovering from the zero pattern {p3}/{p4} sampled complex "
+                "points({p5:.1f}%)",
+                p0=rows,
+                p1=rows_declared,
+                p2=scan["dtype"],
+                p3=len(points),
+                p4=grid_complex,
+                p5=100.0 * len(points) / grid_complex,
             )
+        )
         return points
 
     def _work_path(self, experiment: Experiment) -> Path:
@@ -787,7 +886,7 @@ class NMRPipeBackend:
             "ok": True,
             "nmrpipe": str(bin_dir / "nmrPipe"),
             "bruker": str(bruker) if bruker else "",
-            "message": tr("Find nmrPipe: {p0}", p0=bin_dir / 'nmrPipe'),
+            "message": tr("Find nmrPipe: {p0}", p0=bin_dir / "nmrPipe"),
         }
 
     def process(
@@ -839,9 +938,7 @@ class NMRPipeBackend:
         # repeated process calls (preview/joint/candidate) do not keep showing a
         # misleading conversion progress
         if experiment.segments:
-            merged_in = self._merged_fid_in(
-                work, experiment.dataset_id
-            )
+            merged_in = self._merged_fid_in(work, experiment.dataset_id)
             merged_ready = merged_in is not None
             in_file = merged_in or f"merged/{experiment.dataset_id}.fid"
             if (
@@ -860,13 +957,8 @@ class NMRPipeBackend:
                 _progress(tr("Start converting fid"))
                 # 0.2.166: segment shift and NUS alignment (with segment_shift_hz a
                 # fresh conversion is mandatory)
-                shifts = [
-                    float(v)
-                    for v in (params or {}).get("segment_shift_hz", [])
-                ]
-                converted, convert_logs = self._convert_segments(
-                    runtime, experiment, work, shifts
-                )
+                shifts = [float(v) for v in (params or {}).get("segment_shift_hz", [])]
+                converted, convert_logs = self._convert_segments(runtime, experiment, work, shifts)
                 logs += convert_logs
                 if converted:
                     self._record_conversion(
@@ -894,21 +986,25 @@ class NMRPipeBackend:
                     slice_in = _slice_in_file(slice_dir, experiment.dataset_id)
                     if slice_in:
                         in_file = slice_in
-                        logs.append(tr(
-                            "Use bruker sliced fid ({p0}, streaming "
-                            "processing)",
-                            p0=slice_in,
-                        ))
+                        logs.append(
+                            tr(
+                                "Use bruker sliced fid ({p0}, streaming processing)",
+                                p0=slice_in,
+                            )
+                        )
                 self._record_conversion(
                     work, experiment.dataset_id, raw, logs, experiment=experiment
                 )
         if not converted:
-            return {"success": False, "message": (
-                tr(
-                "Bruker -> NMRPipe conversion "
-                "failed",
-            )
-            ), "logs": logs}
+            return {
+                "success": False,
+                "message": (
+                    tr(
+                        "Bruker -> NMRPipe conversion failed",
+                    )
+                ),
+                "logs": logs,
+            }
         proc_params = dict(params or {})
         sampling = proc_params.get("sampling") or {}
         # sampling.auto_phase=False -> switch off the automatic direct-dimension
@@ -939,7 +1035,8 @@ class NMRPipeBackend:
             logs.append(tr("direct dimension phase coverage: {p0}", p0=direct_phase))
         elif direct_phase_search:
             _progress(
-                tr("Start phase optimisation (1D)") if experiment.ndim == 1
+                tr("Start phase optimisation (1D)")
+                if experiment.ndim == 1
                 else tr("Start phase optimisation (direct dimension)")
             )
             phase_inputs: Path | list[Path]
@@ -947,11 +1044,7 @@ class NMRPipeBackend:
                 phase_inputs = work / "seg_001" / f"{experiment.dataset_id}.fid"
             else:
                 slice_dir = work / "fid"
-                slices = (
-                    sorted(slice_dir.glob("test*.fid"))
-                    if slice_dir.is_dir()
-                    else []
-                )
+                slices = sorted(slice_dir.glob("test*.fid")) if slice_dir.is_dir() else []
                 if slices:
                     phase_inputs = slices
                     logs.append(
@@ -960,10 +1053,11 @@ class NMRPipeBackend:
                 else:
                     phase_inputs = work / f"{experiment.dataset_id}.fid"
             if isinstance(phase_inputs, Path) and not phase_inputs.is_file():
-                logs.append(tr(
-                    "direct-dimension phase search: no fid/slice found, keeping "
-                    "p0=p1=0",
-                ))
+                logs.append(
+                    tr(
+                        "direct-dimension phase search: no fid/slice found, keeping p0=p1=0",
+                    )
+                )
             else:
                 p0, p1 = self._search_direct_phase(
                     work,
@@ -975,12 +1069,13 @@ class NMRPipeBackend:
                 direct_axis = "F2" if experiment.ndim <= 2 else "F3"
                 direct_phase = {direct_axis: (p0, p1)}
                 if experiment.ndim == 1:
-                    _progress(tr(
-                        "Complete 1D phase optimisation: p0={p0:g}° "
-                        "p1={p1:g}°",
-                        p0=p0,
-                        p1=p1,
-                    ))
+                    _progress(
+                        tr(
+                            "Complete 1D phase optimisation: p0={p0:g}° p1={p1:g}°",
+                            p0=p0,
+                            p1=p1,
+                        )
+                    )
                 else:
                     _progress(
                         tr(
@@ -992,15 +1087,14 @@ class NMRPipeBackend:
                         )
                     )
         extract = _as_bool(proc_params.get("extract", experiment.ndim > 1))
-        ext_lo = resolve_ext_lo(proc_params.get("ext_lo"))
-        ext_hi = resolve_ext_hi(proc_params.get("ext_hi"))
+        ext_lo, ext_hi = resolve_ext_window(
+            experiment, proc_params.get("ext_lo"), proc_params.get("ext_hi")
+        )
         baseline = expand_baseline(experiment, proc_params.get("baseline"))
         window = proc_params.get("window")
         zero_fill = proc_params.get("zero_fill")
         linewidth_hz = proc_params.get("linewidth_hz")
-        points_per_line = resolve_points_per_line(
-            proc_params.get("points_per_line")
-        )
+        points_per_line = resolve_points_per_line(proc_params.get("points_per_line"))
         zf_plan = zero_fill_plan(
             experiment,
             zero_fill,
@@ -1064,6 +1158,7 @@ class NMRPipeBackend:
         data_dir: Path | str,
         progress: Callable[[str], None] | None = None,
         fid_com_overrides: dict[str, str] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Standalone stage: bruker -AUTO/fid.com converts raw data into an NMRPipe
         fid (no spectrum is produced).
@@ -1103,9 +1198,7 @@ class NMRPipeBackend:
             # or a fid directory
             has_fid_file = (seg_dir / "fid").is_file()
             has_fid_dir = (
-                any((seg_dir / "fid").glob("*.fid"))
-                if (seg_dir / "fid").is_dir()
-                else False
+                any((seg_dir / "fid").glob("*.fid")) if (seg_dir / "fid").is_dir() else False
             )
             if not has_ser and not has_fid_file and not has_fid_dir:
                 return f"{seg_dir}/fid" if experiment.ndim == 1 else f"{seg_dir}/ser"
@@ -1158,19 +1251,17 @@ class NMRPipeBackend:
                 # static NusTD
                 merged_points: list[tuple[int, ...]] = []
                 for seg in experiment.segments:
-                    merged_points += [
-                        tuple(p) for p in read_nuslist(Path(seg) / "nuslist")
-                    ]
-                logs += _apply_nus_grid_after_clean(
-                    experiment, merged_points, audit=audit
-                )
+                    merged_points += [tuple(p) for p in read_nuslist(Path(seg) / "nuslist")]
+                logs += _apply_nus_grid_after_clean(experiment, merged_points, audit=audit)
             converted, convert_logs = self._convert_segments(
-                runtime, experiment, work, [], fid_com_overrides=fid_com_overrides
+                runtime,
+                experiment,
+                work,
+                [float(v) for v in (params or {}).get("segment_shift_hz", [])],
+                fid_com_overrides=fid_com_overrides,
             )
             logs += convert_logs
-            merged_in = self._merged_fid_in(
-                work, experiment.dataset_id
-            )
+            merged_in = self._merged_fid_in(work, experiment.dataset_id)
             if merged_in and merged_in.endswith(".fid"):
                 fid_path = work / merged_in
             elif merged_in:
@@ -1189,25 +1280,36 @@ class NMRPipeBackend:
                     logs,
                     experiment=experiment,
                 )
-                _count, bad_points = self._write_merged_nuslist(
-                    work, experiment.segments, experiment, logs
+                needs_schedule = bool(
+                    experiment.sampling.mode is SamplingMode.NUS
+                    or segment_kind in ("repeat_nus", "segmented_nus")
                 )
-                if bad_points:
-                    # when source-level deletion is not possible, fall back to
-                    # clearing the generated FID
-                    self._zero_bad_point_fid(
-                        work,
-                        bad_points,
-                        logs,
-                        dataset_id=experiment.dataset_id,
-                        audit=audit,
+                if needs_schedule:
+                    _count, bad_points = self._write_merged_nuslist(
+                        work, experiment.segments, experiment, logs
                     )
+                    if bad_points:
+                        self._zero_bad_point_fid(
+                            work,
+                            bad_points,
+                            logs,
+                            dataset_id=experiment.dataset_id,
+                            audit=audit,
+                        )
+                else:
+                    (work / "nuslist").unlink(missing_ok=True)
         else:
             converted, convert_logs = self._convert(
                 runtime, experiment, raw, work, fid_com_overrides=fid_com_overrides
             )
             logs += convert_logs
             fid_path = self._converted_fid_path(work, experiment.dataset_id)
+            if converted:
+                # (``read_carrier_audit`` / ``read_sweep_width_audit`` /
+                # ``*.fid.conversion.json``,
+                self._record_conversion(
+                    work, experiment.dataset_id, raw, logs, experiment=experiment
+                )
         if not converted:
             return {
                 "success": False,
@@ -1227,9 +1329,7 @@ class NMRPipeBackend:
         # 2026-09-23 (user request): "no bad point in this step" is not "never had one" -
         # report the bad points that earlier runs removed from the source (read
         # qc_audit.jsonl, with the raw .bak files as a fallback)
-        _raw_dirs = (
-            [Path(seg) for seg in experiment.segments] if experiment.segments else [raw]
-        )
+        _raw_dirs = [Path(seg) for seg in experiment.segments] if experiment.segments else [raw]
         logs += format_fid_step_report(
             diagnostics=diag_result,
             source_bad_points=source_bad_points,
@@ -1247,9 +1347,7 @@ class NMRPipeBackend:
             # 2026-09-24: dimensions whose mode/sign is unconfirmed (no FT -neg applied)
             # get the same reminder in the report
             mode_symbol=read_mode_symbol_audit(work),
-            # a single dataset has no "merge" step: the report wording follows the
-            # part count (user 2026-09-24)
-            parts=len(experiment.segments) if experiment.segments else 1,
+            parts=detect_part_count(work, _raw_dirs),
         )
         return {
             "success": True,
@@ -1298,12 +1396,15 @@ class NMRPipeBackend:
         # "not enough memory" is reported spuriously)
         _ext_note = apply_final_ext_params(params)
         if experiment.sampling.mode is not SamplingMode.NUS:
-            return {"success": False, "message": (
-                tr(
-                "For non-NUS data, please use "
-                "process()",
-            )
-            ), "logs": []}
+            return {
+                "success": False,
+                "message": (
+                    tr(
+                        "For non-NUS data, please use process()",
+                    )
+                ),
+                "logs": [],
+            }
         bin_dir = self._bin_dir()
         if bin_dir is None:
             return {
@@ -1335,15 +1436,9 @@ class NMRPipeBackend:
                 # correction) uses the adjusted value instead of restoring it
                 merged_points: list[tuple[int, ...]] = []
                 for seg in experiment.segments:
-                    merged_points += [
-                        tuple(p) for p in read_nuslist(Path(seg) / "nuslist")
-                    ]
-                logs += _apply_nus_grid_after_clean(
-                    experiment, merged_points, audit=audit
-                )
-            merged_in = self._merged_fid_in(
-                work, experiment.dataset_id
-            )
+                    merged_points += [tuple(p) for p in read_nuslist(Path(seg) / "nuslist")]
+                logs += _apply_nus_grid_after_clean(experiment, merged_points, audit=audit)
+            merged_in = self._merged_fid_in(work, experiment.dataset_id)
             # 2026-09-22: reuse goes through the raw input fingerprint (see
             # _converted_fid_is_current) on every path. Source-level cleaning that
             # rewrites or empties raw always changes the fingerprint, so the old merged
@@ -1367,9 +1462,7 @@ class NMRPipeBackend:
                 _kind, kind_logs = _segment_kind_info(experiment.segments)
                 logs += kind_logs
                 shifts = [float(v) for v in params.get("segment_shift_hz", [])]
-                converted, convert_logs = self._convert_segments(
-                    runtime, experiment, work, shifts
-                )
+                converted, convert_logs = self._convert_segments(runtime, experiment, work, shifts)
                 logs += convert_logs
                 if not converted:
                     return {
@@ -1399,12 +1492,11 @@ class NMRPipeBackend:
                 )
             else:
                 logs.append(tr("Reuse merged fid ({p0}; skipping conversion/merge)", p0=merged_in))
-                nuslist_count = len(
-                    (work / "nuslist").read_text(encoding="utf-8").splitlines()
-                )
-            in_file = self._merged_fid_in(
-                work, experiment.dataset_id
-            ) or f"merged/{experiment.dataset_id}.fid"
+                nuslist_count = len((work / "nuslist").read_text(encoding="utf-8").splitlines())
+            in_file = (
+                self._merged_fid_in(work, experiment.dataset_id)
+                or f"merged/{experiment.dataset_id}.fid"
+            )
         else:
             # 0.2.124: bad points are deleted from the source ser/nuslist with a
             # backup kept (user request); this runs before the conversion
@@ -1416,13 +1508,17 @@ class NMRPipeBackend:
                 audit, experiment, [raw], nuslist_count, bad_points, source_removed
             )
             if bad_points and source_removed:
-                # 0.2.197: after bad points are removed the NusTD follows the actual
-                # range of the cleaned nuslist, and cross-validation (parameter
-                # correction) uses the adjusted value instead of restoring it
-                cleaned = [tuple(p) for p in read_nuslist(raw / "nuslist")]
-                logs += _apply_nus_grid_after_clean(
-                    experiment, cleaned, audit=audit
+                cleaned_path, _source = find_schedule_file(
+                    raw,
+                    acqus=(experiment.acquisition_parameters or {}).get("acqus", {}),
+                    expected_columns=schedule_columns_for_ndim(experiment.ndim),
                 )
+                cleaned = (
+                    [tuple(p) for p in read_nuslist(cleaned_path)]
+                    if cleaned_path is not None
+                    else []
+                )
+                logs += _apply_nus_grid_after_clean(experiment, cleaned, audit=audit)
             fid_file = work / f"{experiment.dataset_id}.fid"
             # 2026-09-22: reuse goes through the raw input fingerprint -- the old product
             # is dropped and re-converted only when the fingerprint changed (source-level
@@ -1436,26 +1532,19 @@ class NMRPipeBackend:
                 stale_slice = work / "fid"
                 if stale_slice.is_dir():
                     shutil.rmtree(stale_slice)
-            raw_nuslist = raw / "nuslist"
+            raw_nuslist, schedule_source = self._resolve_schedule_file(raw, experiment, logs)
             recovered_2d: list[int] | None = None
-            if not raw_nuslist.is_file() and experiment.ndim == 2:
-                # 0.2.199-patch29hz-fix12 (user): decide before converting -- running a
-                # truly sparse file whose sampling positions are unknowable as dense
-                # data hangs during conversion (measured: nmrPipe -fn MULT at 100%
-                # CPU)
-                recovered_2d = self._recover_dense_2d_nus(
-                    raw, experiment, logs, fid_file=fid_file
-                )
+            if raw_nuslist is None:
+                recovered_2d = self._recover_dense_nus(raw, experiment, logs, fid_file=fid_file)
                 if recovered_2d is None:
                     return {
                         "success": False,
-                        "message": (
-                            tr(
-                                "missing nuslist sampling table: this 2D data set is not the "
-                                "full-grid+zero-fill dense model, so the sampling positions cannot "
-                                "be recovered; please provide "
-                                "nuslist",
-                            )
+                        "message": tr(
+                            "no sampling schedule found ({p0}); the sampling positions cannot be "
+                            "recovered from the data, so the reconstruction would be wrong - put "
+                            "the schedule file into {p1} and run again",
+                            p0=schedule_source,
+                            p1=raw,
                         ),
                         "logs": logs,
                     }
@@ -1471,19 +1560,12 @@ class NMRPipeBackend:
                 self._record_conversion(
                     work, experiment.dataset_id, raw, logs, experiment=experiment
                 )
-            if raw_nuslist.is_file():
+            if raw_nuslist is not None:
                 shutil.copy2(raw_nuslist, work / "nuslist")
                 # Safety net: re-validate the working nuslist (0 bad points expected
                 # once the source has been cleaned)
-                nuslist_count, _leftover = self._clean_work_nuslist(
-                    work, experiment, logs
-                )
+                nuslist_count, _leftover = self._clean_work_nuslist(work, experiment, logs)
             elif recovered_2d is not None:
-                # 0.2.199-patch29hz-fix12 (user): 2D data without a sampling schedule
-                # but shaped as "full grid + zero fill" -- the sampling points are
-                # recovered straight from the zero pattern (any subset, no longer
-                # assuming "the first N complex points") and written to work/nuslist
-                # for SMILE; the slice stream is still bypassed (2D is single-file).
                 (work / "nuslist").write_text(
                     "\n".join(str(p) for p in recovered_2d) + "\n",
                     encoding="utf-8",
@@ -1491,23 +1573,24 @@ class NMRPipeBackend:
                 nuslist_count = len(recovered_2d)
                 logs.append(
                     tr(
-                        "2D NUS: No sampling schedule, restored from full grid zero mode {p0} "
+                        "NUS: No sampling schedule, restored from full grid zero mode {p0} "
                         "sampling complex "
                         "points",
                         p0=nuslist_count,
                     )
                 )
             else:
-                return {"success": False, "message": (
-                    tr(
-                    "Missing nuslist sampling "
-                    "schedule",
-                )
-                ), "logs": logs}
-            # 0.2.199-patch27: work with bruker's automatic output -- prefer the
-            # single file and fall back to the slice stream (fid/test%03d.fid or
-            # fid/{dataset_id}%03d.fid) when there is none; the nus script xyz2pipe
-            # supports both inputs
+                return {
+                    "success": False,
+                    "message": tr(
+                        "no sampling schedule found ({p0}); the sampling positions cannot be "
+                        "recovered from the data, so the reconstruction would be wrong - put "
+                        "the schedule file into {p1} and run again",
+                        p0=schedule_source,
+                        p1=raw,
+                    ),
+                    "logs": logs,
+                }
             slice_dir = work / "fid"
             slice_in = _slice_in_file(slice_dir, experiment.dataset_id)
             if fid_file.is_file():
@@ -1519,15 +1602,17 @@ class NMRPipeBackend:
                 in_file = fid_file.name  # fallback: conversion should have produced one of them
                 logs.append(
                     tr(
-                    "fid not found (neither a single file nor slices), the final run will "
-                    "fail",
-                )
+                        "fid not found (neither a single file nor slices), the final run will fail",
+                    )
                 )
             if bad_points and not source_removed:
                 # when source-level deletion is not possible (missing ser or a size
                 # mismatch), fall back to clearing the generated FID
                 self._zero_bad_point_fid(
-                    work, bad_points, logs, in_file=in_file,
+                    work,
+                    bad_points,
+                    logs,
+                    in_file=in_file,
                     dataset_id=experiment.dataset_id,
                 )
 
@@ -1535,12 +1620,13 @@ class NMRPipeBackend:
         override = direct_phase_override(params)
         if override is not None:
             direct_p0, direct_p1 = override
-            logs.append(tr(
-                "direct dimension phase coverage: p0={p0:g} "
-                "p1={p1:g}",
-                p0=direct_p0,
-                p1=direct_p1,
-            ))
+            logs.append(
+                tr(
+                    "direct dimension phase coverage: p0={p0:g} p1={p1:g}",
+                    p0=direct_p0,
+                    p1=direct_p1,
+                )
+            )
         sampling = params.get("sampling") or {}
         direct_phase_search = bool(params.get("direct_phase_search", True))
         # 0.2.95: display-layer phase search (nmrDraw idea, on by default) -- scores
@@ -1585,11 +1671,7 @@ class NMRPipeBackend:
                 phase_inputs = work / "seg_001" / f"{experiment.dataset_id}.fid"
             else:
                 slice_dir = work / "fid"
-                slices = (
-                    sorted(slice_dir.glob("test*.fid"))
-                    if slice_dir.is_dir()
-                    else []
-                )
+                slices = sorted(slice_dir.glob("test*.fid")) if slice_dir.is_dir() else []
                 if slices:
                     phase_inputs = slices
                     logs.append(
@@ -1598,10 +1680,11 @@ class NMRPipeBackend:
                 else:
                     phase_inputs = work / f"{experiment.dataset_id}.fid"
             if isinstance(phase_inputs, Path) and not phase_inputs.is_file():
-                logs.append(tr(
-                    "direct-dimension phase search: no fid/slice found, keeping "
-                    "p0=p1=0",
-                ))
+                logs.append(
+                    tr(
+                        "direct-dimension phase search: no fid/slice found, keeping p0=p1=0",
+                    )
+                )
             else:
                 _td = effective_td(experiment)
                 direct_p0, direct_p1 = self._search_direct_phase(
@@ -1639,11 +1722,7 @@ class NMRPipeBackend:
         smile_scaling = bool(params.get("smile_scaling", True))
         smile_report = int(params.get("smile_report", 1))
         nthread = resolve_nthread(params.get("nthread"))
-        # 0.2.113: threads are no longer limited by the grid -- the sampleM incident
-        # came from direct-dimension memory (no slice stream / too much
-        # direct-dimension zero fill), which the 0.2.112 memory guard now backstops
-        ext_lo = resolve_ext_lo(params.get("ext_lo"))
-        ext_hi = resolve_ext_hi(params.get("ext_hi"))
+        ext_lo, ext_hi = resolve_ext_window(experiment, params.get("ext_lo"), params.get("ext_hi"))
         extract = _as_bool(params.get("extract", True))
         baseline = expand_baseline(experiment, params.get("baseline"))
         zero_fill = params.get("zero_fill")
@@ -1668,16 +1747,10 @@ class NMRPipeBackend:
             estimate_smile_peak_mb,
         )
 
-        direct_axis = (
-            experiment.dimensions[0].logical_axis
-            if experiment.dimensions
-            else ""
-        )
+        direct_axis = experiment.dimensions[0].logical_axis if experiment.dimensions else ""
         zf_direct = int((zf_plan.get(direct_axis) or {}).get("size") or td[0])
         direct_pts = direct_points_after_ext(experiment, zf_direct, ext_lo, ext_hi)
-        peak_mb = estimate_smile_peak_mb(
-            experiment.ndim, direct_pts, td[1:]
-        )
+        peak_mb = estimate_smile_peak_mb(experiment.ndim, direct_pts, td[1:])
         avail_mb = available_memory_mb()
         if peak_mb > avail_mb * MEM_SAFETY:
             td0 = max(int(td[0]), 1)
@@ -1698,21 +1771,19 @@ class NMRPipeBackend:
                 if progress is not None:
                     progress(
                         tr(
-                        "Out of memory: direct dimension zero filling has been reduced to 1 x TD "
-                        "to reduce SMILE "
-                        "memory",
-                    ))
+                            "Out of memory: direct dimension zero filling has been reduced to "
+                            "1 x TD "
+                            "to reduce SMILE "
+                            "memory",
+                        )
+                    )
                 zf_plan[direct_axis] = {
                     "mode": "size",
                     "size": one_x,
                     "note": tr("Memory guard: direct dimension zero filling reduced to 1 x TD"),
                 }
-                direct_pts = direct_points_after_ext(
-                    experiment, one_x, ext_lo, ext_hi
-                )
-                peak_mb = estimate_smile_peak_mb(
-                    experiment.ndim, direct_pts, td[1:]
-                )
+                direct_pts = direct_points_after_ext(experiment, one_x, ext_lo, ext_hi)
+                peak_mb = estimate_smile_peak_mb(experiment.ndim, direct_pts, td[1:])
             if peak_mb > avail_mb * MEM_SAFETY:
                 import math
 
@@ -1724,7 +1795,7 @@ class NMRPipeBackend:
                             "The current memory cannot process this spectrum (about {p0} MB "
                             "available, SMILE peak about {p1:.0f} MB); please provide at least "
                             "{p2} GB. You can also narrow the direct-dimension range and turn on "
-                            "\"apply this range to the optimisation\" (the narrower the "
+                            '"apply this range to the optimisation" (the narrower the '
                             "direct-dimension window, the lower the SMILE peak "
                             "memory)",
                             p0=avail_mb,
@@ -1740,8 +1811,7 @@ class NMRPipeBackend:
         max_mem_gb = max(avail_mb * MEM_SAFETY / 1024.0, 1.0)
         logs.append(
             tr(
-                "SMILE Memory limit (-maxMem): {p0:.1f} GB({p1} MB "
-                "available)",
+                "SMILE Memory limit (-maxMem): {p0:.1f} GB({p1} MB available)",
                 p0=max_mem_gb,
                 p1=avail_mb,
             )
@@ -1752,22 +1822,15 @@ class NMRPipeBackend:
         # phase onto recon and cheaply re-renders stage-2 (no SMILE)
         smile_phase = (direct_p0, direct_p1)
         run_display_search = False
-        if (
-            display_phase_search
-            and direct_phase_search
-            and direct_phase_override(params) is None
-        ):
+        if display_phase_search and direct_phase_search and direct_phase_override(params) is None:
             if (work / "phase.json").is_file():
                 try:
-                    data = json.loads(
-                        (work / "phase.json").read_text(encoding="utf-8")
-                    )
+                    data = json.loads((work / "phase.json").read_text(encoding="utf-8"))
                     if data.get("version") == 2:
                         smile_phase = (float(data["p0"]), float(data["p1"]))
                         logs.append(
                             tr(
-                                "direct dimension phase (cache): p0={p0:g} "
-                                "p1={p1:g}",
+                                "direct dimension phase (cache): p0={p0:g} p1={p1:g}",
                                 p0=smile_phase[0],
                                 p1=smile_phase[1],
                             )
@@ -1791,9 +1854,7 @@ class NMRPipeBackend:
         fid_noise = float(params.get("fid_noise", 0.0) or 0.0)
         noise_seed = int(params.get("fid_noise_seed", 0) or 0)
         if fid_noise > 0:
-            noisy_in = self._make_noisy_fid_input(
-                work, in_file, fid_noise, noise_seed, logs
-            )
+            noisy_in = self._make_noisy_fid_input(work, in_file, fid_noise, noise_seed, logs)
             if noisy_in is not None:
                 in_file = noisy_in
         candidate = out_file not in (None, "")
@@ -1820,8 +1881,7 @@ class NMRPipeBackend:
             experiment,
             in_file=in_file,
             nuslist=str(
-                params.get("nuslist_file")
-                or ("nuslist" if (work / "nuslist").is_file() else "")
+                params.get("nuslist_file") or ("nuslist" if (work / "nuslist").is_file() else "")
             ),
             out_file=out_file,
             nthread=nthread,
@@ -1884,9 +1944,7 @@ class NMRPipeBackend:
         # 0.2.199-patch11: a SMILE internal error (e.g. an unapodised direct
         # dimension) can still leave rc=0 in a csh pipeline, so the output is checked
         # explicitly to avoid treating a failed reconstruction as a spectrum
-        smile_err = "SMILE Error" in (
-            (run_result.stdout or "") + (run_result.stderr or "")
-        )
+        smile_err = "SMILE Error" in ((run_result.stdout or "") + (run_result.stderr or ""))
         if smile_err:
             logs.append(
                 tr(
@@ -1899,18 +1957,14 @@ class NMRPipeBackend:
                 "success": False,
                 "message": (
                     tr(
-                    "SMILE Reconstruction failed (internal error: direct dimension needs to be "
-                    "windowed)",
-                )
+                        "SMILE Reconstruction failed (internal error: direct dimension needs to be "
+                        "windowed)",
+                    )
                 ),
                 "logs": logs,
             }
         spectrum = work / out_file
-        if (
-            run_result.returncode != 0
-            or not spectrum.is_file()
-            or spectrum.stat().st_size == 0
-        ):
+        if run_result.returncode != 0 or not spectrum.is_file() or spectrum.stat().st_size == 0:
             return {
                 "success": False,
                 "message": tr("SMILE reconstruction failed / nothing written to {p0}", p0=out_file),
@@ -1932,8 +1986,7 @@ class NMRPipeBackend:
                 p0, p1, score = est
                 logs.append(
                     tr(
-                        "Display layer phase: F2=({p0:g}, {p1:g}) "
-                        "score={p2:.2f}",
+                        "Display layer phase: F2=({p0:g}, {p1:g}) score={p2:.2f}",
                         p0=p0,
                         p1=p1,
                         p2=score,
@@ -1963,13 +2016,8 @@ class NMRPipeBackend:
                         indent=2,
                     ),
                 )
-                if (
-                    abs(((p0 + 180.0) % 360.0) - 180.0) > 2.0
-                    or abs(p1) > 2.0
-                ):
-                    if self._apply_direct_phase(
-                        experiment, work, p0, p1, logs
-                    ):
+                if abs(((p0 + 180.0) % 360.0) - 180.0) > 2.0 or abs(p1) > 2.0:
+                    if self._apply_direct_phase(experiment, work, p0, p1, logs):
                         logs.append(
                             tr(
                                 "final spectrum has been re-rendered according to the display "
@@ -1980,10 +2028,11 @@ class NMRPipeBackend:
             else:
                 logs.append(
                     tr(
-                    "The display layer phase has insufficient confidence or the search failed. "
-                    "Keep the default "
-                    "phase",
-                ))
+                        "The display layer phase has insufficient confidence or the search failed. "
+                        "Keep the default "
+                        "phase",
+                    )
+                )
         if progress is not None:
             progress(tr("SMILE refactoring completed; final spectrum in place"))
         return {
@@ -2024,7 +2073,8 @@ class NMRPipeBackend:
         unaffected). SMILE is a deterministic algorithm, so identical parameters
         give bit-identical reconstructions; injecting a little measurement noise
         makes repeated reconstructions differ, which lets the SMILE optimisation
-        reject spurious peaks through peak stability (0.2.162)."""
+        reject spurious peaks through peak stability (0.2.162).
+        """
         import numpy as np
 
         rng = np.random.default_rng(seed)
@@ -2054,11 +2104,10 @@ class NMRPipeBackend:
             return None
 
     @staticmethod
-    def _write_noisy_fid(
-        src: Path, target: Path, noise_scale: float, rng: Any
-    ) -> None:
+    def _write_noisy_fid(src: Path, target: Path, noise_scale: float, rng: Any) -> None:
         """Read by the nmrPipe fid byte layout, inject noise, write the copy back
-        (real/imaginary blocks)."""
+        (real/imaginary blocks).
+        """
         import nmrglue as ng
         import numpy as np
 
@@ -2068,11 +2117,7 @@ class NMRPipeBackend:
         fdsize = int(float(dic["FDSIZE"]))
         specnum = int(float(dic["FDSPECNUM"]))
         header_len = next(
-            (
-                header
-                for header in (512, 1024, 2048)
-                if len(raw) == header + specnum * fdsize * 8
-            ),
+            (header for header in (512, 1024, 2048) if len(raw) == header + specnum * fdsize * 8),
             None,
         )
         if header_len is None or arr.shape != (specnum, fdsize):
@@ -2082,9 +2127,11 @@ class NMRPipeBackend:
             sigma = float(np.std(np.imag(arr[row]))) if fdsize > 1 else 0.0
             if sigma <= 0:
                 continue
-            noisy[row] = arr[row] + rng.normal(
-                0.0, sigma * noise_scale, fdsize
-            ) + 1j * rng.normal(0.0, sigma * noise_scale, fdsize)
+            noisy[row] = (
+                arr[row]
+                + rng.normal(0.0, sigma * noise_scale, fdsize)
+                + 1j * rng.normal(0.0, sigma * noise_scale, fdsize)
+            )
         out = bytearray(raw[:header_len])
         for row in range(specnum):
             re = np.ascontiguousarray(noisy[row].real, dtype="<f4")
@@ -2182,8 +2229,7 @@ class NMRPipeBackend:
                     holdout_applied = True
                     logs.append(
                         tr(
-                            "Leave sampling point: train={p0} "
-                            "holdout={p1}",
+                            "Leave sampling point: train={p0} holdout={p1}",
                             p0=len(train),
                             p1=len(holdout),
                         )
@@ -2192,17 +2238,13 @@ class NMRPipeBackend:
                     # two; both are accepted and the column count decides how they are
                     # used later (0.2.199-patch29hz-fix10)
                     holdout_coords = [
-                        tuple(int(v) for v in ln.split()[:2])
-                        for ln in holdout
-                        if ln.split()
+                        tuple(int(v) for v in ln.split()[:2]) for ln in holdout if ln.split()
                     ]
         try:
             scripts: list[str] = []
             prod_scripts: list[str] = []
             for combo in combos:
-                resp = self.reconstruct_nus(
-                    experiment, {**base, **combo}, script_only=True
-                )
+                resp = self.reconstruct_nus(experiment, {**base, **combo}, script_only=True)
                 if not resp.get("success") or not resp.get("script"):
                     return {
                         "success": False,
@@ -2216,9 +2258,7 @@ class NMRPipeBackend:
                     prod = self.reconstruct_nus(
                         experiment, {**base_prod, **combo}, script_only=True
                     )
-                    prod_scripts.append(
-                        str(prod.get("script") or resp["script"])
-                    )
+                    prod_scripts.append(str(prod.get("script") or resp["script"]))
                 else:
                     prod_scripts.append(str(resp["script"]))
             prefix, _ = split_nus_script(scripts[0])
@@ -2244,12 +2284,8 @@ class NMRPipeBackend:
                     )
                 if direct_script:
                     task = scan_dir / "step1_direct2d.com"
-                    task.write_text(
-                        direct_script, encoding="utf-8", newline="\n"
-                    )
-                    run0 = runtime.run(
-                        ["csh", task.name], cwd=str(scan_dir), timeout=timeout
-                    )
+                    task.write_text(direct_script, encoding="utf-8", newline="\n")
+                    run0 = runtime.run(["csh", task.name], cwd=str(scan_dir), timeout=timeout)
                     logs.append(tr("step1 2D direct dimension: rc={p0}", p0=run0.returncode))
                     if run0.returncode == 0:
                         direct_2d_file = str(scan_dir / "nus2d" / "direct.ft1")
@@ -2257,20 +2293,20 @@ class NMRPipeBackend:
                 step1 = scan_dir / "step1_direct.com"
                 step1.write_text(prefix, encoding="utf-8", newline="\n")
                 if progress is not None:
-                    progress(0, len(combos), tr(
-                        "direct dimension processing (generating "
-                        "slices)..",
-                    ))
-                run1 = runtime.run(
-                    ["csh", step1.name], cwd=str(scan_dir), timeout=timeout
-                )
+                    progress(
+                        0,
+                        len(combos),
+                        tr(
+                            "direct dimension processing (generating slices)..",
+                        ),
+                    )
+                run1 = runtime.run(["csh", step1.name], cwd=str(scan_dir), timeout=timeout)
                 logs.append(tr("step1 direct dimension: rc={p0}", p0=run1.returncode))
                 if run1.returncode != 0:
                     return {
                         "success": False,
                         "message": tr(
-                            "direct dimension processing failed "
-                            "(rc={p0})",
+                            "direct dimension processing failed (rc={p0})",
                             p0=run1.returncode,
                         ),
                         "logs": logs,
@@ -2289,6 +2325,7 @@ class NMRPipeBackend:
             #   held-out (k0,k1) -> in-plane [k1, k0] (plane = direct-dimension
             #   points, the two axes = indirect dimensions)
             if holdout_file and holdout_coords:
+
                 def _holdout_residual() -> dict[str, float]:
                     import nmrglue as ng
                     import numpy as np
@@ -2331,7 +2368,7 @@ class NMRPipeBackend:
                             _dr, R = ng.pipe.read(str(fr))
                             A = np.asarray(A)
                             R = np.asarray(R)
-                            for (k0, k1) in holdout_coords:
+                            for k0, k1 in holdout_coords:
                                 if not (
                                     0 <= k1 < A.shape[0]
                                     and 0 <= k0 < A.shape[1]
@@ -2347,9 +2384,7 @@ class NMRPipeBackend:
                         # "complex point k -> row 2k (real) / 2k+1 (imaginary) <->
                         # column k of recon"
                         _dd, A2 = ng.pipe.read(direct_2d_file)
-                        _dr2, R2 = ng.pipe.read(
-                            str(scan_dir / "nus2d" / "recon.ft1")
-                        )
+                        _dr2, R2 = ng.pipe.read(str(scan_dir / "nus2d" / "recon.ft1"))
                         A2 = np.asarray(A2)
                         R2 = np.asarray(R2)
                         for (k,) in holdout_coords:
@@ -2370,9 +2405,7 @@ class NMRPipeBackend:
                     scale = float(np.sqrt(np.mean(np.abs(m) ** 2))) or 1.0
                     resid = np.abs(q - m) / scale
                     denom = float(np.linalg.norm(m) * np.linalg.norm(q))
-                    corr = (
-                        float(abs(np.vdot(m, q)) / denom) if denom else 0.0
-                    )
+                    corr = float(abs(np.vdot(m, q)) / denom) if denom else 0.0
                     return {
                         "holdout_rmse": round(float(np.median(resid)), 4),
                         "holdout_rmse_p90": round(float(np.percentile(resid, 90)), 4),
@@ -2383,26 +2416,24 @@ class NMRPipeBackend:
 
             def _scan_suffix(script_text: str, out_name: str) -> str:
                 """Turn a candidate script into the suffix used for this run (the
-                slice form takes only the SMILE + indirect-dimension part)."""
-                part = (
-                    split_nus_script(script_text)[1]
-                    if split_available
-                    else script_text
-                )
+                slice form takes only the SMILE + indirect-dimension part).
+                """
+                part = split_nus_script(script_text)[1] if split_available else script_text
                 return rename_nus_scan_output(part, out_name)
 
-            for index, (combo, script) in enumerate(
-                zip(combos, scripts), start=1
-            ):
+            for index, (combo, script) in enumerate(zip(combos, scripts), start=1):
                 tag = f"cand{index:02d}"
                 if progress is not None:
-                    progress(index, len(combos), tr(
-                        "scanning {p0}/{p1}: "
-                        "{p2}",
-                        p0=index,
-                        p1=len(combos),
-                        p2=combo,
-                    ))
+                    progress(
+                        index,
+                        len(combos),
+                        tr(
+                            "scanning {p0}/{p1}: {p2}",
+                            p0=index,
+                            p1=len(combos),
+                            p2=combo,
+                        ),
+                    )
                 metrics: dict[str, Any] = {}
                 _smile_log = scan_dir / "smile.log"
 
@@ -2424,15 +2455,9 @@ class NMRPipeBackend:
                 # one); the old log is deleted first so a failing round cannot read the
                 # previous round's metrics (fix10)
                 _smile_log.unlink(missing_ok=True)
-                run2 = runtime.run(
-                    ["csh", task.name], cwd=str(scan_dir), timeout=timeout
-                )
+                run2 = runtime.run(["csh", task.name], cwd=str(scan_dir), timeout=timeout)
                 spectrum = scan_dir / f"{tag}.{out_ext}"
-                ok = (
-                    run2.returncode == 0
-                    and spectrum.is_file()
-                    and spectrum.stat().st_size > 0
-                )
+                ok = run2.returncode == 0 and spectrum.is_file() and spectrum.stat().st_size > 0
                 # 0.2.199-patch29hz-fix6: SMILE's per-plane RMS report -> goodness of
                 # fit for the training points (median of FINAL/INITIAL; no
                 # plane-to-grid mapping needed, so it is comparable across parameters)
@@ -2455,9 +2480,7 @@ class NMRPipeBackend:
                             _ratios.append(_fin / _ini)
                     if _ratios:
                         _ratios.sort()
-                        metrics["smile_rms_ratio"] = round(
-                            _ratios[len(_ratios) // 2], 4
-                        )
+                        metrics["smile_rms_ratio"] = round(_ratios[len(_ratios) // 2], 4)
                         metrics["smile_planes"] = len(_ratios)
                 except OSError:
                     pass
@@ -2479,14 +2502,10 @@ class NMRPipeBackend:
                     spectrum.unlink(missing_ok=True)
                 logs.append(
                     tr(
-                        "{p0}: rc={p1} ({p2}) "
-                        "indicator={p3}",
+                        "{p0}: rc={p1} ({p2}) indicator={p3}",
                         p0=tag,
                         p1=run2.returncode,
-                        p2='set aside rebuild' if holdout_file else (
-                        'Full '
-                        'sampling rebuild'
-                    ),
+                        p2="set aside rebuild" if holdout_file else ("Full sampling rebuild"),
                         p3=metrics,
                     )
                 )
@@ -2504,18 +2523,19 @@ class NMRPipeBackend:
             if holdout_file:
                 logs.append(
                     tr(
-                    "scan run mode: hold-out reconstruction (consistency wording; peak count and "
-                    "quality score come from the hold-out "
-                    "reconstruction)",
-                )
+                        "scan run mode: hold-out reconstruction (consistency wording; peak count "
+                        "and "
+                        "quality score come from the hold-out "
+                        "reconstruction)",
+                    )
                 )
             else:
                 logs.append(
                     tr(
-                    "scan run mode: full-sampling reconstruction (net true-peak wording; peak "
-                    "count and quality score come from the final "
-                    "spectrum)",
-                )
+                        "scan run mode: full-sampling reconstruction (net true-peak wording; peak "
+                        "count and quality score come from the final "
+                        "spectrum)",
+                    )
                 )
             n_ok = sum(1 for entry in candidates if entry.get("ok"))
             if not candidates:
@@ -2583,11 +2603,7 @@ class NMRPipeBackend:
             }
         work = Path(work_dir) if work_dir else self._work_path(experiment)
         if planes is None:
-            planes = (
-                "nus3d_rc/test%04d.ft1"
-                if experiment.ndim >= 3
-                else "nus2d/recon.ft1"
-            )
+            planes = "nus3d_rc/test%04d.ft1" if experiment.ndim >= 3 else "nus2d/recon.ft1"
         if experiment.ndim >= 3:
             if not (work / "nus3d_rc").is_dir():
                 return {
@@ -2623,9 +2639,7 @@ class NMRPipeBackend:
             experiment,
             zf_params.get("zero_fill"),
             linewidth_hz=zf_params.get("linewidth_hz"),
-            points_per_line=resolve_points_per_line(
-                zf_params.get("points_per_line")
-            ),
+            points_per_line=resolve_points_per_line(zf_params.get("points_per_line")),
         )
         script = generate_nus_finalize_script(
             experiment,
@@ -2639,21 +2653,13 @@ class NMRPipeBackend:
             window=zf_params.get("window"),
             keep_complex=bool(zf_params.get("keep_complex")),
         )
-        finalize_com = work / (
-            script_name or f"{experiment.dataset_id}_finalize.com"
-        )
+        finalize_com = work / (script_name or f"{experiment.dataset_id}_finalize.com")
         finalize_com.write_text(script, encoding="utf-8", newline="\n")
         runtime = CshRuntime()
-        result = runtime.run(
-            ["csh", finalize_com.name], cwd=str(work), timeout=timeout
-        )
+        result = runtime.run(["csh", finalize_com.name], cwd=str(work), timeout=timeout)
         logs = zero_fill_report(zf_plan) + [f"finalize.com: rc={result.returncode}"]
         spectrum = work / out_file
-        if (
-            result.returncode != 0
-            or not spectrum.is_file()
-            or spectrum.stat().st_size == 0
-        ):
+        if result.returncode != 0 or not spectrum.is_file() or spectrum.stat().st_size == 0:
             return {
                 "success": False,
                 "message": tr("finalize failed / nothing written to {p0}", p0=out_file),
@@ -2708,10 +2714,7 @@ class NMRPipeBackend:
             raise ToolError(tr("proj3D.tcl(NMRPipe projection tool) not found"))
         dic, _ = ng.pipe.read(str(src))
         if labels is None:
-            labels = [
-                str(dic.get(k, "") or "")
-                for k in ("FDF1LABEL", "FDF2LABEL", "FDF3LABEL")
-            ]
+            labels = [str(dic.get(k, "") or "") for k in ("FDF1LABEL", "FDF2LABEL", "FDF3LABEL")]
         # Clear stale .dat files, keeping only this run's output
         for stale in dest.glob("*.dat"):
             stale.unlink(missing_ok=True)
@@ -2731,9 +2734,7 @@ class NMRPipeBackend:
             # 0.2.199-patch29w: duplicate labels (HNN has two 15N) leave proj3D
             # unable to pick an axis by label (measured: bad axis name Y), so fall
             # back to the numpy in-memory projection
-            return self._project_3d_numpy(
-                str(src), dest, prefix=prefix, labels=labels
-            )
+            return self._project_3d_numpy(str(src), dest, prefix=prefix, labels=labels)
         dat_files = sorted(dest.glob("*.dat"))
         outputs: dict[str, str] = {}
         nuclei: dict[str, list[str]] = {}
@@ -2753,8 +2754,7 @@ class NMRPipeBackend:
         if len(outputs) != 3:
             raise ToolError(
                 tr(
-                    "proj3D output parsing exception (expected 3 *.dat, actual {p0}): "
-                    "{p1}",
+                    "proj3D output parsing exception (expected 3 *.dat, actual {p0}): {p1}",
                     p0=len(outputs),
                     p1=[p.name for p in dat_files],
                 )
@@ -2793,8 +2793,7 @@ class NMRPipeBackend:
         if data.ndim != 3:
             raise ToolError(
                 tr(
-                    "Projection requires 3D spectrum: {p0} "
-                    "shape={p1}",
+                    "Projection requires 3D spectrum: {p0} shape={p1}",
                     p0=spectrum_path,
                     p1=data.shape,
                 )
@@ -2826,7 +2825,7 @@ class NMRPipeBackend:
             ):
                 for k, v in dic.items():
                     if str(k).startswith(src_pref):
-                        out[out_pref + str(k)[len(src_pref):]] = v
+                        out[out_pref + str(k)[len(src_pref) :]] = v
                 out[out_pref + "SIZE"] = float(size)
             ngpipe.write(
                 str(path),
@@ -2850,11 +2849,11 @@ class NMRPipeBackend:
             "numpy_fallback": True,
         }
 
-
     @staticmethod
     def _converted_fid_path(work: Path, dataset_id: str) -> Path:
         """Converted fid path: prefer the single file, keep work/fid/ slices
-        compatible."""
+        compatible.
+        """
         single = work / f"{dataset_id}.fid"
         if single.is_file():
             return single
@@ -2866,7 +2865,8 @@ class NMRPipeBackend:
     @staticmethod
     def _merged_fid_in(work: Path, dataset_id: str) -> str | None:
         """in_file of the merged segments: the single file first, otherwise the
-        slice stream (0.2.199-patch28)."""
+        slice stream (0.2.199-patch28).
+        """
         if (work / "merged" / f"{dataset_id}.fid").is_file():
             return f"merged/{dataset_id}.fid"
         slice_dir = work / "merged" / "fid"
@@ -3037,16 +3037,15 @@ class NMRPipeBackend:
                 # inter-part field drift conclusion to be in the record -- a wholly
                 # missing record must not bypass this gate (previously it returned True
                 # first, so old projects were neither validated nor re-run)
-                logs.append(tr(
-                    "No conversion record for a multi-part dataset; converting again so the "
-                    "inter-part field drift is checked",
-                ))
+                logs.append(
+                    tr(
+                        "No conversion record for a multi-part dataset; converting again so the "
+                        "inter-part field drift is checked",
+                    )
+                )
                 return False
             logs.append(
-                tr(
-                    "Reuse converted fid (no conversion record; the raw data is not "
-                    "verified)"
-                )
+                tr("Reuse converted fid (no conversion record; the raw data is not verified)")
             )
             return True
         try:
@@ -3057,9 +3056,11 @@ class NMRPipeBackend:
             )
             return False
         if require_field_drift and "field_drift" not in data:
-            logs.append(tr(
-                "The conversion record has no inter-part field drift check; converting again",
-            ))
+            logs.append(
+                tr(
+                    "The conversion record has no inter-part field drift check; converting again",
+                )
+            )
             return False
         recorded = str(data.get("raw_fingerprint") or "")
         if recorded and recorded != raw_dir_fingerprint(raw_dirs):
@@ -3082,9 +3083,7 @@ class NMRPipeBackend:
         fid = work / f"{dataset_id}.fid"
         size = data.get("fid_size")
         if isinstance(size, int) and fid.is_file() and fid.stat().st_size != size:
-            logs.append(
-                tr("Converted fid {p0} is incomplete; converting again", p0=fid.name)
-            )
+            logs.append(tr("Converted fid {p0} is incomplete; converting again", p0=fid.name))
             return False
         logs.append(tr("Reuse converted fid (skip conversion)"))
         return True
@@ -3188,9 +3187,7 @@ class NMRPipeBackend:
             bruker_ok = False
             bruker = find_tool("bruker", self._bin_dir())
             if bruker is not None:
-                result = runtime.run(
-                    ["bruker", "-AUTO"], cwd=str(convert_dir), timeout=120
-                )
+                result = runtime.run(["bruker", "-AUTO"], cwd=str(convert_dir), timeout=120)
                 logs.append(f"bruker -AUTO ({convert_dir.name}): rc={result.returncode}")
                 if result.returncode == 0 and raw_fid.is_file():
                     # 0.2.91: fid.com goes into process/ (dest_work); raw no longer
@@ -3264,9 +3261,7 @@ class NMRPipeBackend:
                     try:
                         atomic_write_text(
                             dest_work / f"{experiment.dataset_id}.fid_com_corrections.json",
-                            json.dumps(
-                                {"lines": list(corrections)}, ensure_ascii=False, indent=2
-                            )
+                            json.dumps({"lines": list(corrections)}, ensure_ascii=False, indent=2)
                             + "\n",
                         )
                     except OSError:
@@ -3312,7 +3307,10 @@ class NMRPipeBackend:
                 if run_result.returncode != 0:
                     return False
             if not self._finalize_converted_fid(
-                convert_dir, dest_work, experiment.dataset_id, logs,
+                convert_dir,
+                dest_work,
+                experiment.dataset_id,
+                logs,
                 ndim=experiment.ndim,
             ):
                 return False
@@ -3361,10 +3359,9 @@ class NMRPipeBackend:
                 if data.get("version") == 2:
                     logs.append(
                         tr(
-                            "direct dimension phase (cache): p0={p0:g} "
-                            "p1={p1:g}",
-                            p0=data['p0'],
-                            p1=data['p1'],
+                            "direct dimension phase (cache): p0={p0:g} p1={p1:g}",
+                            p0=data["p0"],
+                            p1=data["p1"],
                         )
                     )
                     return float(data["p0"]), float(data["p1"])
@@ -3390,26 +3387,19 @@ class NMRPipeBackend:
         )
         try:
             if "%" in in_file:
-                (light_dir / "fid").symlink_to(
-                    work / "fid", target_is_directory=True
-                )
+                (light_dir / "fid").symlink_to(work / "fid", target_is_directory=True)
             else:
-                (light_dir / Path(in_file).name).symlink_to(
-                    work / Path(in_file).name
-                )
+                (light_dir / Path(in_file).name).symlink_to(work / Path(in_file).name)
         except OSError:
             logs.append(tr("Lightweight SMILE phase search: symbolic link failed, skipped"))
             return None
         nthread = resolve_nthread(params.get("nthread"))
-        ext_lo = resolve_ext_lo(params.get("ext_lo"))
-        ext_hi = resolve_ext_hi(params.get("ext_hi"))
+        ext_lo, ext_hi = resolve_ext_window(experiment, params.get("ext_lo"), params.get("ext_hi"))
         extract = _as_bool(params.get("extract", True))
         baseline = expand_baseline(experiment, params.get("baseline"))
         zero_fill = params.get("zero_fill")
         linewidth_hz = params.get("linewidth_hz")
-        points_per_line = resolve_points_per_line(
-            params.get("points_per_line")
-        )
+        points_per_line = resolve_points_per_line(params.get("points_per_line"))
         if experiment.ndim >= 3:
             script_fn = generate_3d_nus_script
             ext = "ft3"
@@ -3424,8 +3414,7 @@ class NMRPipeBackend:
             experiment,
             in_file=in_file,
             nuslist=str(
-                params.get("nuslist_file")
-                or ("nuslist" if (work / "nuslist").is_file() else "")
+                params.get("nuslist_file") or ("nuslist" if (work / "nuslist").is_file() else "")
             ),
             out_file=out_light,
             nthread=nthread,
@@ -3460,25 +3449,18 @@ class NMRPipeBackend:
         result = runtime.run(["csh", "light.com"], cwd=str(light_dir), timeout=600)
         logs.append(f"light.com: rc={result.returncode}")
         light_ft = light_dir / out_light
-        if (
-            result.returncode != 0
-            or not light_ft.is_file()
-            or light_ft.stat().st_size == 0
-        ):
+        if result.returncode != 0 or not light_ft.is_file() or light_ft.stat().st_size == 0:
             logs.append(
                 tr(
-                "lightweight SMILE phase search failed (falling back to "
-                "NU-DFT/default)",
-            )
+                    "lightweight SMILE phase search failed (falling back to NU-DFT/default)",
+                )
             )
             return None
         try:
             import nmrglue as ng
 
             _dic, data = ng.pipe.read(str(light_ft))
-            est = search_direct_phase_on_spectrum(
-                np.asarray(data), cancel=cancel_requested
-            )
+            est = search_direct_phase_on_spectrum(np.asarray(data), cancel=cancel_requested)
         except Exception as exc:  # noqa: BLE001
             logs.append(tr("Lightweight spectrum scoring failed (fallback): {p0}", p0=exc))
             return None
@@ -3565,11 +3547,7 @@ class NMRPipeBackend:
                 if count > 0:
                     paths = paths[:count]
                 arrays = [read_pipe_complex(path) for path in paths]
-                arr = (
-                    np.stack(arrays, axis=-1)
-                    if len(arrays) > 1
-                    else arrays[0]
-                )
+                arr = np.stack(arrays, axis=-1) if len(arrays) > 1 else arrays[0]
                 logs.append(
                     tr(
                         "Display-layer phase search: all {p0} 3D replica planes take part (direct "
@@ -3597,8 +3575,7 @@ class NMRPipeBackend:
                 return None
             logs.append(
                 tr(
-                    "Display layer phase search: F2=({p0:.1f}, {p1:.1f}) "
-                    "score={p2:.1f}",
+                    "Display layer phase search: F2=({p0:.1f}, {p1:.1f}) score={p2:.1f}",
                     p0=est[0],
                     p1=est[1],
                     p2=est[2],
@@ -3656,9 +3633,9 @@ class NMRPipeBackend:
                 stack = np.stack(arrays, axis=-1)  # (i0, i1, k=direct dimension)
                 n = stack.shape[-1]
                 k = np.arange(n, dtype=float)
-                ramp = np.exp(
-                    1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1))
-                ).reshape(*([1] * (stack.ndim - 1)), n)
+                ramp = np.exp(1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1))).reshape(
+                    *([1] * (stack.ndim - 1)), n
+                )
                 rotated = stack * ramp
                 for path, plane in zip(paths, np.moveaxis(rotated, -1, 0)):
                     dic, _data = ng.pipe.read(str(path))
@@ -3677,9 +3654,9 @@ class NMRPipeBackend:
                 arr = np.asarray(data)
                 n = arr.shape[0]
                 k = np.arange(n, dtype=float)
-                ramp = np.exp(
-                    1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1))
-                ).reshape(n, *([1] * (arr.ndim - 1)))
+                ramp = np.exp(1j * np.deg2rad(p0 + p1 * k / max(n - 1, 1))).reshape(
+                    n, *([1] * (arr.ndim - 1))
+                )
                 rot = arr * ramp
                 out_file = work / "nus2d" / "recon_ph.ft1"
                 ng.pipe.write(
@@ -3689,11 +3666,9 @@ class NMRPipeBackend:
                     overwrite=True,
                 )
                 planes = "nus2d/recon_ph.ft1"
-            resp = self.finalize_nus(
-                experiment, work_dir=work, planes=planes
-            )
+            resp = self.finalize_nus(experiment, work_dir=work, planes=planes)
             if not resp.get("success"):
-                logs.append(tr("finalize rerender failed: {p0}", p0=resp.get('message')))
+                logs.append(tr("finalize rerender failed: {p0}", p0=resp.get("message")))
                 return False
             return True
         except Exception as exc:  # noqa: BLE001
@@ -3743,20 +3718,17 @@ class NMRPipeBackend:
         if phase_file.is_file():
             try:
                 data = json.loads(phase_file.read_text(encoding="utf-8"))
-                if data.get("version") != 2 or (
-                    is_1d and data.get("source") != "1d_self"
-                ):
+                if data.get("version") != 2 or (is_1d and data.get("source") != "1d_self"):
                     raise ValueError(
                         tr(
-                        "Old version cache (algorithm has been updated), need to search "
-                        "again",
-                    ))
+                            "Old version cache (algorithm has been updated), need to search again",
+                        )
+                    )
                 logs.append(
                     tr(
-                        "direct dimension phase (cache): p0={p0:g} "
-                        "p1={p1:g}",
-                        p0=data['p0'],
-                        p1=data['p1'],
+                        "direct dimension phase (cache): p0={p0:g} p1={p1:g}",
+                        p0=data["p0"],
+                        p1=data["p1"],
                     )
                 )
                 return float(data["p0"]), float(data["p1"])
@@ -3884,16 +3856,24 @@ class NMRPipeBackend:
                 # peak), the old result wins, so narrow spectra do not regress.
                 est_old = search_direct_spectrum_phase(spectra)
                 est_sym = search_direct_phase_on_spectrum(
-                    spectra, axis=-1, metric="symmetry",
-                    coarse_p0_step=15.0, radius=12, min_windows=3,
-                    prefer_p1_zero=False, sign_mode="uniform",
+                    spectra,
+                    axis=-1,
+                    metric="symmetry",
+                    coarse_p0_step=15.0,
+                    radius=12,
+                    min_windows=3,
+                    prefer_p1_zero=False,
+                    sign_mode="uniform",
                 )
                 cands: list[tuple[float, float, float, float, float]] = []
                 if est_old is not None:
                     cands.append(
                         (
                             dominant_absorption_ratio(spectra[0], est_old[0], 0.0),
-                            est_old[0], 0.0, float(est_old[2]), float(est_old[3]),
+                            est_old[0],
+                            0.0,
+                            float(est_old[2]),
+                            float(est_old[3]),
                         )
                     )
                 if est_sym is not None:
@@ -3902,8 +3882,10 @@ class NMRPipeBackend:
                             dominant_absorption_ratio(
                                 spectra[0], float(est_sym[0]), float(est_sym[1])
                             ),
-                            float(est_sym[0]), float(est_sym[1]),
-                            float(est_sym[2]), 0.0,
+                            float(est_sym[0]),
+                            float(est_sym[1]),
+                            float(est_sym[2]),
+                            0.0,
                         )
                     )
                 if not cands:
@@ -3929,21 +3911,24 @@ class NMRPipeBackend:
                         indent=2,
                     ),
                 )
-                logs.append(tr(
-                    "1D phase search: p0={p0:g} p1={p1:g} "
-                    "(score={p2:.3f})",
-                    p0=p0,
-                    p1=p1,
-                    p2=score,
-                ))
+                logs.append(
+                    tr(
+                        "1D phase search: p0={p0:g} p1={p1:g} (score={p2:.3f})",
+                        p0=p0,
+                        p1=p1,
+                        p2=score,
+                    )
+                )
                 return p0, p1
             est = search_direct_spectrum_phase(spectra)
             if est is None:
                 logs.append(
                     tr(
-                    "direct dimension phase search: direct dimension spectrum has no signal, keep "
-                    "p0=p1=0",
-                ))
+                        "direct dimension phase search: direct dimension spectrum has no signal, "
+                        "keep "
+                        "p0=p1=0",
+                    )
+                )
                 return 0.0, 0.0
             p0, p1, score, gain = est
             atomic_write_text(
@@ -4000,15 +3985,21 @@ class NMRPipeBackend:
         logs: list[str] = []
         is_nus = experiment.sampling.mode is SamplingMode.NUS
         ok = self._convert_dir(
-            runtime, experiment, raw, work, is_nus, logs,
+            runtime,
+            experiment,
+            raw,
+            work,
+            is_nus,
+            logs,
             fid_com_overrides=fid_com_overrides,
         )
         if not ok and is_nus:
             logs.append(
                 tr(
-                "NUS Conversion requires bruker native recognition (without bruk2pipe "
-                "fallback)",
-            ))
+                    "NUS Conversion requires bruker native recognition (without bruk2pipe "
+                    "fallback)",
+                )
+            )
         return ok, logs
 
     def _split_slices(
@@ -4026,14 +4017,14 @@ class NMRPipeBackend:
         Unused since conversion/merging moved to the single file in
         0.2.199-patch16; kept for compatibility with old working directories and
         for debugging. When out_dir already holds slices the split is skipped
-        (avoiding duplicates or failure)."""
+        (avoiding duplicates or failure).
+        """
         out_dir.mkdir(parents=True, exist_ok=True)
         if _slice_candidates(out_dir, Path(in_file).stem):
             existing = _slice_candidates(out_dir, Path(in_file).stem)
             logs.append(
                 tr(
-                    "slice {p0}: already has slice-form output ({p1}), skip "
-                    "splitting",
+                    "slice {p0}: already has slice-form output ({p1}), skip splitting",
                     p0=out_dir.name,
                     p1=len(existing),
                 )
@@ -4048,7 +4039,7 @@ class NMRPipeBackend:
         logs.append(tr("slice {p0}: rc={p1}", p0=out_dir.name, p1=result.returncode))
         if result.returncode != 0 or not list(out_dir.glob("test*.fid")):
             return False
-        logs.append(tr("Number of slices: {p0}", p0=len(list(out_dir.glob('test*.fid')))))
+        logs.append(tr("Number of slices: {p0}", p0=len(list(out_dir.glob("test*.fid")))))
         return True
 
     def _merge_single_fid(
@@ -4060,14 +4051,13 @@ class NMRPipeBackend:
         logs: list[str],
     ) -> bool:
         """Merge the full-grid single-file fids of every segment pairwise in the time
-        domain with addNMR (following the lab's 2ndAdd.com)."""
+        domain with addNMR (following the lab's 2ndAdd.com).
+        """
         merged = work / "merged"
         if merged.exists():
             shutil.rmtree(merged)  # idempotent: clear any earlier merge first
         merged.mkdir(parents=True)
-        shutil.copy2(
-            work / "seg_001" / f"{dataset_id}.fid", merged / f"{dataset_id}.fid"
-        )
+        shutil.copy2(work / "seg_001" / f"{dataset_id}.fid", merged / f"{dataset_id}.fid")
         for index in range(2, n_segments + 1):
             tmp = work / "merge_tmp"
             if tmp.exists():
@@ -4088,19 +4078,16 @@ class NMRPipeBackend:
                 timeout=600,
             )
             logs.append(f"addNMR seg_{index:03d}: rc={result.returncode}")
-            if result.returncode != 0 or not (
-                tmp / f"{dataset_id}.fid"
-            ).is_file():
+            if result.returncode != 0 or not (tmp / f"{dataset_id}.fid").is_file():
                 return False
             shutil.rmtree(merged)
             shutil.move(str(tmp), str(merged))
         logs.append(
             tr(
-            "Multi-segment merge completed -> merged/{p0}.fid ({p1} "
-            "parts)",
-            p0=dataset_id,
-            p1=n_segments,
-        )
+                "Multi-segment merge completed -> merged/{p0}.fid ({p1} parts)",
+                p0=dataset_id,
+                p1=n_segments,
+            )
         )
         return True
 
@@ -4119,7 +4106,8 @@ class NMRPipeBackend:
         symmetric to _merge_single_fid (single-file merging goes to
         merged/{dataset_id}.fid). 0.2.199-patch29ct: implemented (the call site
         existed but the method was missing, so generating an FID raised
-        AttributeError)."""
+        AttributeError).
+        """
         merged = work / "merged"
         if merged.exists():
             shutil.rmtree(merged)  # idempotent: clear the earlier merge first
@@ -4131,14 +4119,11 @@ class NMRPipeBackend:
         for sl in first_slices:
             shutil.copy2(sl, merged / "fid" / sl.name)
         for index in range(2, n_segments + 1):
-            seg_slices = sorted(
-                (work / f"seg_{index:03d}" / "fid").glob("test*.fid")
-            )
+            seg_slices = sorted((work / f"seg_{index:03d}" / "fid").glob("test*.fid"))
             if len(seg_slices) != len(first_slices):
                 logs.append(
                     tr(
-                        "part {p0} has {p1} slices, inconsistent with first part "
-                        "({p2})",
+                        "part {p0} has {p1} slices, inconsistent with first part ({p2})",
                         p0=index,
                         p1=len(seg_slices),
                         p2=len(first_slices),
@@ -4165,13 +4150,11 @@ class NMRPipeBackend:
                     cwd=str(work),
                     timeout=600,
                 )
-                if result.returncode != 0 or not (
-                    tmp / "fid" / sl.name
-                ).is_file():
+                if result.returncode != 0 or not (tmp / "fid" / sl.name).is_file():
                     ok = False
                     break
             logs.append(
-                tr("addNMR seg_{p0:03d} slice merge: rc={p1}", p0=index, p1='ok' if ok else 'fail')
+                tr("addNMR seg_{p0:03d} slice merge: rc={p1}", p0=index, p1="ok" if ok else "fail")
             )
             if not ok:
                 return False
@@ -4204,15 +4187,7 @@ class NMRPipeBackend:
         directly; the slice form streams PS -rs through xyz2pipe).
         """
         logs: list[str] = []
-        # 2026-09-23 late night (user, d_018): before touching the conversion, check
-        # whether "these parts can be merged" -- differing
-        # TD/SW/O1/SFO1/GRPDLY/FnMODE/PULPROG = refuse to merge (far cheaper than
-        # suspecting it from the spectrum afterwards). Differing NS is only a warning:
-        # per part S is proportional to NS and sigma to sqrt(NS), so the matching
-        # weight w proportional to S/sigma^2 is a constant and a plain sum is the
-        # optimal merge (user 2026-09-24: "adding the fids directly has no weighting
-        # problem either"). The conclusion is archived with the field drift record and
-        # goes into the FID step report.
+        audit = QcAuditLog(work)
         consistency: dict[str, Any] | None = None
         if len(experiment.segments) >= 2:
             consistency = check_segment_consistency(experiment.segments)
@@ -4221,137 +4196,63 @@ class NMRPipeBackend:
                 str(entry.get("key", "")) for entry in consistency.get("blocking") or []
             ]
             if blocking_keys:
-                return False, logs + [tr(
-                    "The parts are not the same experiment ({p0} differs between parts); merging "
-                    "was refused - re-import them with matching acquisition parameters",
-                    p0=", ".join(blocking_keys),
-                )]
+                if "NusTD" in blocking_keys and consistency.get("nus_complementary"):
+                    reason = tr(
+                        "the parts are complementary NUS sampling but their grid NusTD differs "
+                        "({p0}); complementary subsets cannot complete one grid, so merging was "
+                        "refused - check that every part belongs to the same NUS schedule",
+                        p0=", ".join(blocking_keys),
+                    )
+                else:
+                    reason = tr(
+                        "the parts are not the same experiment ({p0} differs between parts); "
+                        "merging was refused - re-import them with matching acquisition parameters",
+                        p0=", ".join(blocking_keys),
+                    )
+                return False, logs + [reason]
         is_nus = experiment.sampling.mode is SamplingMode.NUS
         if is_nus:
-            # 0.2.124: bad points are deleted from the source ser/nuslist with a
-            # backup kept (user request, idempotent)
-            self._clean_source_nus(
-                experiment, [Path(seg) for seg in experiment.segments], logs
-            )
+            self._clean_source_nus(experiment, [Path(seg) for seg in experiment.segments], logs)
         slice_mode = False
         for index, seg_dir in enumerate(experiment.segments, start=1):
             seg_work = work / f"seg_{index:03d}"
             seg_work.mkdir(parents=True, exist_ok=True)
             if not self._convert_dir(
-                runtime, experiment, Path(seg_dir), seg_work, is_nus, logs,
+                runtime,
+                experiment,
+                Path(seg_dir),
+                seg_work,
+                is_nus,
+                logs,
                 fid_com_overrides=fid_com_overrides,
             ):
-                return False, logs + [(
+                return False, logs + [
                     tr(
-                    "data part {p0} ({p1}) conversion "
-                    "failed",
-                    p0=index,
-                    p1=Path(seg_dir).name,
-                )
-                )]
-            seg_single = (
-                seg_work / f"{experiment.dataset_id}.fid"
-            ).is_file()
+                        "data part {p0} ({p1}) conversion failed",
+                        p0=index,
+                        p1=Path(seg_dir).name,
+                    )
+                ]
+            seg_single = (seg_work / f"{experiment.dataset_id}.fid").is_file()
             if not seg_single:
                 slice_mode = True
-                logs.append(tr(
-                    "part {p0}: bruker outputs sliced fid (compatible with "
-                    "merging)",
-                    p0=index,
-                ))
-            shift_hz = shifts[index - 1] if index - 1 < len(shifts) else 0.0
-            if not shift_hz:
-                continue
-            if seg_single:
-                fid_name = f"{experiment.dataset_id}.fid"
-                shifted = seg_work / f"{experiment.dataset_id}_shifted.fid"
-                result = runtime.run(
-                    [
-                        "nmrPipe",
-                        "-in",
-                        fid_name,
-                        "|",
-                        "nmrPipe",
-                        "-fn",
-                        "PS",
-                        "-rs",
-                        f"{shift_hz}Hz",
-                        "-out",
-                        shifted.name,
-                        "-ov",
-                    ],
-                    cwd=str(seg_work),
-                    timeout=600,
-                )
                 logs.append(
                     tr(
-                        "part {p0} frequency shift -rs {p1}Hz: "
-                        "rc={p2}",
+                        "part {p0}: bruker outputs sliced fid (compatible with merging)",
                         p0=index,
-                        p1=shift_hz,
-                        p2=result.returncode,
                     )
                 )
-                if result.returncode == 0 and shifted.is_file():
-                    shifted.replace(seg_work / fid_name)
-            else:
-                # Slice form: PS -rs on the xyz2pipe stream, rewriting the whole batch
-                fid_dir = seg_work / "fid"
-                shifted_dir = seg_work / "fid_shifted"
-                if shifted_dir.exists():
-                    shutil.rmtree(shifted_dir)
-                result = runtime.run(
-                    [
-                        "xyz2pipe",
-                        "-in",
-                        "fid/test%03d.fid",
-                        "-x",
-                        "|",
-                        "nmrPipe",
-                        "-fn",
-                        "PS",
-                        "-rs",
-                        f"{shift_hz}Hz",
-                        "|",
-                        "pipe2xyz",
-                        "-out",
-                        "fid_shifted/test%03d.fid",
-                        "-x",
-                    ],
-                    cwd=str(seg_work),
-                    timeout=600,
-                )
-                logs.append(
-                    tr(
-                        "part {p0} slice-form frequency shift -rs {p1}Hz: "
-                        "rc={p2}",
-                        p0=index,
-                        p1=shift_hz,
-                        p2=result.returncode,
-                    )
-                )
-                if result.returncode == 0 and list(
-                    shifted_dir.glob("test*.fid")
-                ):
-                    shutil.rmtree(fid_dir)
-                    shifted_dir.replace(fid_dir)
-        # 2026-09-23 (user): multiple parts (segmented acquisition / repeated-experiment
-        # averaging) go through the **segment consistency check** first, then the
-        # direct-dimension peaks are aligned, and only then does addNMR sum them --
-        # unaligned field drift broadens or splits the peaks, and "the two parts were
-        # never the same experiment" (differing TD/SW/O1) must refuse the merge
-        # (late-night d_018). With a manual segment_shift_hz the manual values are used
-        # (each part already got its PS -rs above) and no automatic check runs.
         if len(experiment.segments) >= 2:
-            drift_record: dict[str, Any] | None
             if any(shifts):
-                logs.append(tr(
-                    "Manual per-part frequency shift (segment_shift_hz) is set; the automatic "
-                    "inter-part field drift check was skipped",
-                ))
-                # the manual path is archived too: otherwise the reuse test
-                # (require_field_drift) never sees a field drift conclusion and
-                # re-converts the same batch of data every time
+                logs.append(
+                    tr(
+                        "Inter-part field drift: applying the per-part shifts you entered "
+                        "(the automatic check is gone; part 1 is the reference)",
+                    )
+                )
+                applied_record = self._apply_manual_segment_shifts(
+                    runtime, experiment, work, shifts, logs, audit
+                )
                 drift_record = {
                     "checked": False,
                     "reason": "manual-segment-shift",
@@ -4362,21 +4263,24 @@ class NMRPipeBackend:
                         if value
                     },
                     "segment_consistency": consistency,
+                    "applied_hz": applied_record,
                 }
                 write_field_drift_record(work, drift_record)
             else:
-                drift_record = self._correct_group_drift(
-                    runtime, experiment, work, logs, consistency
-                )
-            if drift_record and drift_record.get("blocked"):
-                return False, logs + [tr(
-                    "Inter-part field drift corrections could not be rolled back consistently; "
-                    "merging was refused (a half-corrected merge would be worse than none)",
-                )]
+                drift_record = {
+                    "checked": False,
+                    "reason": "manual-only",
+                    "parts": len(experiment.segments),
+                    "segment_consistency": consistency,
+                }
+                write_field_drift_record(work, drift_record)
         if not slice_mode:
             if not self._merge_single_fid(
-                runtime, work, len(experiment.segments),
-                experiment.dataset_id, logs,
+                runtime,
+                work,
+                len(experiment.segments),
+                experiment.dataset_id,
+                logs,
             ):
                 return False, logs + [tr("Multiple single file merge failed")]
         else:
@@ -4393,9 +4297,7 @@ class NMRPipeBackend:
                         logs,
                     ):
                         return False, logs + [tr("data segment {p0} Slicing failed", p0=index)]
-            if not self._merge_slices(
-                runtime, work, len(experiment.segments), logs
-            ):
+            if not self._merge_slices(runtime, work, len(experiment.segments), logs):
                 return False, logs + [tr("Multiple slice merging failed")]
         return True, logs
 
@@ -4411,368 +4313,156 @@ class NMRPipeBackend:
             inputs.append(sorted((seg_work / "fid").glob("test*.fid")))
         return inputs
 
-    def _apply_segment_shift(
+    def _apply_manual_segment_shifts(
         self,
         runtime: CshRuntime,
         experiment: Experiment,
         work: Path,
-        index: int,
-        shift_hz: float,
-        report: Any,
+        shifts: list[float],
         logs: list[str],
         audit: QcAuditLog,
-    ) -> str | None:
-        """Write one part's drift correction into that part's fid.com and re-convert it.
+    ) -> dict[str, float]:
+        """Apply the user-entered offset to each segment by rewriting its ``fid.com``
+        (``PS -rs <Hz>``) command and re-converting that segment.
 
-        Returns the **pre-edit fid.com text** on success (the all-or-nothing rollback
-        needs it); returns None when any step fails. ``shift_hz`` is the **cumulative**
-        correction: the second round writes "the value already written last round plus
-        this round's residual" into the script, not the residual alone -- a plain
-        replacement would shrink the correction in the second round (bug fixed
-        2026-09-23).
+        Automatic inter-segment field-drift correction has been replaced by manual
+        offsets. Segment 1 is the reference (``shifts[0]`` remains zero and receives
+        no ``PS -rs``); each later segment has one value in Hz. Unspecified segments
+        (0.0) are unchanged. There is no all-or-nothing rollback: the supplied manual
+        values are authoritative, and a failed segment is reported while processing
+        continues for the others. Unlike the automatic path, no programmatic decision
+        is being made here.
+
+        Returns ``{segment_number: applied_hz}`` for segments that were actually changed.
         """
-        seg_work = work / f"seg_{index + 1:03d}"
-        fid_com = seg_work / "fid.com"
-        raw_dir = Path(experiment.segments[index])
-        if not fid_com.is_file():
-            logs.append(tr(
-                "part {p0}: fid.com not found, field drift correction skipped",
-                p0=index + 1,
-            ))
-            return None
-        try:
-            original = fid_com.read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
-            logs.append(tr(
-                "part {p0}: fid.com could not be read ({p1}); field drift correction skipped",
-                p0=index + 1,
-                p1=exc,
-            ))
-            return None
-        patched, applied = insert_ps_shift(original, shift_hz)
-        if not applied:
-            logs.append(tr(
-                "part {p0}: no MULT line in fid.com, field drift correction skipped",
-                p0=index + 1,
-            ))
-            return None
-        try:
-            fid_com.write_text(patched, encoding="utf-8", newline="\n")
-        except OSError as exc:
-            logs.append(tr(
-                "part {p0}: fid.com could not be written ({p1}); field drift correction skipped",
-                p0=index + 1,
-                p1=exc,
-            ))
-            return None
-        # Same convention as _convert_dir: fid.com lives in the part work directory and its
-        # relative paths (./ser) resolve against the original conversion directory.
-        # 2026-09-24 review B6/B7: on failure (including an exception from the runtime,
-        # e.g. the TaskTerminatedError of a user "stop") fid.com is restored to its
-        # pre-edit text -- otherwise the script keeps PS -rs while the data is stale, and
-        # the record still says "not corrected".
-        def _restore(reason: str) -> None:
-            try:
-                fid_com.write_text(original, encoding="utf-8", newline="\n")
-                logs.append(tr(
-                    "part {p0}: the field drift correction was rolled back ({p1})",
-                    p0=index + 1,
-                    p1=reason,
-                ))
-            except OSError as exc:  # noqa: BLE001 - a failed restore must still be reported
-                logs.append(tr(
-                    "part {p0}: the field drift correction could not be rolled back ({p1})",
-                    p0=index + 1,
-                    p1=exc,
-                ))
-
-        try:
-            result = runtime.run(["csh", str(fid_com)], cwd=str(raw_dir), timeout=900)
-        except Exception as exc:  # noqa: BLE001 - an interrupt must not leave half-changed state
-            logs.append(tr(
-                "part {p0} field drift re-conversion failed: {p1}",
-                p0=index + 1,
-                p1=exc,
-            ))
-            _restore(f"{type(exc).__name__}: {exc}")
-            return None
-        logs.append(tr(
-            "part {p0} field drift re-conversion -rs {p1}Hz: rc={p2}",
-            p0=index + 1,
-            p1=f"{shift_hz:.4f}",
-            p2=result.returncode,
-        ))
-        if result.returncode != 0:
-            _restore(f"rc={result.returncode}")
-            return None
-        if not self._finalize_converted_fid(
-            raw_dir, seg_work, experiment.dataset_id, logs, ndim=experiment.ndim
-        ):
-            _restore("the converted fid could not be moved into place")
-            return None
-        audit.record(
-            QcAction(
-                issue_detected=tr("inter-part direct-dimension field drift"),
-                location=f"seg_{index + 1:03d}/fid.com",
-                # 2026-09-24 re-check: the audit's detection_rule must state the
-                # criterion that **actually applied** -- it changed from "1 FFT point" to
-                # max(1.5 Hz, 0.2 x line width), and archiving the old convention would
-                # disconnect the record from the behaviour.
-                detection_rule=criterion_rule_text(report),
-                action_taken="fid_com_ps_rs_shift",
-                before_state={
-                    "shift_hz": 0.0,
-                    "offset_hz": round(float(report.offsets_hz[index] or 0.0), 4),
-                    "offset_ppm": round(float(report.offsets_ppm[index] or 0.0), 5),
-                },
-                after_state={"shift_hz": round(float(shift_hz), 4)},
-                extra={"file": "fid.com", "part": index + 1},
-            )
-        )
-        return original
-
-    def _rollback_segment_shifts(
-        self,
-        runtime: CshRuntime,
-        experiment: Experiment,
-        work: Path,
-        saved: dict[int, str],
-        logs: list[str],
-    ) -> bool:
-        """Restore the rewritten parts to their original fid.com and convert again
-        (guaranteeing "either all corrected or none corrected").
-
-        Returns False when any restore fails -- the caller then blocks the merge: a
-        half-corrected merge input (addNMR shifted some parts and not others) is worse
-        than no correction at all, which is exactly what made the d_018 spectrum "very
-        strange".
-        """
-        ok_all = True
-        for index in sorted(saved):
+        applied: dict[str, float] = {}
+        for index, value in enumerate(shifts):
+            if index == 0:
+                continue
+            shift_hz = float(value or 0.0)
+            if shift_hz == 0.0:
+                continue
+            if not math.isfinite(shift_hz):
+                logs.append(
+                    tr(
+                        "part {p0}: the shift {p1} Hz is not a finite number; skipped",
+                        p0=index + 1,
+                        p1=value,
+                    )
+                )
+                continue
             seg_work = work / f"seg_{index + 1:03d}"
             fid_com = seg_work / "fid.com"
             raw_dir = Path(experiment.segments[index])
-            try:
-                fid_com.write_text(saved[index], encoding="utf-8", newline="\n")
-            except OSError as exc:
-                logs.append(tr(
-                    "part {p0}: the field drift correction could not be rolled back ({p1})",
-                    p0=index + 1,
-                    p1=exc,
-                ))
-                ok_all = False
+            if not fid_com.is_file():
+                logs.append(
+                    tr(
+                        "part {p0}: fid.com not found, the shift was not applied",
+                        p0=index + 1,
+                    )
+                )
                 continue
+            try:
+                original = fid_com.read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                logs.append(
+                    tr(
+                        "part {p0}: fid.com could not be read ({p1}); the shift was not applied",
+                        p0=index + 1,
+                        p1=exc,
+                    )
+                )
+                continue
+            patched, ok = insert_ps_shift(original, shift_hz)
+            if not ok:
+                logs.append(
+                    tr(
+                        "part {p0}: no MULT line in fid.com, the shift could not be applied",
+                        p0=index + 1,
+                    )
+                )
+                continue
+            try:
+                fid_com.write_text(patched, encoding="utf-8", newline="\n")
+            except OSError as exc:
+                logs.append(
+                    tr(
+                        "part {p0}: fid.com could not be written ({p1}); the shift was not applied",
+                        p0=index + 1,
+                        p1=exc,
+                    )
+                )
+                continue
+
+            def _restore(reason: str) -> None:
+                try:
+                    fid_com.write_text(original, encoding="utf-8", newline="\n")
+                    logs.append(
+                        tr(
+                            "part {p0}: the shift was rolled back ({p1})",
+                            p0=index + 1,
+                            p1=reason,
+                        )
+                    )
+                except OSError as exc:
+                    logs.append(
+                        tr(
+                            "part {p0}: the shift could not be rolled back ({p1})",
+                            p0=index + 1,
+                            p1=exc,
+                        )
+                    )
+
             try:
                 result = runtime.run(["csh", str(fid_com)], cwd=str(raw_dir), timeout=900)
-            except Exception as exc:  # noqa: BLE001 - report an interrupt as a failure too
-                logs.append(tr(
-                    "part {p0}: the field drift rollback failed: {p1}",
-                    p0=index + 1,
-                    p1=exc,
-                ))
-                ok_all = False
+            except Exception as exc:
+                logs.append(
+                    tr(
+                        "part {p0} re-conversion failed: {p1}",
+                        p0=index + 1,
+                        p1=exc,
+                    )
+                )
+                _restore(f"{type(exc).__name__}: {exc}")
                 continue
-            logs.append(tr(
-                "part {p0} drift correction rolled back (fid.com restored): rc={p1}",
-                p0=index + 1,
-                p1=result.returncode,
-            ))
-            if result.returncode != 0 or not self._finalize_converted_fid(
+            logs.append(
+                tr(
+                    "part {p0} re-converted with PS -rs {p1}Hz: rc={p2}",
+                    p0=index + 1,
+                    p1=f"{shift_hz:.4f}",
+                    p2=result.returncode,
+                )
+            )
+            if result.returncode != 0:
+                _restore(f"rc={result.returncode}")
+                continue
+            if not self._finalize_converted_fid(
                 raw_dir, seg_work, experiment.dataset_id, logs, ndim=experiment.ndim
             ):
-                ok_all = False
-        return ok_all
-
-    def _correct_group_drift(
-        self,
-        runtime: CshRuntime,
-        experiment: Experiment,
-        work: Path,
-        logs: list[str],
-        consistency: dict[str, Any] | None = None,
-    ) -> dict[str, Any] | None:
-        """Inter-part field drift: measure each part's offset from the reference part and,
-        when it is over the criterion, patch that part's fid.com (PS -rs) and re-convert,
-        then re-check.
-
-        Reference = part 1; the criterion is **linewidth-based** (see
-        ``workflow/field_drift``): the correction only happens when the offset exceeds
-        ``max(1.5 Hz, 0.2 x linewidth)`` (a relative broadening above 2% is what
-        measurably affects the peak shape); "measurable" must first pass a coherence
-        statistic against a shuffled per-trace phase control and then a random-half
-        resampling stability gate; a part that cannot be measured is only reported, never
-        corrected, and never recorded as "within the criterion". The result is written to
-        ``work/field_drift.json`` (the conversion provenance carries it into
-        ``*.fid.conversion.json``) and every patched part is recorded separately in the
-        QC audit.
-
-        **all-or-nothing** (user 2026-09-23, after d_018 "some were corrected and some
-        were not, and they were all merged anyway"): the parts over the criterion are
-        either all corrected or none is -- if one part fails mid-way, the parts already
-        changed are rolled back to uncorrected and reported honestly; only when the
-        rollback also fails is ``blocked`` set, and the caller then refuses the merge.
-        """
-        parts = len(experiment.segments)
-        axes = direct_axis_hz(experiment)
-        if axes is None:
-            logs.append(tr(
-                "Inter-part field drift check skipped (direct-dimension SW/OBS unknown)",
-            ))
-            write_field_drift_record(
-                work, {"checked": False, "reason": "direct-axis-unknown"}
-            )
-            return None
-        sw_hz, sf_mhz = axes
-        audit = QcAuditLog(work)
-        record: dict[str, Any] = {
-            "checked": True,
-            "reference": 1,
-            "parts": parts,
-            "sw_hz": round(sw_hz, 3),
-            "hz_min": DRIFT_HZ_MIN,
-            "points_min": DRIFT_POINTS_MIN,
-            "ppm_reference": DRIFT_PPM_THRESHOLD,
-            "rounds": [],
-            "corrected_parts": [],
-            "applied_shift_hz": {},
-            "segment_consistency": consistency,
-            "merge": {
-                "parts": parts,
-                "policy": "all-or-nothing",
-                "corrected_parts": [],
-                "uncorrected_parts": [],
-                "blocked": False,
-            },
-        }
-        applied: dict[int, float] = {}
-        saved: dict[int, str] = {}
-        needed: set[int] = set()
-        last: GroupDriftResult | None = None
-        for round_index in range(1, MAX_ROUNDS + 1):
-            inputs = self._segment_fid_inputs(work, experiment)
-            if any(not paths for paths in inputs):
-                logs.append(tr(
-                    "Inter-part field drift check skipped: a part has no converted fid",
-                ))
-                record["checked"] = False
-                record["reason"] = "missing-part-fid"
-                last = None
-                break
-            report = detect_group_drift(inputs, sw_hz=sw_hz, sf_mhz=sf_mhz)
-            logs += report.reports
-            record["rounds"].append(report.as_dict())
-            last = report
-            if not report.needs_shift:
-                break
-            needed.update(report.needs_shift)
-            failed: list[int] = []
-            for index, residual_hz in sorted(report.needs_shift.items()):
-                target = float(residual_hz) + applied.get(index, 0.0)
-                original = self._apply_segment_shift(
-                    runtime, experiment, work, index, target, report, logs, audit
+                _restore("the converted fid could not be moved into place")
+                continue
+            applied[str(index + 1)] = round(shift_hz, 4)
+            audit.record(
+                QcAction(
+                    issue_detected=tr("inter-part direct-dimension field drift"),
+                    location=f"seg_{index + 1:03d}/fid.com",
+                    detection_rule=tr(
+                        "the shift was entered by the user (part 1 is the reference)"
+                    ),
+                    action_taken="fid_com_ps_rs_shift",
+                    before_state={"shift_hz": 0.0},
+                    after_state={"shift_hz": round(shift_hz, 4)},
+                    extra={"file": "fid.com", "part": index + 1, "source": "manual"},
                 )
-                if original is None:
-                    failed.append(index)
-                    continue
-                saved.setdefault(index, original)
-                applied[index] = target
-            if failed and applied:
-                logs.append(tr(
-                    "Inter-part field drift: {p0} part(s) could not be corrected while {p1} "
-                    "part(s) were already shifted; rolling every correction back so the merged "
-                    "parts share the same (uncorrected) frequency axis",
-                    p0=len(failed),
-                    p1=len(applied),
-                ))
-                if not self._rollback_segment_shifts(
-                    runtime, experiment, work, saved, logs
-                ):
-                    record["blocked"] = True
-                    record["merge"]["blocked"] = True
-                    break
-                applied.clear()
-                saved.clear()
-                record["rolled_back"] = True
-                break
-            if failed:
-                logs.append(tr(
-                    "Inter-part field drift: none of the {p0} part(s) above the criterion could "
-                    "be corrected; they are merged without a frequency shift",
-                    p0=len(failed),
-                ))
-                break
-            if round_index == MAX_ROUNDS:
-                # the last round changed things too -> measure once more for the
-                # **post-change** true residual (no further correction)
-                inputs = self._segment_fid_inputs(work, experiment)
-                if not any(not paths for paths in inputs):
-                    verify = detect_group_drift(inputs, sw_hz=sw_hz, sf_mhz=sf_mhz)
-                    record["rounds"].append(verify.as_dict())
-                    last = verify
-                break
-        if last is not None:
-            criterion = float(last.criterion_hz or DRIFT_HZ_MIN)
-            largest = last.largest_offset()
-            record["point_hz"] = (
-                last.point_hz if last.point_hz is None else round(last.point_hz, 4)
             )
-            record["criterion_hz_after"] = round(criterion, 4)
-            record["linewidth_hz"] = (
-                None if last.linewidth_hz is None else round(last.linewidth_hz, 3)
+        if not applied:
+            logs.append(
+                tr(
+                    "Inter-part field drift: no part was given a shift, so every fid.com was left "
+                    "untouched",
+                )
             )
-            record["criterion_basis"] = last.criterion_basis
-            # only **trustworthy** measurements are counted: skipped parts leave
-            # noise-level numbers (see GroupDriftResult)
-            record["max_abs_hz_after"] = (
-                None if largest is None else round(abs(largest[1]), 4)
-            )
-            record["max_abs_ppm_after"] = (
-                None if largest is None else round(abs(largest[0]), 5)
-            )
-            # same convention as the **measured offset** (the old implementation wrote
-            # "whether this round needs another correction", so a measured 4.0 Hz already
-            # past the 1.5 Hz criterion still wrote within_threshold_after: true --
-            # self-contradictory)
-            record["within_threshold_after"] = last.within_criterion()
-        corrected_parts = sorted(index + 1 for index in applied)
-        uncorrected_parts = sorted(
-            index + 1 for index in needed if index not in applied
-        )
-        record["corrected_parts"] = corrected_parts
-        record["applied_shift_hz"] = {
-            str(index + 1): round(float(value), 4)
-            for index, value in sorted(applied.items())
-        }
-        record["merge"]["corrected_parts"] = corrected_parts
-        record["merge"]["uncorrected_parts"] = uncorrected_parts
-        if record.get("blocked"):
-            logs.append(tr(
-                "Inter-part field drift: the corrections could not be rolled back consistently; "
-                "merging was refused",
-            ))
-        elif uncorrected_parts:
-            logs.append(tr(
-                "Merging {p0} part(s): inter-part field drift was not corrected for {p1} part(s) "
-                "({p2}) - every part was merged without a frequency shift so the merged data "
-                "stays internally consistent",
-                p0=parts,
-                p1=len(uncorrected_parts),
-                p2=", ".join(str(part) for part in uncorrected_parts),
-            ))
-        elif corrected_parts:
-            logs.append(tr(
-                "Merging {p0} part(s): part(s) {p1} were corrected for inter-part field drift, "
-                "the rest were within the criterion",
-                p0=parts,
-                p1=", ".join(str(part) for part in corrected_parts),
-            ))
-        else:
-            logs.append(tr(
-                "Merging {p0} part(s): no inter-part field drift correction was applied",
-                p0=parts,
-            ))
-        write_field_drift_record(work, record)
-        return record
+        return applied
 
     def _clean_source_nus(
         self,
@@ -4800,12 +4490,14 @@ class NMRPipeBackend:
         caller falls back to clearing the generated FID).
         """
         per_dir: list[list[tuple[int, ...]]] = []
+        schedule_paths: list[Path | None] = []
         entries: list[tuple[int, int, tuple[int, ...]]] = []
         for dir_idx, raw_dir in enumerate(raw_dirs):
-            nuslist_path = Path(raw_dir) / "nuslist"
+            nuslist_path, _source = self._resolve_schedule_file(Path(raw_dir), experiment, logs)
+            schedule_paths.append(nuslist_path)
             pts = (
                 [tuple(p) for p in read_nuslist(nuslist_path)]
-                if nuslist_path.is_file()
+                if nuslist_path is not None and nuslist_path.is_file()
                 else []
             )
             per_dir.append(pts)
@@ -4819,10 +4511,7 @@ class NMRPipeBackend:
             try:
                 from core.data.bruker_reader import classify_segment_kind
 
-                repeat = (
-                    classify_segment_kind([Path(p) for p in raw_dirs])
-                    == "repeat_nus"
-                )
+                repeat = classify_segment_kind([Path(p) for p in raw_dirs]) == "repeat_nus"
             except Exception:  # noqa: BLE001 - conservative: treat a failure as segmented
                 repeat = False
         if repeat:
@@ -4861,7 +4550,9 @@ class NMRPipeBackend:
             if not drop_rows:
                 continue
             raw_dir = Path(raw_dirs[dir_idx])
-            nuslist_path = raw_dir / "nuslist"
+            nuslist_path = schedule_paths[dir_idx]
+            if nuslist_path is None:
+                continue
             data_file = raw_dir / "ser"
             if not data_file.is_file():
                 logs.append(
@@ -4915,8 +4606,7 @@ class NMRPipeBackend:
                     shutil.copy2(data_file, backup)
                     logs.append(
                         tr(
-                            "The source ser has been backed up -> {p0}/ser.bak ({p1} "
-                            "bytes)",
+                            "The source ser has been backed up -> {p0}/ser.bak ({p1} bytes)",
                             p0=raw_dir.name,
                             p1=data_size,
                         )
@@ -4929,9 +4619,8 @@ class NMRPipeBackend:
                 )
                 tmp = raw_dir / "ser.tmp"
                 tmp.write_bytes(kept_bytes)
-                os.replace(tmp, data_file)  # breaks hard/symbolic links; the
-                # external original is untouched
-                nus_backup = raw_dir / "nuslist.bak"
+                os.replace(tmp, data_file)
+                nus_backup = nuslist_path.with_name(nuslist_path.name + ".bak")
                 if not nus_backup.exists():
                     shutil.copy2(nuslist_path, nus_backup)
                 text = "".join(
@@ -4939,31 +4628,34 @@ class NMRPipeBackend:
                     for i, p in enumerate(per_dir[dir_idx])
                     if i not in drop_rows
                 )
-                nus_tmp = raw_dir / "nuslist.tmp"
+                nus_tmp = nuslist_path.with_name(nuslist_path.name + ".tmp")
                 nus_tmp.write_text(text, encoding="utf-8", newline="\n")
                 os.replace(nus_tmp, nuslist_path)
                 removed_any = True
                 cleaned_dirs.add(dir_idx)
                 logs.append(
                     tr(
-                        "Source cleanup {p0}: nuslist {p1} → {p2} OK, ser {p3} → {p4} bytes "
+                        "Source cleanup {p0}: {p1} {p2} → {p3} OK, ser {p4} → {p5} bytes "
                         "(backup "
                         ".bak)",
                         p0=raw_dir.name,
-                        p1=n_rows,
-                        p2=n_rows - len(drop_rows),
-                        p3=data_size,
-                        p4=len(kept_bytes),
+                        p1=nuslist_path.name,
+                        p2=n_rows,
+                        p3=n_rows - len(drop_rows),
+                        p4=data_size,
+                        p5=len(kept_bytes),
                     )
                 )
             except OSError as exc:  # noqa: BLE001 - a failed cleanup must not block
                 logs.append(
                     tr(
-                    "⚠ {p0} source cleanup failed ({p1}), falling back to cleaning the generated "
-                    "FID",
-                    p0=raw_dir.name,
-                    p1=exc,
-                ))
+                        "⚠ {p0} source cleanup failed ({p1}), falling back to cleaning the "
+                        "generated "
+                        "FID",
+                        p0=raw_dir.name,
+                        p1=exc,
+                    )
+                )
         for point in bad:
             owners = {dir_idx for dir_idx, _row, value in entries if value == point}
             detail = ", ".join(reasons.get(point, []) or [tr("unknown")])
@@ -5011,30 +4703,27 @@ class NMRPipeBackend:
         point).
         """
         all_points: list[tuple[int, ...]] = []
+        per_segment: list[list[tuple[int, ...]]] = []
         for seg_dir in segment_dirs:
-            nuslist_path = Path(seg_dir) / "nuslist"
-            if nuslist_path.is_file():
-                all_points += [tuple(p) for p in read_nuslist(nuslist_path)]
+            nuslist_path, _source = self._resolve_schedule_file(Path(seg_dir), experiment, logs)
+            points = (
+                [tuple(p) for p in read_nuslist(nuslist_path)]
+                if nuslist_path is not None and nuslist_path.is_file()
+                else []
+            )
+            per_segment.append(points)
+            all_points += points
         repeat = False
         if len(segment_dirs) > 1:
             try:
                 from core.data.bruker_reader import classify_segment_kind
 
-                repeat = (
-                    classify_segment_kind([Path(p) for p in segment_dirs])
-                    == "repeat_nus"
-                )
+                repeat = classify_segment_kind([Path(p) for p in segment_dirs]) == "repeat_nus"
             except Exception:  # noqa: BLE001 - conservative: treat a failure as segmented
                 repeat = False
         if repeat:
             valid, bad, reasons = [], [], {}
-            for seg_dir in segment_dirs:
-                nl_path = Path(seg_dir) / "nuslist"
-                seg_pts = (
-                    [tuple(p) for p in read_nuslist(nl_path)]
-                    if nl_path.is_file()
-                    else []
-                )
+            for seg_pts in per_segment:
                 v, b, r = _validate_nus_points(seg_pts, experiment)
                 valid += v
                 for point in b:
@@ -5053,10 +4742,9 @@ class NMRPipeBackend:
         for point in bad:
             logs.append(
                 tr(
-                    "⚠ Sampling bad point detected {p0}:{p1},dropped from the merged "
-                    "nuslist",
+                    "⚠ Sampling bad point detected {p0}:{p1},dropped from the merged nuslist",
                     p0=point,
-                    p1=','.join(reasons.get(point, []) or ['unknown']),
+                    p1=",".join(reasons.get(point, []) or ["unknown"]),
                 )
             )
         text = "".join(" ".join(str(v) for v in point) + "\n" for point in valid)
@@ -5065,17 +4753,21 @@ class NMRPipeBackend:
         # contradiction): this line reports how many were dropped **during this merge**, not how
         # many were deleted in total
         if bad:
-            logs.append(tr(
-                "Merge nuslist:{p0} sampling point (another {p1} bad point(s) dropped in "
-                "this merge)",
-                p0=len(valid),
-                p1=len(bad),
-            ))
+            logs.append(
+                tr(
+                    "Merge nuslist:{p0} sampling point (another {p1} bad point(s) dropped in "
+                    "this merge)",
+                    p0=len(valid),
+                    p1=len(bad),
+                )
+            )
         else:
-            logs.append(tr(
-                "Merge nuslist:{p0} sampling point (no new bad point in this step)",
-                p0=len(valid),
-            ))
+            logs.append(
+                tr(
+                    "Merge nuslist:{p0} sampling point (no new bad point in this step)",
+                    p0=len(valid),
+                )
+            )
         return len(valid), bad
 
     def _zero_bad_point_fid(
@@ -5138,11 +4830,12 @@ class NMRPipeBackend:
             elif f1 is None and base is not None and base.is_file():
                 targets = [base]
             if not targets:
-                logs.append(tr(
-                    "⚠ bad point {p0}:No corresponding FID file, no need to "
-                    "clean",
-                    p0=point,
-                ))
+                logs.append(
+                    tr(
+                        "⚠ bad point {p0}:No corresponding FID file, no need to clean",
+                        p0=point,
+                    )
+                )
                 continue
             for target in targets:
                 try:
@@ -5154,10 +4847,10 @@ class NMRPipeBackend:
                     if not rows:
                         logs.append(
                             tr(
-                            "⚠ bad point {p0}:The line is out of bounds, no need to clean "
-                            "up",
-                            p0=point,
-                        ))
+                                "⚠ bad point {p0}:The line is out of bounds, no need to clean up",
+                                p0=point,
+                            )
+                        )
                         continue
                     arr[rows, :] = 0
                     ng.pipe.write(str(target), dic, arr, overwrite=True)
@@ -5179,7 +4872,8 @@ class NMRPipeBackend:
     ) -> tuple[int, list[tuple[int, ...]]]:
         """Validate and clean the working-directory nuslist (single NUS data):
         drop bad points and warn with a ⚠ marker. Returns (valid point count,
-        bad-point list)."""
+        bad-point list).
+        """
         nuslist_path = work / "nuslist"
         if not nuslist_path.is_file():
             return 0, []
@@ -5195,17 +4889,17 @@ class NMRPipeBackend:
                         "corresponding FID cleaned "
                         "up",
                         p0=point,
-                        p1=','.join(reasons.get(point, []) or ['unknown']),
+                        p1=",".join(reasons.get(point, []) or ["unknown"]),
                     )
                 )
             logs.append(
                 tr(
-                "nuslist cleanup: {p0} → {p1} sampling point (bad point "
-                "{p2})",
-                p0=len(points),
-                p1=len(valid),
-                p2=len(bad),
-            ))
+                    "nuslist cleanup: {p0} → {p1} sampling point (bad point {p2})",
+                    p0=len(points),
+                    p1=len(valid),
+                    p2=len(bad),
+                )
+            )
         return len(valid), bad
 
     # ------------------------------------------------------------- processing
@@ -5283,13 +4977,14 @@ class NMRPipeBackend:
                 ext_hi=ext_hi,
                 sampling=sampling,
                 keep_direct_complex=keep_complex_all or keep_direct_complex,
-                complex_axes=(frozenset(dim.logical_axis for dim in experiment.dimensions)
-                              if keep_complex_all else None),
+                complex_axes=(
+                    frozenset(dim.logical_axis for dim in experiment.dimensions)
+                    if keep_complex_all
+                    else None
+                ),
                 direct_poly_time=direct_poly_time,
             )
-        process_com = work / (
-            script_name or f"{experiment.dataset_id}_process.com"
-        )
+        process_com = work / (script_name or f"{experiment.dataset_id}_process.com")
         process_com.write_text(script, encoding="utf-8", newline="\n")
         run_result = runtime.run(
             ["csh", process_com.name],
@@ -5299,11 +4994,7 @@ class NMRPipeBackend:
         )
         logs.append(f"process.com: rc={run_result.returncode}")
         spectrum = work / out_file
-        if (
-            run_result.returncode != 0
-            or not spectrum.is_file()
-            or spectrum.stat().st_size == 0
-        ):
+        if run_result.returncode != 0 or not spectrum.is_file() or spectrum.stat().st_size == 0:
             return False, logs + [tr("Not generated {p0}", p0=out_file)], spectrum
         logs.append(tr("spectrum -> {p0}", p0=spectrum))
         return True, logs, spectrum

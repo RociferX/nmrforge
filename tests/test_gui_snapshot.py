@@ -60,18 +60,12 @@ def test_snapshot_step_writes_scripts_and_params(tmp_path: Path) -> None:
 
 def test_snapshot_step_skips_when_already_snapshotted(tmp_path: Path) -> None:
     manager, exp_id, data_id = _manager_with_data(tmp_path)
-    run = manager.start_run(
-        exp_id, workflow_ref="process", inputs={"data_id": data_id}
-    )
+    run = manager.start_run(exp_id, workflow_ref="process", inputs={"data_id": data_id})
     manager.finish_run(run.run_id, "success")
     controller = ProcessingController(manager)
-    first = controller._snapshot_step(
-        exp_id, data_id, ("process",), {"process.com": "v1"}
-    )
+    first = controller._snapshot_step(exp_id, data_id, ("process",), {"process.com": "v1"})
     assert first
-    second = controller._snapshot_step(
-        exp_id, data_id, ("process",), {"process.com": "v2"}
-    )
+    second = controller._snapshot_step(exp_id, data_id, ("process",), {"process.com": "v2"})
     assert second == ""
     snapshot_dir = manager.root / run.snapshot_dir
     assert "v1" in (snapshot_dir / "process.com").read_text(encoding="utf-8")
@@ -87,13 +81,9 @@ def test_snapshot_step_filters_by_data_id(tmp_path: Path) -> None:
     """Multi-sample data experiment type: snapshot only the most recent run matching data_id."""
     manager, exp_id, _data_id = _manager_with_data(tmp_path)
     manager.import_data(exp_id, "/fake/2")  # d_002
-    run2 = manager.start_run(
-        exp_id, workflow_ref="process", inputs={"data_id": "d_002"}
-    )
+    run2 = manager.start_run(exp_id, workflow_ref="process", inputs={"data_id": "d_002"})
     manager.finish_run(run2.run_id, "success")
-    run1 = manager.start_run(
-        exp_id, workflow_ref="process", inputs={"data_id": "d_001"}
-    )
+    run1 = manager.start_run(exp_id, workflow_ref="process", inputs={"data_id": "d_001"})
     manager.finish_run(run1.run_id, "success")
 
     controller = ProcessingController(manager)
@@ -125,9 +115,7 @@ def test_spectrum_scripts_helper(tmp_path: Path) -> None:
     assert set(scripts) == {"process.com", "nus.com"}
 
 
-def test_run_history_dialog_shows_snapshot(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_run_history_dialog_shows_snapshot(tmp_path: Path, qapp: QApplication) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("HSQC")
     run = manager.start_run(entry.id, workflow_ref="manual_process")
@@ -135,7 +123,9 @@ def test_run_history_dialog_shows_snapshot(
     manager.snapshot_run(run.run_id, {"process.com": "nmrPipe ..."})
 
     dialog = RunHistoryDialog(
-        None, list(manager.project.workflow_runs), "demo",
+        None,
+        list(manager.project.workflow_runs),
+        "demo",
         project_root=manager.root,
     )
     dialog.table.selectRow(0)
@@ -148,7 +138,9 @@ def test_run_history_dialog_shows_snapshot(
     run2 = manager.start_run(entry.id, workflow_ref="import")
     manager.finish_run(run2.run_id, "success")
     dialog2 = RunHistoryDialog(
-        None, list(manager.project.workflow_runs), "demo",
+        None,
+        list(manager.project.workflow_runs),
+        "demo",
         project_root=manager.root,
     )
     dialog2.table.selectRow(1)
@@ -167,7 +159,9 @@ def test_run_history_dialog_opens_snapshot(
     manager.snapshot_run(run.run_id, {"fid.com": "csh"})
 
     dialog = RunHistoryDialog(
-        None, list(manager.project.workflow_runs), "demo",
+        None,
+        list(manager.project.workflow_runs),
+        "demo",
         project_root=manager.root,
     )
     dialog.table.selectRow(0)

@@ -32,7 +32,6 @@ def test_converted_fid_reuse_follows_the_raw_fingerprint(tmp_path: Path) -> None
     (work / "d_001.fid").write_bytes(b"x" * 32)
     logs: list[str] = []
 
-    # missing record (old project): still reused, but the log states it was unchecked
     assert backend._converted_fid_is_current(work, "d_001", raw, logs) is True
     assert logs
 
@@ -41,13 +40,11 @@ def test_converted_fid_reuse_follows_the_raw_fingerprint(tmp_path: Path) -> None
     logs.clear()
     assert backend._converted_fid_is_current(work, "d_001", raw, logs) is True
 
-    # raw changed (e.g. source-level NUS cleanup rewrote ser): must re-convert
     (raw / "ser").write_bytes(b"2" * 64)
     logs.clear()
     assert backend._converted_fid_is_current(work, "d_001", raw, logs) is False
     assert logs
 
-    # fid truncated: must re-convert
     backend._record_conversion(work, "d_001", raw, logs)
     (work / "d_001.fid").write_bytes(b"x")
     logs.clear()
@@ -106,79 +103,14 @@ def test_reconstruct_nus_reconverts_only_when_the_raw_fingerprint_changed(
 
     second = backend.reconstruct_nus(exp, dict(params), script_only=True)
     assert second["success"] is True
-    assert len(calls) == 1  # raw unchanged → reuse the converted product, no conversion
+    assert len(calls) == 1
     assert _conversion_fingerprint(work, exp.dataset_id) == fingerprint
 
-    # source-level cleanup rewrites raw (e.g. bad points deleted, nuslist rewritten)
-    # → the fingerprint changes → must re-convert
-    (raw / "nuslist").write_text("1 1\n2 3\n4 5\n", encoding="utf-8")
+    (raw / "nuslist").write_text("1\n2\n4\n", encoding="utf-8")
     third = backend.reconstruct_nus(exp, dict(params), script_only=True)
     assert third["success"] is True
     assert len(calls) == 2
     assert _conversion_fingerprint(work, exp.dataset_id) != fingerprint
-
-
-def test_convert_segments_gates_the_automatic_drift_check(tmp_path: Path) -> None:
-    """Multi-segment conversion: the automatic inter-part field drift runs by default;
-    an explicit segment_shift_hz stops the script from being touched automatically.
-    """
-    from types import SimpleNamespace
-
-    from core.data.internal_data_model import AxisRole, Dimension, Experiment
-
-    def fake_convert_dir(
-        self, runtime, experiment, raw_dir, dest_work, is_nus, logs, fid_com_overrides=None
-    ):
-        dest_work.mkdir(parents=True, exist_ok=True)
-        (dest_work / f"{experiment.dataset_id}.fid").write_bytes(b"converted")
-        return True
-
-    class _FakeRuntime:
-        def run(self, args, cwd=None, timeout=None):  # noqa: ARG002
-            name = args[args.index("-out") + 1]
-            (Path(cwd) / name).write_bytes(b"shifted")
-            return SimpleNamespace(returncode=0)
-
-    calls: list[bool] = []
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(NMRPipeBackend, "_convert_dir", fake_convert_dir)
-    monkeypatch.setattr(NMRPipeBackend, "_merge_single_fid", lambda *a, **k: True)
-    monkeypatch.setattr(
-        NMRPipeBackend,
-        "_correct_group_drift",
-        lambda self, runtime, experiment, work, logs, consistency=None: calls.append(True),
-    )
-    try:
-        exp = Experiment(
-            dataset_id="d_900",
-            source_path=tmp_path,
-            ndim=2,
-            dimensions=[
-                Dimension(logical_axis="F2", nucleus="1H", td=64, role=AxisRole.DIRECT),
-                Dimension(logical_axis="F1", nucleus="15N", td=8),
-            ],
-            segments=[tmp_path / "a", tmp_path / "b"],
-        )
-        backend = NMRPipeBackend(nmrpipe_bin="")
-
-        ok, logs = backend._convert_segments(_FakeRuntime(), exp, tmp_path / "auto", [])
-        assert ok is True
-        assert calls == [True]
-
-        calls.clear()
-        ok, logs = backend._convert_segments(
-            _FakeRuntime(), exp, tmp_path / "manual", [0.0, 12.5]
-        )
-        assert ok is True
-        assert calls == []
-        assert any("segment_shift_hz" in line for line in logs)
-        # the manual route is archived too: otherwise the reuse decision keeps finding
-        # "no field drift conclusion" and re-converts the same batch of data
-        record = field_drift.read_field_drift_record(tmp_path / "manual")
-        assert record is not None and record["reason"] == "manual-segment-shift"
-        assert record["manual_shifts_hz"] == {"2": 12.5}
-    finally:
-        monkeypatch.undo()
 
 
 def _fake_multi_segment_experiment(tmp_path: Path, segments: list[Path]):
@@ -193,7 +125,11 @@ def _fake_multi_segment_experiment(tmp_path: Path, segments: list[Path]):
         ndim=2,
         dimensions=[
             Dimension(
-                logical_axis="F2", nucleus="1H", td=64, sw=8000.0, sf=600.0,
+                logical_axis="F2",
+                nucleus="1H",
+                td=64,
+                sw=8000.0,
+                sf=600.0,
                 role=AxisRole.DIRECT,
             ),
             Dimension(logical_axis="F1", nucleus="15N", td=8),
@@ -202,54 +138,20 @@ def _fake_multi_segment_experiment(tmp_path: Path, segments: list[Path]):
     )
 
 
-def test_convert_segments_refuses_to_merge_different_experiments(tmp_path: Path) -> None:
-    """Different TD = not the same experiment: refuse the merge before converting, so
-    no conversion is wasted and no strange spectrum is produced.
-    """
-    raws: list[Path] = []
-    for name, td in (("s1", 356), ("s2", 512)):
-        raw = tmp_path / name
-        raw.mkdir()
-        (raw / "acqus").write_text(
-            "##TITLE= test\n"
-            f"##$TD= {td}\n"
-            "##$SW_h= 11904.762\n"
-            "##$NS= 32\n",
-            encoding="utf-8",
-        )
-        raws.append(raw)
-    converted: list[str] = []
-
-    def fake_convert_dir(
-        self, runtime, experiment, raw_dir, dest_work, is_nus, logs, fid_com_overrides=None
-    ):
-        converted.append(str(raw_dir))
-        dest_work.mkdir(parents=True, exist_ok=True)
-        (dest_work / f"{experiment.dataset_id}.fid").write_bytes(b"converted")
-        return True
-
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(NMRPipeBackend, "_convert_dir", fake_convert_dir)
-    try:
-        exp = _fake_multi_segment_experiment(tmp_path, raws)
-        ok, logs = NMRPipeBackend(nmrpipe_bin="")._convert_segments(
-            _FakeCshRuntime(), exp, tmp_path / "work", []
-        )
-    finally:
-        monkeypatch.undo()
-    assert ok is False
-    assert converted == []          # nothing converted: the check precedes conversion
-    text = "\n".join(logs)
-    assert "TD" in text and "拒绝合并" in text
+def _fake_convert_dir(
+    self, runtime, experiment, raw_dir, dest_work, is_nus, logs, fid_com_overrides=None
+):
+    """Regression coverage:  fake convert dir."""
+    _ = (self, runtime, raw_dir, is_nus, fid_com_overrides)
+    dest_work.mkdir(parents=True, exist_ok=True)
+    (dest_work / f"{experiment.dataset_id}.fid").write_bytes(b"converted")
+    return True
 
 
-def test_group_drift_correction_is_all_or_nothing(tmp_path: Path) -> None:
-    """A part over the criterion is either fully corrected or not corrected at all: a
-    mid-way failure rolls back the parts already changed and reports it faithfully.
-
-    Field convention (d_018): some parts were moved and some were not, so the addNMR
-    sum looked "very strange".
-    """
+def test_manual_segment_shifts_write_ps_rs_for_the_parts_the_user_filled(
+    tmp_path: Path,
+) -> None:
+    """Regression coverage: test manual segment shifts write ps rs for the parts the user filled."""
     raws = []
     for name in ("s1", "s2", "s3"):
         raw = tmp_path / name
@@ -260,170 +162,115 @@ def test_group_drift_correction_is_all_or_nothing(tmp_path: Path) -> None:
     backend = NMRPipeBackend(nmrpipe_bin="")
     work = tmp_path / "work"
 
-    applied: list[tuple[int, float]] = []
-    rolled_back: list[int] = []
+    shifted: list[tuple[int, float]] = []
+    runtime_calls: list[list[str]] = []
 
-    def fake_detect(segments, *, sw_hz, sf_mhz, **kwargs):
-        return field_drift.GroupDriftResult(
-            offsets_hz=[None, 40.0, 30.0],
-            offsets_ppm=[None, 0.0666, 0.05],
-            quality=[None, 50.0, 50.0],
-            uncertainty_hz=[None, 0.1, 0.1],
-            needs_shift={1: 40.0, 2: 30.0},
-            point_hz=0.5,
-            criterion_hz=1.5,
-        )
+    class RecordingRuntime:
+        def run(self, args, cwd=None, timeout=None):
+            runtime_calls.append(list(args))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    def fake_apply(
-        self, runtime, experiment, work, index, shift_hz, report, logs, audit
-    ):
-        applied.append((index, shift_hz))
-        return "original fid.com" if index == 1 else None       # part 3 correction fails
+    def fake_apply(self, runtime, experiment, work_, shifts, logs, audit):
+        for index, value in enumerate(shifts):
+            if index and value:
+                shifted.append((index + 1, float(value)))
+        return {str(i + 1): float(v) for i, v in enumerate(shifts) if i and v}
 
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(npb, "detect_group_drift", fake_detect)
+    monkeypatch.setattr(NMRPipeBackend, "_convert_dir", _fake_convert_dir)
+    monkeypatch.setattr(NMRPipeBackend, "_merge_single_fid", lambda *a, **k: True)
+    monkeypatch.setattr(NMRPipeBackend, "_apply_manual_segment_shifts", fake_apply)
+    try:
+        ok, logs = backend._convert_segments(RecordingRuntime(), exp, work, [0.0, 40.0, 0.0])
+    finally:
+        monkeypatch.undo()
+
+    assert ok is True
+
+    assert shifted == [(2, 40.0)]
+
+    assert runtime_calls == []
+    record = field_drift.read_field_drift_record(work)
+    assert record is not None
+    assert record["reason"] == "manual-segment-shift"
+    assert record["manual_shifts_hz"] == {"2": 40.0}
+    assert record["applied_hz"] == {"2": 40.0}
+
+
+def test_no_segment_shifts_leaves_every_fid_com_untouched(tmp_path: Path) -> None:
+    """Regression coverage: test no segment shifts leaves every fid com untouched."""
+    raws = []
+    for name in ("s1", "s2"):
+        raw = tmp_path / name
+        raw.mkdir()
+        (raw / "acqus").write_text("##TITLE= test\n", encoding="utf-8")
+        raws.append(raw)
+    exp = _fake_multi_segment_experiment(tmp_path, raws)
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    work = tmp_path / "work"
+    called: list[bool] = []
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(NMRPipeBackend, "_convert_dir", _fake_convert_dir)
+    monkeypatch.setattr(NMRPipeBackend, "_merge_single_fid", lambda *a, **k: True)
     monkeypatch.setattr(
         NMRPipeBackend,
-        "_segment_fid_inputs",
-        lambda self, work, exp: [[Path("a")], [Path("b")], [Path("c")]],
+        "_apply_manual_segment_shifts",
+        lambda *a, **k: called.append(True),
     )
-    monkeypatch.setattr(NMRPipeBackend, "_apply_segment_shift", fake_apply)
-    def fake_rollback(self, runtime, experiment, work, saved, logs):
-        rolled_back.extend(sorted(saved))
-        return True
+    try:
+        ok, logs = backend._convert_segments(_FakeCshRuntime(), exp, work, [])
+    finally:
+        monkeypatch.undo()
 
-    monkeypatch.setattr(NMRPipeBackend, "_rollback_segment_shifts", fake_rollback)
+    assert ok is True
+    assert called == []
+    record = field_drift.read_field_drift_record(work)
+    assert record is not None and record["reason"] == "manual-only"
+    assert "applied_hz" not in record
+
+
+def test_manual_segment_shift_skips_a_part_without_a_mult_line(tmp_path: Path) -> None:
+    """Regression coverage: test manual segment shift skips a part without a mult line."""
+    from core.audit.qc_audit import QcAuditLog
+
+    raws = []
+    for name in ("s1", "s2", "s3"):
+        raw = tmp_path / name
+        raw.mkdir()
+        (raw / "acqus").write_text("##TITLE= test\n", encoding="utf-8")
+        raws.append(raw)
+    exp = _fake_multi_segment_experiment(tmp_path, raws)
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    work = tmp_path / "work"
+    for index in (2, 3):
+        seg = work / f"seg_{index:03d}"
+        seg.mkdir(parents=True)
+        if index == 2:
+            (seg / "fid.com").write_text("bruker -xN 64 \\\n", encoding="utf-8")
+        else:
+            (seg / "fid.com").write_text(
+                "bruker -xN 64 \\\n| nmrPipe -fn MULT -c 1.0 \\\n", encoding="utf-8"
+            )
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(NMRPipeBackend, "_finalize_converted_fid", lambda *a, **k: False)
     try:
         logs: list[str] = []
-        record = backend._correct_group_drift(
-            _FakeCshRuntime(), exp, work, logs, {"available": 3, "warnings": [], "blocking": []}
+        applied = backend._apply_manual_segment_shifts(
+            _FakeCshRuntime(), exp, work, [0.0, 40.0, 12.5], logs, QcAuditLog(work)
         )
     finally:
         monkeypatch.undo()
 
-    assert applied == [(1, 40.0), (2, 30.0)]
-    assert rolled_back == [1]                       # only the parts really changed are rolled back
-    assert record is not None
-    assert record["rolled_back"] is True
-    assert record["corrected_parts"] == []
-    assert record["merge"]["uncorrected_parts"] == [2, 3]
-    assert any("回滚" in line for line in logs)
     text = "\n".join(logs)
-    assert "已合并" not in text or "未做频移" in text
 
+    assert "MULT" in text, text
+    assert "PS -rs" not in (work / "seg_002" / "fid.com").read_text(encoding="utf-8")
 
-def test_group_drift_second_round_adds_to_the_first_shift(tmp_path: Path) -> None:
-    """The second round writes "the value already written in the previous round + this
-    round's residual", not the residual alone (that would shrink the correction).
+    assert applied == {}
 
-    It also verifies that one more measurement runs after the last round, giving the
-    real residual **after the change**.
-    """
-    raws = []
-    for name in ("s1", "s2"):
-        raw = tmp_path / name
-        raw.mkdir()
-        (raw / "acqus").write_text("##TITLE= test\n", encoding="utf-8")
-        raws.append(raw)
-    exp = _fake_multi_segment_experiment(tmp_path, raws)
-    backend = NMRPipeBackend(nmrpipe_bin="")
-    work = tmp_path / "work"
-
-    applied: list[tuple[int, float]] = []
-    seen: list[int] = []
-
-    def fake_detect(segments, *, sw_hz, sf_mhz, **kwargs):
-        seen.append(1)
-        if len(seen) == 1:
-            return field_drift.GroupDriftResult(
-                offsets_hz=[None, 40.0], offsets_ppm=[None, 0.067],
-                quality=[None, 50.0], uncertainty_hz=[None, 0.1],
-                needs_shift={1: 40.0}, point_hz=0.5, criterion_hz=1.5,
-            )
-        if len(seen) == 2:
-            return field_drift.GroupDriftResult(
-                offsets_hz=[None, 5.0], offsets_ppm=[None, 0.008],
-                quality=[None, 50.0], uncertainty_hz=[None, 0.1],
-                needs_shift={1: 5.0}, point_hz=0.5, criterion_hz=1.5,
-            )
-        return field_drift.GroupDriftResult(
-            offsets_hz=[None, 0.0], offsets_ppm=[None, 0.0],
-            quality=[None, 50.0], uncertainty_hz=[None, 0.1], point_hz=0.5, criterion_hz=1.5,
-        )
-
-    def fake_apply(
-        self, runtime, experiment, work, index, shift_hz, report, logs, audit
-    ):
-        applied.append((index, shift_hz))
-        return "original fid.com"
-
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(npb, "detect_group_drift", fake_detect)
-    monkeypatch.setattr(
-        NMRPipeBackend,
-        "_segment_fid_inputs",
-        lambda self, work, exp: [[Path("a")], [Path("b")]],
-    )
-    monkeypatch.setattr(NMRPipeBackend, "_apply_segment_shift", fake_apply)
-    try:
-        logs: list[str] = []
-        record = backend._correct_group_drift(_FakeCshRuntime(), exp, work, logs)
-    finally:
-        monkeypatch.undo()
-
-    assert applied == [(1, 40.0), (1, 45.0)]        # 2nd round = 40 + residual 5
-    assert record is not None
-    assert record["applied_shift_hz"] == {"2": 45.0}
-    assert record["corrected_parts"] == [2]
-    assert record["max_abs_hz_after"] == 0.0
-    assert record["within_threshold_after"] is True
-    assert len(record["rounds"]) == 3          # two measurements + a re-check after the change
-
-
-def test_group_drift_record_is_consistent_with_the_measured_residual(tmp_path: Path) -> None:
-    """within_threshold_after uses the same convention as the measured offset (the old
-    implementation wrote "does this round still need correction", contradicting itself).
-    """
-    raws = []
-    for name in ("s1", "s2"):
-        raw = tmp_path / name
-        raw.mkdir()
-        (raw / "acqus").write_text("##TITLE= test\n", encoding="utf-8")
-        raws.append(raw)
-    exp = _fake_multi_segment_experiment(tmp_path, raws)
-    backend = NMRPipeBackend(nmrpipe_bin="")
-    work = tmp_path / "work"
-
-    def fake_apply(
-        self, runtime, experiment, work, index, shift_hz, report, logs, audit
-    ):
-        return None       # no part can be corrected at all
-
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(
-        npb,
-        "detect_group_drift",
-        lambda segments, *, sw_hz, sf_mhz, **k: field_drift.GroupDriftResult(
-            offsets_hz=[None, 2.15], offsets_ppm=[None, 0.0036],
-            quality=[None, 50.0], uncertainty_hz=[None, 0.1],
-            needs_shift={1: 2.15}, point_hz=0.5, criterion_hz=1.5,
-        ),
-    )
-    monkeypatch.setattr(
-        NMRPipeBackend,
-        "_segment_fid_inputs",
-        lambda self, work, exp: [[Path("a")], [Path("b")]],
-    )
-    monkeypatch.setattr(NMRPipeBackend, "_apply_segment_shift", fake_apply)
-    try:
-        record = backend._correct_group_drift(_FakeCshRuntime(), exp, work, [])
-    finally:
-        monkeypatch.undo()
-
-    assert record is not None
-    assert record["max_abs_hz_after"] == 2.15
-    assert record["within_threshold_after"] is False     # 2.15 Hz > 1.5 Hz criterion, so not True
-    assert record["merge"]["uncorrected_parts"] == [2]
+    assert "PS -rs" not in (work / "seg_003" / "fid.com").read_text(encoding="utf-8")
 
 
 def test_multi_segment_reuse_requires_the_field_drift_record(tmp_path: Path) -> None:
@@ -442,26 +289,19 @@ def test_multi_segment_reuse_requires_the_field_drift_record(tmp_path: Path) -> 
     (work / "d_001.fid").write_bytes(b"x" * 32)
     logs: list[str] = []
 
-    # old record (converted before this feature): no field drift field → must re-convert
     backend._record_conversion(work, "d_001", raws, logs)
     logs.clear()
     assert (
-        backend._converted_fid_is_current(
-            work, "d_001", raws, logs, require_field_drift=True
-        )
+        backend._converted_fid_is_current(work, "d_001", raws, logs, require_field_drift=True)
         is False
     )
     assert any("没有组间场漂结论" in line for line in logs)
 
-    # add the field drift conclusion → reuse; the single-dataset route (whose default
-    # require_field_drift=False) is unaffected
     field_drift.write_field_drift_record(work, {"checked": True, "rounds": []})
     backend._record_conversion(work, "d_001", raws, logs)
     logs.clear()
     assert (
-        backend._converted_fid_is_current(
-            work, "d_001", raws, logs, require_field_drift=True
-        )
+        backend._converted_fid_is_current(work, "d_001", raws, logs, require_field_drift=True)
         is True
     )
     assert backend._converted_fid_is_current(work, "d_001", raws, logs) is True
@@ -488,16 +328,12 @@ def test_reconstruct_nus_segments_reuse_follows_the_raw_fingerprint(
     monkeypatch.setattr(npb, "CshRuntime", _FakeCshRuntime)
     monkeypatch.setattr(NMRPipeBackend, "_bin_dir", lambda self: tmp_path)
 
-    def fake_convert_segments(
-        self, runtime, experiment, work, shifts, fid_com_overrides=None
-    ):
+    def fake_convert_segments(self, runtime, experiment, work, shifts, fid_com_overrides=None):
         merge_calls.append(tuple(shifts))
         (work / "merged" / "fid").mkdir(parents=True, exist_ok=True)
         (work / "merged" / "fid" / "test001.fid").write_bytes(b"merged-v1")
         (work / "nuslist").write_text("1 1\n2 3\n4 5\n", encoding="utf-8")
-        # the real _convert_segments leaves a field drift conclusion for multi-segment
-        # data (2026-09-23); the fake must write one too, otherwise the reuse decision
-        # treats a record without a field drift conclusion as old and converts again
+
         field_drift.write_field_drift_record(work, {"checked": True, "rounds": []})
         return True, ["fake segment conversion"]
 
@@ -518,7 +354,7 @@ def test_reconstruct_nus_segments_reuse_follows_the_raw_fingerprint(
 
     second = backend.reconstruct_nus(exp, dict(params), script_only=True)
     assert second["success"] is True
-    assert len(merge_calls) == 1  # raw unchanged → reuse the merged product
+    assert len(merge_calls) == 1
     assert _conversion_fingerprint(work, exp.dataset_id) == fingerprint
 
     (segments[0] / "nuslist").write_text("1 1\n2 3\n", encoding="utf-8")
@@ -632,9 +468,7 @@ def test_finalize_converted_fid_single_file(tmp_path: Path) -> None:
     assert (dest / "exp.fid").is_file()
 
 
-def _write_plane(
-    out: Path, arr: np.ndarray, *, f1_size: int = 30, f3_size: int = 4
-) -> None:
+def _write_plane(out: Path, arr: np.ndarray, *, f1_size: int = 30, f3_size: int = 4) -> None:
     """Write one 3D reconstruction plane with nmrglue (first axis real/imaginary
     interleaved, matching nus3d_rc).
 
@@ -667,9 +501,7 @@ def _write_plane(
     ng.pipe.write(str(out), dic, arr.astype(np.complex64), overwrite=True)
 
 
-def _synthetic_3d_planes(
-    work: Path, n_dir: int = 64, *, theta: float = 0.0
-) -> Path:
+def _synthetic_3d_planes(work: Path, n_dir: int = 64, *, theta: float = 0.0) -> Path:
     """Synthesize complex 3D planes: one plane per direct-dimension point, with the
     direct dimension = plane index (0.2.199-patch17).
 
@@ -686,7 +518,7 @@ def _synthetic_3d_planes(
     k = np.arange(n_dir, dtype=float)
     signals = np.zeros((n_i0, n_i1, n_dir), dtype=np.complex128)
     for i0, i1 in ((3, 3), (3, 11), (8, 8), (11, 3), (11, 11), (6, 13)):
-        peak = 16 + i0 + i1  # the peak position lies within margin(8)..n-margin(56)
+        peak = 16 + i0 + i1
         signals[i0, i1, :] = 400.0 / (1.0 + ((k - peak) / 4.0) ** 2)
     if theta:
         ramp = np.exp(1j * np.deg2rad(theta + 12.0 * k / (n_dir - 1)))
@@ -695,9 +527,7 @@ def _synthetic_3d_planes(
     noise = noise + 1j * rng.normal(0, 0.05, size=noise.shape)
     data = signals + noise
     for p in range(n_dir):
-        _write_plane(
-            plane_dir / f"test{p + 1:04d}.ft1", data[:, :, p], f3_size=n_dir
-        )
+        _write_plane(plane_dir / f"test{p + 1:04d}.ft1", data[:, :, p], f3_size=n_dir)
     dic, data0 = ng.pipe.read(str(plane_dir / "test0001.ft1"))
     assert np.asarray(data0).dtype == np.float32, "平面应为实型交错存储"
     assert np.asarray(data0).shape == (2 * n_i0, n_i1), "交错复型布局错误"
@@ -760,14 +590,11 @@ def test_apply_direct_phase_3d_rotates_copy_not_source(
     assert calls[0][1] == "nus3d_rc_ph/test%04d.ft1"
     out_dir = tmp_path / "nus3d_rc_ph"
     assert out_dir.is_dir()
-    assert len(list(out_dir.glob("test*.ft1"))) == len(
-        list(plane_dir.glob("test*.ft1"))
-    )
-    # the source planes are untouched byte for byte
+    assert len(list(out_dir.glob("test*.ft1"))) == len(list(plane_dir.glob("test*.ft1")))
+
     for path in sorted(plane_dir.glob("test*.ft1")):
         after = np.asarray(ng.pipe.read(str(path))[1])
         assert np.array_equal(after, before[path.name])
-
 
 
 def test_finalize_converted_fid_missing(tmp_path: Path) -> None:
@@ -789,8 +616,7 @@ def test_reconstruct_nus_segments_missing_nmrpipe(bruker_dir: Path, tmp_path: Pa
     dst_b = tmp_path / "seg_b"
     shutil.copytree(bruker_dir / "nus_3d", dst_a)
     shutil.copytree(bruker_dir / "nus_3d", dst_b)
-    # 0.2.199-patch29dz: the pre-check requires acqus+ser (the simplified fixture
-    # directory has no ser, but real data always does)
+
     (dst_a / "ser").touch()
     (dst_b / "ser").touch()
     exp = read_segments([dst_a, dst_b])
@@ -798,9 +624,8 @@ def test_reconstruct_nus_segments_missing_nmrpipe(bruker_dir: Path, tmp_path: Pa
     result = backend.reconstruct_nus(exp, {})
     assert result["success"] is False
 
-def test_write_merged_nuslist_detects_bad_points(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+
+def test_write_merged_nuslist_detects_bad_points(tmp_path: Path, bruker_dir: Path) -> None:
     """Bad-point detection: out-of-range points and cross-segment duplicates are
     removed from the merged nuslist with a ⚠ warning.
     """
@@ -834,9 +659,8 @@ def test_write_merged_nuslist_detects_bad_points(
     assert all(tuple(int(v) for v in line.split()) not in bad for line in written)
     assert count == len(written)
 
-def test_ser_point_layout_derives_bytes(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+
+def test_ser_point_layout_derives_bytes(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.195: the ser layout is derived from the sampling parameters (direct-dimension
     TD padding + word size + redundancy).
     """
@@ -847,13 +671,13 @@ def test_ser_point_layout_derives_bytes(
     src = tmp_path / "nus"
     shutil.copytree(bruker_dir / "nus_2d", src)
     exp = read_dataset(src)
-    # nus_2d direct TD=2048 → padded to 2048 → 1024 complex points × 2 × 8 bytes = 16384
+
     layout = _ser_point_layout(exp, 4 * 16384, 4)
     assert layout == (16384, 16384, 1)
-    # redundancy 4 vectors per point
+
     layout2 = _ser_point_layout(exp, 4 * 4 * 16384, 4)
     assert layout2 == (4 * 16384, 16384, 4)
-    # not divisible / cannot be determined → None
+
     assert _ser_point_layout(exp, 4 * 100, 4) is None
 
 
@@ -882,9 +706,7 @@ def test_zero_bad_point_fid_states_slices(
 
     def fake_read(path):
         read_targets.append(Path(path).name)
-        return {"FDSIZE": 454, "FDSPECNUM": 170}, np.ones(
-            (170, 454), dtype=np.complex64
-        )
+        return {"FDSIZE": 454, "FDSPECNUM": 170}, np.ones((170, 454), dtype=np.complex64)
 
     def fake_write(path, dic, arr, overwrite=False):
         write_targets.append(Path(path).name)
@@ -894,11 +716,9 @@ def test_zero_bad_point_fid_states_slices(
 
     backend = NMRPipeBackend()
     logs: list[str] = []
-    backend._zero_bad_point_fid(
-        work, [(5, 3)], logs, dataset_id=exp.dataset_id
-    )
+    backend._zero_bad_point_fid(work, [(5, 3)], logs, dataset_id=exp.dataset_id)
     joined = "\n".join(logs)
-    # States: complex point (f2=5, f1=3) → slices 7/8, rows 10/11
+
     assert sorted(write_targets) == ["test007.fid", "test008.fid"]
     assert "test007.fid" in joined and "test008.fid" in joined
     assert "test003.fid" not in joined
@@ -923,6 +743,8 @@ def test_nus_grid_from_points_and_apply(tmp_path: Path) -> None:
     assert _nus_grid_from_points([]) is None
     assert _nus_grid_from_points([(10,), (63,)]) == [64]
     assert _nus_grid_from_points([(5, 3), (82, 25)]) == [83, 26]
+    assert _nus_grid_from_points([(1,), (2, 3)]) is None
+    assert _nus_grid_from_points([(-1,), (2,)]) is None
 
     exp3 = Experiment(
         dataset_id="x",
@@ -938,7 +760,7 @@ def test_nus_grid_from_points_and_apply(tmp_path: Path) -> None:
     )
     logs = _apply_nus_grid_after_clean(exp3, [(5, 3), (82, 25)])
     assert exp3.acquisition_parameters["acqu2s"]["NusTD"] == 166
-    # F1 actual range 26 → 26×2=52, unchanged
+
     assert exp3.acquisition_parameters["acqu3s"]["NusTD"] == 52
     assert any("170→166" in line for line in logs)
 
@@ -958,9 +780,21 @@ def test_nus_grid_from_points_and_apply(tmp_path: Path) -> None:
     assert any("64→21" in line for line in logs2)
 
 
-def test_clean_work_nuslist_single_dataset(
-    tmp_path: Path, bruker_dir: Path
+def test_validate_nus_points_rejects_wrong_arity_negative_and_oob(
+    bruker_dir: Path,
 ) -> None:
+    """Regression coverage: test validate nus points rejects wrong arity negative and oob."""
+    from backend.nmrpipe_backend import _validate_nus_points
+
+    exp = read_dataset(bruker_dir / "nus_3d")
+    valid, bad, reasons = _validate_nus_points([(1, 2), (1,), (1, 2, 3), (-1, 2), (1, 9999)], exp)
+
+    assert valid == [(1, 2)]
+    assert set(bad) == {(1,), (1, 2, 3), (-1, 2), (1, 9999)}
+    assert all(reasons[point] for point in bad)
+
+
+def test_clean_work_nuslist_single_dataset(tmp_path: Path, bruker_dir: Path) -> None:
     """Single NUS dataset bad-point cleanup: out-of-range points removed + a ⚠
     warning (uniform across all NUS data).
     """
@@ -971,7 +805,7 @@ def test_clean_work_nuslist_single_dataset(
 
     src = tmp_path / "nus"
     shutil.copytree(bruker_dir / "nus_2d", src)
-    # inject an out-of-range point (nus_2d F1 complex-point grid upper bound td//2)
+
     lines = (src / "nuslist").read_text(encoding="utf-8").splitlines()
     (src / "nuslist").write_text("\n".join(lines) + "\n1000\n", encoding="utf-8")
     exp = read_dataset(src)
@@ -989,9 +823,7 @@ def test_clean_work_nuslist_single_dataset(
     assert len(written) == len(lines)
 
 
-def test_clean_source_nus_single_removes_with_backup(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_clean_source_nus_single_removes_with_backup(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.124: bad points are deleted at the source ser/nuslist with a backup, no
     longer waiting to zero them in the generated FID.
     """
@@ -1004,9 +836,7 @@ def test_clean_source_nus_single_removes_with_backup(
     lines = (raw / "nuslist").read_text(encoding="utf-8").splitlines()
     (raw / "nuslist").write_text("\n".join(lines) + "\n1000\n", encoding="utf-8")
     n = len(lines) + 1
-    # 0.2.195: ser bytes follow the sampling parameters (direct-dimension TD padding +
-    # word size); built for the nus_2d fixture (direct TD=2048, double-precision word
-    # size 8): 2048//2×2×8 = 16384 bytes per point
+
     row_bytes = 16384
     ser = b"".join(bytes([i % 256]) * row_bytes for i in range(n))
     (raw / "ser").write_bytes(ser)
@@ -1020,7 +850,7 @@ def test_clean_source_nus_single_removes_with_backup(
     assert (raw / "ser.bak").is_file()
     assert (raw / "ser.bak").stat().st_size == len(ser)
     kept = (raw / "ser").read_bytes()
-    assert len(kept) == len(ser) - row_bytes  # the bad point (last row) is deleted whole
+    assert len(kept) == len(ser) - row_bytes
     assert kept == ser[: len(lines) * row_bytes]
     written = (raw / "nuslist").read_text(encoding="utf-8").splitlines()
     assert all(tuple(int(v) for v in line.split()) != (1000,) for line in written)
@@ -1029,9 +859,35 @@ def test_clean_source_nus_single_removes_with_backup(
     assert "源头" in joined and "备份" in joined
 
 
-def test_clean_source_nus_breaks_link_external_untouched(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_clean_source_nus_honours_explicit_schedule_name(tmp_path: Path, bruker_dir: Path) -> None:
+    """Regression coverage: test clean source nus honours explicit schedule name."""
+    import shutil
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+
+    raw = tmp_path / "raw_named"
+    shutil.copytree(bruker_dir / "nus_2d", raw)
+    schedule = raw / "CANH"
+    (raw / "nuslist").replace(schedule)
+    with (raw / "acqus").open("a", encoding="utf-8") as handle:
+        handle.write("##$NUSLIST= <CANH>\n")
+    lines = schedule.read_text(encoding="utf-8").splitlines()
+    schedule.write_text("\n".join(lines) + "\n1000\n", encoding="utf-8")
+    row_bytes = 16384
+    (raw / "ser").write_bytes(b"x" * (row_bytes * (len(lines) + 1)))
+    exp = read_dataset(raw)
+
+    count, bad, removed = NMRPipeBackend()._clean_source_nus(exp, [raw], [])
+
+    assert removed is True
+    assert count == len(lines)
+    assert bad == [(1000,)]
+    assert (raw / "CANH.bak").is_file()
+    assert not (raw / "nuslist").exists()
+    assert "1000" not in schedule.read_text(encoding="utf-8")
+
+
+def test_clean_source_nus_breaks_link_external_untouched(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.124: when raw/ser is a hard link, the source-level deletion does not
     pollute the external original.
     """
@@ -1055,14 +911,12 @@ def test_clean_source_nus_breaks_link_external_untouched(
     logs: list[str] = []
     _count, _bad, removed = backend._clean_source_nus(exp, [raw], logs)
     assert removed is True
-    assert external.read_bytes() == ser  # the external original is unchanged
+    assert external.read_bytes() == ser
     assert (raw / "ser").stat().st_size == len(ser) - row_bytes
     assert (raw / "ser.bak").stat().st_size == len(ser)
 
 
-def test_clean_source_nus_repeat_nus_keeps_same_points(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_clean_source_nus_repeat_nus_keeps_same_points(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.199-patch29cx: repeated-experiment co-addition (NUS with shared points) --
     cross-segment duplicates are not bad points and ser is not emptied.
     """
@@ -1076,7 +930,7 @@ def test_clean_source_nus_repeat_nus_keeps_same_points(
     shutil.copytree(bruker_dir / "nus_2d", seg1)
     shutil.copytree(bruker_dir / "nus_2d", seg2)
     nl = (seg1 / "nuslist").read_text(encoding="utf-8")
-    (seg2 / "nuslist").write_text(nl, encoding="utf-8")  # the two segments share sampling points
+    (seg2 / "nuslist").write_text(nl, encoding="utf-8")
     n = len(nl.splitlines())
     row_bytes = 16384
     ser = b"".join(bytes([i % 256]) * row_bytes for i in range(n))
@@ -1094,9 +948,7 @@ def test_clean_source_nus_repeat_nus_keeps_same_points(
     assert not (seg1 / "ser.bak").exists()
 
 
-def test_write_merged_nuslist_repeat_nus_dedups(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_write_merged_nuslist_repeat_nus_dedups(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.199-patch29cx: for repeated co-addition the merged nuslist is deduplicated,
     keeping the unique points; there are no bad points.
     """
@@ -1115,18 +967,14 @@ def test_write_merged_nuslist_repeat_nus_dedups(
     exp = read_segments([seg1, seg2])
     backend = NMRPipeBackend()
     logs: list[str] = []
-    count, bad = backend._write_merged_nuslist(
-        tmp_path, [seg1, seg2], exp, logs
-    )
+    count, bad = backend._write_merged_nuslist(tmp_path, [seg1, seg2], exp, logs)
     assert bad == []
     written = (tmp_path / "nuslist").read_text(encoding="utf-8").splitlines()
-    assert len(written) == n  # cross-segment duplicates deduplicated, not counted twice
+    assert len(written) == n
     assert count == n
 
 
-def test_clean_source_nus_segments_drops_bad_and_dups(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_clean_source_nus_segments_drops_bad_and_dups(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.124: multi-segment source-level cleanup -- out-of-range points and
     cross-segment duplicates are deleted from each segment's ser/nuslist.
     """
@@ -1140,9 +988,9 @@ def test_clean_source_nus_segments_drops_bad_and_dups(
     shutil.copytree(bruker_dir / "nus_2d", seg1)
     shutil.copytree(bruker_dir / "nus_2d", seg2)
     nl1 = (seg1 / "nuslist").read_text(encoding="utf-8").splitlines()
-    dup_x = "7 3"  # absent from the fixture, once in seg1 and seg2 → cross-segment duplicate
+    dup_x = "17"
     (seg1 / "nuslist").write_text("\n".join(nl1) + "\n" + dup_x + "\n", encoding="utf-8")
-    seg2_pts = [dup_x, "9 10", "11 12", "13 14", "15 16", "1000 1000"]
+    seg2_pts = [dup_x, "19", "21", "23", "25", "1000"]
     (seg2 / "nuslist").write_text("\n".join(seg2_pts) + "\n", encoding="utf-8")
     n1, n2 = len(nl1) + 1, len(seg2_pts)
     row_bytes = 16384
@@ -1153,23 +1001,21 @@ def test_clean_source_nus_segments_drops_bad_and_dups(
     logs: list[str] = []
     count, bad, removed = backend._clean_source_nus(exp, [seg1, seg2], logs)
     assert removed is True
-    # seg1 loses 1 row (the cross-segment duplicate dup_x); seg2 loses 2 rows
-    # (dup_x + an out-of-range point)
+
     assert (seg1 / "ser").stat().st_size == n1 * row_bytes - row_bytes
     assert (seg2 / "ser").stat().st_size == n2 * row_bytes - 2 * row_bytes
     assert (seg1 / "ser.bak").is_file() and (seg2 / "ser.bak").is_file()
+
     def _points(dir_path: Path) -> list[tuple[int, ...]]:
         return [
             tuple(int(v) for v in line.split())
-            for line in (dir_path / "nuslist")
-            .read_text(encoding="utf-8")
-            .splitlines()
+            for line in (dir_path / "nuslist").read_text(encoding="utf-8").splitlines()
         ]
 
     merged = _points(seg1) + _points(seg2)
     assert len(merged) == count
     assert len(set(merged)) == len(merged)
-    assert all(p != (1000, 1000) for p in merged)
+    assert all(p != (1000,) for p in merged)
 
 
 class _FakeConvertRuntime:
@@ -1194,8 +1040,7 @@ class _FakeConvertRuntime:
             if (base / "acqu3s").is_file():
                 self.acqu3s_td = parse_param_file(base / "acqu3s")["TD"]
             (base / "fid.com").write_text(
-                "bruk2pipe -in ./ser -out ./test.fid \\\n"
-                " -xN 96 -yN 48 -zN 128\n",
+                "bruk2pipe -in ./ser -out ./test.fid \\\n -xN 96 -yN 48 -zN 128\n",
                 encoding="utf-8",
                 newline="\n",
             )
@@ -1206,8 +1051,7 @@ class _FakeConvertRuntime:
                     (slice_dir / f"test{i:03d}.fid").write_bytes(b"x")
             elif self.single:
                 (base / "test.fid").write_bytes(b"x")
-            # fid.com's nusExpand.tcl -mask writes a sampling mask (1=sampled point);
-            # the test checks the cleanup
+
             mask_dir = base / "mask"
             mask_dir.mkdir(exist_ok=True)
             for i in range(1, 5):
@@ -1218,9 +1062,7 @@ class _FakeConvertRuntime:
 def _fake_bruker(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "backend.nmrpipe_backend.find_tool",
-        lambda name, nmrpipe_bin=None: (
-            Path("/bin/bruker") if name == "bruker" else None
-        ),
+        lambda name, nmrpipe_bin=None: Path("/bin/bruker") if name == "bruker" else None,
     )
 
 
@@ -1244,11 +1086,11 @@ def test_convert_dir_nus3d_single_file_no_stage(
     _fake_bruker(monkeypatch)
     logs: list[str] = []
     assert backend._convert_dir(fake, exp, raw, work, True, logs)
-    assert Path(fake.bruker_cwd) == raw  # converted directly inside raw, no staging
-    assert (work / f"{exp.dataset_id}.fid").is_file()  # the single file is put in place
+    assert Path(fake.bruker_cwd) == raw
+    assert (work / f"{exp.dataset_id}.fid").is_file()
     assert not (work / "fid").exists()
-    assert not (raw / "acqu3s.bak").exists()  # acqu3s is no longer modified/backed up
-    assert not (raw / "mask").exists()  # the mask intermediate product is cleaned up
+    assert not (raw / "acqu3s.bak").exists()
+    assert not (raw / "mask").exists()
 
 
 def test_convert_dir_nus2d_no_stage(
@@ -1271,13 +1113,10 @@ def test_convert_dir_nus2d_no_stage(
     _fake_bruker(monkeypatch)
     logs: list[str] = []
     assert backend._convert_dir(fake, exp, raw, work, True, logs)
-    bruker_cwd = next(
-        cwd for argv, cwd in fake.calls if argv[:2] == ["bruker", "-AUTO"]
-    )
+    bruker_cwd = next(cwd for argv, cwd in fake.calls if argv[:2] == ["bruker", "-AUTO"])
     assert Path(bruker_cwd) == raw
     assert (work / f"{exp.dataset_id}.fid").is_file()
     assert not (work / "fid").exists()
-    # 0.2.199-patch13: the mask/ written by fid.com inside raw has been cleaned up
     assert not (raw / "mask").exists()
 
 
@@ -1295,10 +1134,11 @@ def test_converted_fid_path_single_first(tmp_path: Path) -> None:
     slice_dir = work / "fid"
     slice_dir.mkdir()
     (slice_dir / "test001.fid").write_bytes(b"x")
-    # with both a single file and slices present, the single file wins
+
     assert NMRPipeBackend._converted_fid_path(work, "exp") == single
     single.unlink()
     assert NMRPipeBackend._converted_fid_path(work, "exp") == slice_dir
+
 
 def _write_3d_stream_ft3(path: Path) -> None:
     """Write a single-stream 3D final-spectrum header (FDSIZE = the 1H direct
@@ -1349,9 +1189,7 @@ def _write_proj_ft2(path: Path, nrow: int, ncol: int) -> None:
         dic[pre + "CAR"] = 117.986 if pre == "FDF1" else 4.696
         dic[pre + "ORIG"] = 6115.307 if pre == "FDF1" else 3602.677
         dic[pre + "SW"] = 2189.142 if pre == "FDF1" else 3001.729
-    ng.pipe.write(
-        str(path), dic, np.zeros((nrow, ncol), dtype=np.float32), overwrite=True
-    )
+    ng.pipe.write(str(path), dic, np.zeros((nrow, ncol), dtype=np.float32), overwrite=True)
 
 
 def test_project_3d_mapping(tmp_path: Path, monkeypatch) -> None:
@@ -1376,25 +1214,21 @@ def test_project_3d_mapping(tmp_path: Path, monkeypatch) -> None:
 
     def fake_run(argv, *, cwd=None, timeout=3600, on_line=None):
         calls.append(list(argv))
-        # 0.2.133: proj3D.tcl names the outputs automatically
-        # {nucleusA}.{nucleusB}.dat (no pre-splitting of planes)
+
         out_dir = Path(argv[argv.index("-outDir") + 1])
         _write_proj_ft2(out_dir / "13C.15N.dat", 128, 256)
         _write_proj_ft2(out_dir / "1H.13C.dat", 256, 600)
         _write_proj_ft2(out_dir / "1H.15N.dat", 128, 600)
         return FakeRun(0)
 
-    monkeypatch.setattr(
-        "backend.nmrpipe_backend.CshRuntime.run", staticmethod(fake_run)
-    )
+    monkeypatch.setattr("backend.nmrpipe_backend.CshRuntime.run", staticmethod(fake_run))
     backend = NMRPipeBackend()
     src = tmp_path / "final.ft3"
     _write_3d_stream_ft3(src)
     out = tmp_path / "out"
     out.mkdir()
     result = backend.project_3d(src, out, prefix="proj", labels=["15N", "1H", "13C"])
-    # key = the two nuclei in the filename; labels = the fixed-axis nucleus,
-    # nuclei = the two plane nuclei (filename X.Y order)
+
     assert result["labels"] == {
         "13C-15N": "1H",
         "1H-13C": "15N",
@@ -1408,15 +1242,13 @@ def test_project_3d_mapping(tmp_path: Path, monkeypatch) -> None:
     assert len(result["paths"]) == 3
     for key, p in result["paths"].items():
         assert Path(p).is_file()
-    # the header is not rewritten: the proj3D output is kept as is (the slots still hold
-    # the 15N/1H written by the fake)
+
     import nmrglue as ng
 
     dic, _ = ng.pipe.read(result["paths"]["13C-15N"])
     assert str(dic["FDF1LABEL"]) == "15N"
     assert str(dic["FDF2LABEL"]) == "1H"
-    # only one proj3D.tcl-equivalent command is called (the 3D spectrum is fed
-    # directly, named automatically, with -sum)
+
     assert len(calls) == 1
     argv = calls[0]
     joined = " ".join(str(a) for a in argv)
@@ -1457,20 +1289,12 @@ def test_finalize_nus_window_param_passthrough(
         params={"window": {"F1": {"type": "gaussian", "g1": 3.0}}},
     )
     assert resp["success"] is True, resp
-    script = (work / f"{experiment.dataset_id}_finalize.com").read_text(
-        encoding="utf-8"
-    )
+    script = (work / f"{experiment.dataset_id}_finalize.com").read_text(encoding="utf-8")
     assert "| nmrPipe -fn GM -g1 3 -g2 15 \\" in script
     lines = script.splitlines()
     gm = next(i for i, line in enumerate(lines) if "GM -g1 3" in line)
-    zf = next(
-        i for i, line in enumerate(lines)
-        if "| nmrPipe -fn ZF" in line and i > gm
-    )
-    ft = next(
-        i for i, line in enumerate(lines)
-        if "| nmrPipe -fn FT" in line and i > zf
-    )
+    zf = next(i for i, line in enumerate(lines) if "| nmrPipe -fn ZF" in line and i > gm)
+    ft = next(i for i, line in enumerate(lines) if "| nmrPipe -fn FT" in line and i > zf)
     assert gm < zf < ft
 
 
@@ -1510,13 +1334,11 @@ def test_finalize_nus_reads_sampling_flags_from_params(
         params={"sampling": {"flip_f1": True}},
     )
     assert resp["success"] is True, resp
-    script = (work / f"{experiment.dataset_id}_finalize.com").read_text(
-        encoding="utf-8"
-    )
+    script = (work / f"{experiment.dataset_id}_finalize.com").read_text(encoding="utf-8")
     ft_lines = [line for line in script.splitlines() if "-fn FT" in line]
-    assert len(ft_lines) == 1  # 2D: indirect dimension F1
+    assert len(ft_lines) == 1
     assert ft_lines[0].rstrip().endswith("-neg \\")
-    # an explicit sampling= still wins (compatible with existing calls)
+
     resp = backend.finalize_nus(
         experiment,
         work_dir=work,
@@ -1524,9 +1346,7 @@ def test_finalize_nus_reads_sampling_flags_from_params(
         sampling={},
     )
     assert resp["success"] is True, resp
-    script = (work / f"{experiment.dataset_id}_finalize.com").read_text(
-        encoding="utf-8"
-    )
+    script = (work / f"{experiment.dataset_id}_finalize.com").read_text(encoding="utf-8")
     assert "-neg" not in script
 
 
@@ -1544,6 +1364,7 @@ class _FakeMergeRuntime:
         argv = list(argv)
         self.calls.append(argv)
         if argv[0] == "addNMR":
+
             def _val(flag: str) -> str:
                 return argv[argv.index(flag) + 1]
 
@@ -1574,7 +1395,7 @@ def test_merge_slices_combines_segments(tmp_path: Path) -> None:
     logs: list[str] = []
     assert backend._merge_slices(fake, work, 2, logs)
     merged = work / "merged" / "fid"
-    assert (merged / "test001.fid").read_bytes() == b"2a1a"  # in1 (segment 2) + in2 (merged)
+    assert (merged / "test001.fid").read_bytes() == b"2a1a"
     assert (merged / "test002.fid").read_bytes() == b"2b1b"
     add_calls = [c for c in fake.calls if c[0] == "addNMR"]
     assert len(add_calls) == 2
@@ -1668,8 +1489,7 @@ def test_convert_to_fid_segments_annotates_segment_kind(
     dst_b = tmp_path / "seg_b"
     shutil.copytree(bruker_dir / "nus_3d", dst_a)
     shutil.copytree(bruker_dir / "nus_3d", dst_b)
-    # 0.2.199-patch29dz: the pre-check requires acqus+ser (the simplified fixture
-    # directory has no ser, but real data always does)
+
     (dst_a / "ser").touch()
     (dst_b / "ser").touch()
     exp = read_segments([dst_a, dst_b])
@@ -1707,6 +1527,56 @@ def test_convert_to_fid_segments_annotates_segment_kind(
     assert "同网格叠加" in joined
 
 
+def test_convert_to_fid_repeat_uniform_does_not_write_empty_nuslist(
+    tmp_path: Path, bruker_dir: Path, monkeypatch
+) -> None:
+    """Regression coverage: test convert to fid repeat uniform does not write empty nuslist."""
+    import shutil
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+    from core.data.bruker_reader import read_segments
+
+    segments = []
+    for name in ("seg_a", "seg_b"):
+        dst = tmp_path / name
+        shutil.copytree(bruker_dir / "hnca_3d", dst)
+        (dst / "ser").touch()
+        segments.append(dst)
+    experiment = read_segments(segments)
+    work = tmp_path / "work"
+    backend = NMRPipeBackend(nmrpipe_bin="", work_dir=str(work))
+    monkeypatch.setattr(backend, "_bin_dir", lambda: Path("nmrpipe"))
+    monkeypatch.setattr(
+        backend,
+        "_clean_source_nus",
+        lambda experiment, raw_dirs, logs: (0, [], False),
+    )
+    monkeypatch.setattr(
+        backend,
+        "_convert_segments",
+        lambda runtime, experiment, work, shifts, fid_com_overrides=None: (True, []),
+    )
+    monkeypatch.setattr(
+        backend,
+        "_merged_fid_in",
+        lambda work, dataset_id: f"merged/{dataset_id}.fid",
+    )
+
+    def _unexpected_schedule(*args, **kwargs):
+        raise AssertionError("repeat_uniform must not merge a nuslist")
+
+    monkeypatch.setattr(backend, "_write_merged_nuslist", _unexpected_schedule)
+    work.mkdir()
+    (work / "nuslist").write_text("", encoding="utf-8")
+
+    result = backend.convert_to_fid(experiment, tmp_path)
+
+    assert result["success"] is True
+    assert result["effective_params"]["segment_kind"] == "repeat_uniform"
+    assert not (work / "nuslist").exists()
+    assert all("nuslist" not in line.lower() for line in result["logs"])
+
+
 def test_convert_to_fid_log_carries_the_car_reference_and_corrections(
     tmp_path: Path, bruker_dir: Path, monkeypatch
 ) -> None:
@@ -1728,33 +1598,33 @@ def test_convert_to_fid_log_carries_the_car_reference_and_corrections(
 
     copy = tmp_path / "hsqc"
     shutil.copytree(bruker_dir / "hsqc_2d", copy)
-    (copy / "ser").touch()  # the pre-check needs acqus+ser (a simplified fixture directory)
+    (copy / "ser").touch()
     experiment = read_dataset(copy)
     work = tmp_path / "process"
     work.mkdir()
-    # the conversion record (the real flow writes it via _convert_dir →
-    # _record_conversion, including the carrier and fid_com_corrections sidecars):
-    # prepared here directly to verify the log side really reads them.
-    (work / f"{experiment.dataset_id}.fid.conversion.json").write_text(
+    dataset_id = experiment.dataset_id
+
+    summary = "CAR: every dimension follows the acquisition centre (acqus O1/BF1)"
+    (work / f"{dataset_id}.carrier.json").write_text(
         _json.dumps(
             {
-                "raw_fingerprint": {},
-                "carrier": {
-                    "convention": "o1bf1",
-                    "summary": "CAR reference = the computed acquisition centre",
-                    "notes": [],
-                    "fix_lines": ["yCAR: fid.com=118.500 -> acqus O1/BF1=118.000"],
-                    "blocks": [
-                        "15N acquisition center : 118.00 ppm\n"
-                        "Configured target CAR  : 118.50 ppm\n"
-                        "Δ                       : +0.50 ppm\n"
-                        "status: REFERENCE_OVERRIDE"
-                    ],
-                    "dims": [{"axis": "y", "status": "REFERENCE_OVERRIDE"}],
-                },
-                "fid_com_corrections": ["yN: fid.com=256 -> acqus=512 (corrected)"],
+                "convention": "o1bf1",
+                "summary": summary,
+                "notes": [],
+                "fix_lines": ["yCAR: fid.com=118.500 -> acqus O1/BF1=118.000"],
+                "blocks": [
+                    "15N acquisition center : 118.00 ppm\n"
+                    "Configured target CAR  : 118.50 ppm\n"
+                    "Δ                       : +0.50 ppm\n"
+                    "status: REFERENCE_OVERRIDE"
+                ],
+                "dims": [{"axis": "y", "status": "REFERENCE_OVERRIDE"}],
             }
         ),
+        encoding="utf-8",
+    )
+    (work / f"{dataset_id}.fid_com_corrections.json").write_text(
+        _json.dumps({"lines": ["yN: fid.com=256 -> acqus=512 (corrected)"]}),
         encoding="utf-8",
     )
     backend = NMRPipeBackend(nmrpipe_bin="")
@@ -1768,9 +1638,77 @@ def test_convert_to_fid_log_carries_the_car_reference_and_corrections(
     result = backend.convert_to_fid(experiment, copy)
     assert result["success"] is True
     joined = "\n".join(result["logs"])
-    assert "REFERENCE_OVERRIDE" in joined  # the CAR reference convention block (report design)
-    assert "118.50 ppm" in joined and "+0.50 ppm" in joined
-    assert "yN: fid.com=256" in joined  # the list of fid.com corrections made during conversion
+    assert summary in joined
+    assert "yN: fid.com=256" in joined
+
+    assert "REFERENCE_OVERRIDE" not in joined
+    assert "Configured target CAR" not in joined
+
+    record = work / f"{dataset_id}.fid.conversion.json"
+    assert record.is_file()
+    payload = _json.loads(record.read_text(encoding="utf-8"))
+    assert payload["carrier"]["dims"][0]["status"] == "REFERENCE_OVERRIDE"
+    assert payload["fid_com_corrections"] == ["yN: fid.com=256 -> acqus=512 (corrected)"]
+
+
+def test_convert_to_fid_single_dataset_records_the_conversion(
+    tmp_path: Path, bruker_dir: Path, monkeypatch
+) -> None:
+    """Regression coverage: test convert to fid single dataset records the conversion."""
+    import shutil
+
+    copy = tmp_path / "hsqc"
+    shutil.copytree(bruker_dir / "hsqc_2d", copy)
+    (copy / "ser").touch()
+    experiment = read_dataset(copy)
+    work = tmp_path / "process"
+    work.mkdir()
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    monkeypatch.setattr(backend, "_bin_dir", lambda: Path("nmrpipe"))
+    monkeypatch.setattr(backend, "_work_path", lambda experiment: work)
+    monkeypatch.setattr(backend, "_convert", lambda *a, **k: (True, ["converted"]))
+    monkeypatch.setattr(
+        "backend.nmrpipe_backend.load_or_run_direct_diagnostics",
+        lambda work, experiment: None,
+    )
+    recorded: list[tuple] = []
+    monkeypatch.setattr(
+        backend,
+        "_record_conversion",
+        lambda *a, **k: recorded.append((a, k)),
+    )
+    result = backend.convert_to_fid(experiment, copy)
+    assert result["success"] is True
+
+    assert len(recorded) == 1, "single-dataset conversion did not record its provenance"
+    args, kwargs = recorded[0]
+    assert args[0] == work
+    assert args[1] == experiment.dataset_id
+
+    assert kwargs.get("experiment") is experiment
+
+
+def test_convert_to_fid_records_nothing_when_conversion_fails(
+    tmp_path: Path, bruker_dir: Path, monkeypatch
+) -> None:
+    """Regression coverage: test convert to fid records nothing when conversion fails."""
+    import shutil
+
+    copy = tmp_path / "hsqc"
+    shutil.copytree(bruker_dir / "hsqc_2d", copy)
+    (copy / "ser").touch()
+    experiment = read_dataset(copy)
+    work = tmp_path / "process"
+    work.mkdir()
+    backend = NMRPipeBackend(nmrpipe_bin="")
+    monkeypatch.setattr(backend, "_bin_dir", lambda: Path("nmrpipe"))
+    monkeypatch.setattr(backend, "_work_path", lambda experiment: work)
+    monkeypatch.setattr(backend, "_convert", lambda *a, **k: (False, ["boom"]))
+    recorded: list[tuple] = []
+    monkeypatch.setattr(backend, "_record_conversion", lambda *a, **k: recorded.append(a))
+    result = backend.convert_to_fid(experiment, copy)
+    assert result["success"] is False
+    assert recorded == []
 
 
 def test_convert_to_fid_segments_classify_failure_nonblocking(
@@ -1789,8 +1727,7 @@ def test_convert_to_fid_segments_classify_failure_nonblocking(
     dst_b = tmp_path / "seg_b"
     shutil.copytree(bruker_dir / "nus_3d", dst_a)
     shutil.copytree(bruker_dir / "nus_3d", dst_b)
-    # 0.2.199-patch29dz: the pre-check requires acqus+ser (the simplified fixture
-    # directory has no ser, but real data always does)
+
     (dst_a / "ser").touch()
     (dst_b / "ser").touch()
     exp = read_segments([dst_a, dst_b])
@@ -1830,9 +1767,6 @@ def test_convert_to_fid_segments_classify_failure_nonblocking(
     assert any("多段类型识别失败" in line for line in result["logs"])
 
 
-# ------------------------------------------------- 2026-09-24 review batch C guards
-
-
 def test_multi_segment_reuse_rejects_an_empty_or_truncated_merged_product(
     tmp_path: Path,
 ) -> None:
@@ -1857,10 +1791,10 @@ def test_multi_segment_reuse_rejects_an_empty_or_truncated_merged_product(
 
     logs: list[str] = []
     assert backend._converted_fid_is_current(work, "d_001", raw, logs) is True
-    merged.write_bytes(b"")  # a 0-byte product left by an interruption/full disk
+    merged.write_bytes(b"")
     logs.clear()
     assert backend._converted_fid_is_current(work, "d_001", raw, logs) is False
-    merged.write_bytes(b"x" * 8)  # truncated
+    merged.write_bytes(b"x" * 8)
     logs.clear()
     assert backend._converted_fid_is_current(work, "d_001", raw, logs) is False
 
@@ -1887,35 +1821,29 @@ def test_multi_segment_reuse_without_a_record_checks_the_field_drift(
         backend._converted_fid_is_current(work, "d_001", raw, logs, require_field_drift=True)
         is False
     )
-    # there is an explicit statement (the wording follows the UI language; the
-    # assertion only checks that something is said)
     assert logs
-    # the single-dataset route (require_field_drift=False) keeps the "an old project
-    # still reuses" behavior
+
     logs.clear()
     assert backend._converted_fid_is_current(work, "d_001", raw, logs) is True
 
 
-def test_segment_shift_failure_restores_the_script(tmp_path: Path) -> None:
-    """B6/B7: fid.com must be restored when csh returns non-zero or raises (including
-    a user "stop").
-    """
+def test_manual_segment_shift_failure_restores_the_script(tmp_path: Path) -> None:
+    """Regression coverage: test manual segment shift failure restores the script."""
     from backend.nmrpipe_backend import NMRPipeBackend
     from core.audit.qc_audit import QcAuditLog
 
     backend = NMRPipeBackend(nmrpipe_bin="")
     work = tmp_path / "process"
-    seg = work / "seg_001"
+    seg = work / "seg_002"
     seg.mkdir(parents=True)
     script = seg / "fid.com"
     original = "bruk2pipe -in ./ser \\\n| nmrPipe -fn MULT -c 1.0 \\\n"
     script.write_text(original, encoding="utf-8")
-    raw_dir = tmp_path / "raw"
-    raw_dir.mkdir()
-    experiment = SimpleNamespace(segments=[str(raw_dir)], dataset_id="d_001", ndim=2)
-    report = field_drift.GroupDriftResult(
-        offsets_hz=[None, 40.0], offsets_ppm=[None, 0.01]
-    )
+    raw1 = tmp_path / "raw1"
+    raw2 = tmp_path / "raw2"
+    raw1.mkdir()
+    raw2.mkdir()
+    experiment = SimpleNamespace(segments=[str(raw1), str(raw2)], dataset_id="d_001", ndim=2)
     audit = QcAuditLog(work)
 
     class _Fail:
@@ -1928,15 +1856,14 @@ def test_segment_shift_failure_restores_the_script(tmp_path: Path) -> None:
 
     logs: list[str] = []
     assert (
-        backend._apply_segment_shift(_Fail(), experiment, work, 0, 40.0, report, logs, audit)
-        is None
+        backend._apply_manual_segment_shifts(_Fail(), experiment, work, [0.0, 40.0], logs, audit)
+        == {}
     )
     assert script.read_text(encoding="utf-8") == original
+    logs.clear()
     assert (
-        backend._apply_segment_shift(_Boom(), experiment, work, 0, 40.0, report, logs, audit)
-        is None
+        backend._apply_manual_segment_shifts(_Boom(), experiment, work, [0.0, 40.0], logs, audit)
+        == {}
     )
     assert script.read_text(encoding="utf-8") == original
-    # both the restore and the failure must leave a trace (the wording follows the
-    # UI language)
     assert logs

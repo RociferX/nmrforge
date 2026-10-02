@@ -24,17 +24,12 @@ processing:
   memory_disk_path: ""           # optional: ramdisk root (default Linux /dev/shm; on Windows point at a self-created RAM disk)
 
 peaks:
-  # peak localisation (2026-09-13): the sub-grid refinement method that follows detection.
+  # peak localisation: the sub-grid refinement method that follows detection.
+  # Gaussian fitting was removed on 2026-09-26; three-point parabolic refinement is the only method.
+  # The ROI and iteration-budget keys (gaussian_roi_* / gaussian_max_nfev) were removed as well.
   # consumer: core/peaks/localize.py::load_localization_defaults (peak picking / GUI / API).
   localization:
-    method: parabolic           # parabolic (default, the existing 3-point parabola) | gaussian (2D only)
-    gaussian_roi_f1_ppm: 1.5    # Gaussian fit ROI radius (indirect dimension F1, ppm, physical width)
-    gaussian_roi_f2_ppm: 0.25   # Gaussian fit ROI radius (direct dimension F2, ppm, physical width)
-    gaussian_roi_max_points: 0  # maximum half-width per axis of the fitting window, in points: 0 = no limit (the default,
-                                # identical to earlier versions); a positive value such as 48 caps the fit size
-                                # on a fine grid (zero-filled) and speeds it up markedly (records roi_capped per peak
-                                # when it triggers; a failed fit automatically retries with the full ROI)
-    gaussian_max_nfev: 200      # maximum number of function evaluations for the single-peak least-squares fit (hard cap on a failing fit)
+    method: parabolic           # only method (three-point parabolic vertex)
 
 smile:
   nthread: 2                   # SMILE thread count (default 2; ceiling = machine cores - 2, only 1 on <=3 cores; 0 also falls back to the safe default of 2)

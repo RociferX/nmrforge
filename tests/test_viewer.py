@@ -99,9 +99,7 @@ def test_spectrum_axis_index_at_f() -> None:
 
 
 def test_spectrum_axis_fallback_carrier() -> None:
-    axis = SpectrumAxis(
-        label="F1", size=64, sw_hz=3000.0, obs_mhz=150.0, carrier_ppm=118.0
-    )
+    axis = SpectrumAxis(label="F1", size=64, sw_hz=3000.0, obs_mhz=150.0, carrier_ppm=118.0)
     ppm = axis.ppm
     assert ppm[0] > ppm[-1]
     assert abs(ppm[32] - 118.0) < 1e-6
@@ -247,12 +245,12 @@ def test_viewer_contour_defaults_and_english_labels(
     assert viewer.level_slider.value() == 31
     assert viewer._level_count == 8
     assert viewer.count_slider.value() == 8
-    assert viewer.level_label.text().startswith("Contour start 2.98%")
-    # cubic mapping: the first 10% threshold takes up most of the slider (steeper than squared)
+    assert viewer.level_label.text() == "2.98"
+
     viewer.level_slider.setValue(50)
     assert viewer._level_fraction() < 0.15
     viewer.level_slider.setValue(31)
-    assert viewer.count_label.text() == "Levels 8"
+    assert viewer.count_label.text() == "8"
     assert viewer.show_peaks_checkbox.text() == "Show peaks"
     assert viewer.show_1d_button.text() == "1D"
     viewer.close()
@@ -305,7 +303,7 @@ def test_viewer_nearest_peak(qapp: QApplication) -> None:
 
 def test_viewer_axis_direction_nmrdraw(qapp: QApplication) -> None:
     """Display convention (user 0.2.59 feedback): 1H high ppm on the left (x column 0 on the
-left), 15N high ppm at the bottom (y row 0 at the bottom)."""
+    left), 15N high ppm at the bottom (y row 0 at the bottom)."""
     import pyqtgraph as pg
 
     viewer = SpectrumViewer()
@@ -328,9 +326,9 @@ def test_viewer_aspect_ratio(qapp: QApplication) -> None:
     viewer = SpectrumViewer()
     viewer.add_spectrum(_synthetic_spectrum())
     viewer.set_aspect_ratio(2.0)
-    assert viewer.plot.getViewBox().state['aspectLocked'] == 2.0
+    assert viewer.plot.getViewBox().state["aspectLocked"] == 2.0
     viewer.set_aspect_ratio(None)
-    assert viewer.plot.getViewBox().state['aspectLocked'] is False
+    assert viewer.plot.getViewBox().state["aspectLocked"] is False
     viewer.close()
 
 
@@ -338,11 +336,11 @@ def test_viewer_aspect_slider(qapp: QApplication) -> None:
     viewer = SpectrumViewer()
     viewer.add_spectrum(_synthetic_spectrum())
     assert viewer.aspect_slider.value() == 0
-    assert viewer.plot.getViewBox().state['aspectLocked'] is False
+    assert viewer.plot.getViewBox().state["aspectLocked"] is False
     viewer.aspect_slider.setValue(200)
-    assert viewer.plot.getViewBox().state['aspectLocked'] == 2.0
+    assert viewer.plot.getViewBox().state["aspectLocked"] == 2.0
     viewer.aspect_slider.setValue(0)
-    assert viewer.plot.getViewBox().state['aspectLocked'] is False
+    assert viewer.plot.getViewBox().state["aspectLocked"] is False
     viewer.close()
 
 
@@ -390,7 +388,7 @@ def test_viewer_right_click_disabled(qapp: QApplication) -> None:
     viewer.add_spectrum(_synthetic_spectrum())
     vb = viewer.plot.getViewBox()
     # Check that right-click is disabled (no context menu created yet)
-    assert not hasattr(vb, 'menu') or vb.menu is None
+    assert not hasattr(vb, "menu") or vb.menu is None
     viewer.close()
 
 
@@ -420,12 +418,6 @@ def test_spectrum_window_load_failure(
     window.close()
 
 
-
-
-
-
-
-
 def test_viewer_drag_hold_follow_crosshair(qapp: QApplication) -> None:
     """hold left-button drag: eventFilter MouseMove drives crosshair."""
     from qtcompat.QtCore import QEvent, Qt
@@ -436,19 +428,20 @@ def test_viewer_drag_hold_follow_crosshair(qapp: QApplication) -> None:
     viewer.set_1d_mode(True)
     assert viewer._strips_active
     scene = viewer.plot.scene()
-    # the scene wrapper (PyQt returns a wrapper object from plot.scene())
 
     viewer._mouse_left_pressed = True
     calls: list[str] = []
     viewer._move_crosshair = lambda x, y: calls.append(f"move {x} {y}") or None
     viewer._update_strips = lambda y, x: calls.append(f"strips {y} {x}") or None
 
-    # view and scene are 1:1: build the drag position from the view point (40, 60)
     drag_pos = viewer.plot.getViewBox().mapViewToScene(QPointF(40.0, 60.0))
     drag = QMouseEvent(
         QEvent.Type.MouseMove,
-        drag_pos, drag_pos, drag_pos,
-        Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton,
+        drag_pos,
+        drag_pos,
+        drag_pos,
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.LeftButton,
         Qt.KeyboardModifier.NoModifier,
     )
     viewer.eventFilter(scene, drag)
@@ -477,8 +470,11 @@ def test_viewer_drag_1d_updates_readout(qapp: QApplication) -> None:
     drag_pos = viewer.plot.getViewBox().mapViewToScene(QPointF(20.0, 0.0))
     drag = QMouseEvent(
         QEvent.Type.MouseMove,
-        drag_pos, drag_pos, drag_pos,
-        Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton,
+        drag_pos,
+        drag_pos,
+        drag_pos,
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.LeftButton,
         Qt.KeyboardModifier.NoModifier,
     )
     viewer.eventFilter(scene, drag)
@@ -486,6 +482,7 @@ def test_viewer_drag_1d_updates_readout(qapp: QApplication) -> None:
     assert "1H" in text and "ppm" in text
     assert text != "Move mouse to read ppm"
     viewer.close()
+
 
 def test_scene_mouse_event_kind_maps_graphics_types(qapp: QApplication) -> None:
     """0.2.148: pyqtgraph scene drag event types GraphicsSceneMouse* must count as press/move."""
@@ -499,6 +496,7 @@ def test_scene_mouse_event_kind_maps_graphics_types(qapp: QApplication) -> None:
     assert viewer._mouse_event_kind(QEvent.Type.GraphicsSceneMouseMove) == "move"
     assert viewer._mouse_event_kind(QEvent.Type.GraphicsSceneMouseRelease) == "release"
     viewer.close()
+
 
 def test_value_spinboxes_roundtrip(qapp: QApplication) -> None:
     """0.2.148: values can be typed and sync both ways with the sliders; the level count is
@@ -520,10 +518,13 @@ def test_value_spinboxes_roundtrip(qapp: QApplication) -> None:
     viewer.level_slider.setValue(50)
     percent = viewer.level_label.value()
     assert 12.0 <= percent <= 13.0  # (0.5)^3 = 12.5%
-    # the value is displayed directly after the title
-    assert viewer.level_label.text().startswith("Contour start ")
-    assert viewer.level_label.text().endswith("%")
-    assert viewer.count_label.text().startswith("Levels ")
+
+    from qtcompat.QtWidgets import QLabel
+
+    assert viewer.level_label.prefix() == viewer.level_label.suffix() == ""
+    assert viewer.count_label.prefix() == ""
+    assert viewer.aspect_label.prefix() == viewer.aspect_label.suffix() == ""
+    assert {w.text() for w in viewer.level_controls.findChildren(QLabel)} == {"Contour start", "%"}
     viewer.close()
 
 
@@ -539,7 +540,132 @@ def test_phase_panel_spinboxes_roundtrip(qapp: QApplication) -> None:
     assert panel.p1_slider.value() == -45
     panel.p0_slider.setValue(75)
     assert panel.p0_label.value() == 75.0
-    assert panel.p0_label.text() == "P0: 75°"
+    assert panel.p0_label.text() == "75"
+    viewer.close()
+
+
+@pytest.mark.parametrize("decimal", [False, True])
+@pytest.mark.parametrize("enter_key", ["Key_Return", "Key_Enter"])
+def test_slider_input_requires_enter(qapp, decimal, enter_key) -> None:
+    from qtcompat.QtCore import Qt
+    from qtcompat.QtTest import QTest
+    from qtcompat.QtWidgets import QPushButton, QVBoxLayout, QWidget
+
+    from ui_support.numeric_inputs import CommitDoubleSpinBox, CommitSpinBox
+
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    spin = CommitDoubleSpinBox() if decimal else CommitSpinBox()
+    spin.setRange(0, 10)
+    spin.setValue(2)
+    button = QPushButton("Other control")
+    layout.addWidget(spin)
+    layout.addWidget(button)
+    host.show()
+    host.activateWindow()
+    spin.setFocus()
+    qapp.processEvents()
+    changed = []
+    spin.valueChanged.connect(changed.append)
+    spin.selectAll()
+    QTest.keyClicks(spin, "0")
+    assert spin.value() == 2 and changed == []
+    if decimal:
+        QTest.keyClicks(spin, ".5")
+    assert spin.value() == 2 and changed == []
+    QTest.keyClick(spin, getattr(Qt.Key, enter_key))
+    expected = 0.5 if decimal else 0
+    assert spin.value() == expected
+    assert changed == [expected]
+
+    spin.selectAll()
+    QTest.keyClicks(spin, "7")
+    QTest.keyClick(spin, Qt.Key.Key_Tab)
+    qapp.processEvents()
+    assert spin.value() == expected and changed == [expected]
+    spin.setFocus()
+    spin.selectAll()
+    QTest.keyClicks(spin, "8")
+    QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+    qapp.processEvents()
+    assert spin.value() == expected and changed == [expected]
+    assert float(spin.text()) == expected
+    host.close()
+
+
+@pytest.mark.parametrize("decimal", [False, True])
+def test_slider_input_cancel_and_arrows(qapp, decimal) -> None:
+    from qtcompat.QtCore import Qt
+    from qtcompat.QtTest import QTest
+    from qtcompat.QtWidgets import QStyle, QStyleOptionSpinBox
+
+    from ui_support.numeric_inputs import CommitDoubleSpinBox, CommitSpinBox
+
+    spin = CommitDoubleSpinBox() if decimal else CommitSpinBox()
+    spin.setRange(-10, 10)
+    step = 0.1 if decimal else 1
+    spin.setSingleStep(step)
+    spin.setValue(2)
+    spin.show()
+    spin.setFocus()
+    qapp.processEvents()
+    spin.selectAll()
+    QTest.keyClicks(spin, "-7")
+    QTest.keyClick(spin, Qt.Key.Key_Escape)
+    assert spin.value() == 2 and float(spin.text()) == 2
+    spin.selectAll()
+    QTest.keyClicks(spin, "8")
+    QTest.keyClick(spin, Qt.Key.Key_Up)
+    assert spin.value() == pytest.approx(2 + step)
+
+    spin.selectAll()
+    QTest.keyClicks(spin, "9")
+    option = QStyleOptionSpinBox()
+    spin.initStyleOption(option)
+    rect = spin.style().subControlRect(
+        QStyle.ComplexControl.CC_SpinBox, option, QStyle.SubControl.SC_SpinBoxDown, spin
+    )
+    QTest.mouseClick(spin, Qt.MouseButton.LeftButton, pos=rect.center())
+    assert spin.value() == pytest.approx(2)
+    spin.close()
+
+
+def test_viewer_aspect_decimal_and_precise_contour_commit(qapp, monkeypatch) -> None:
+    from qtcompat.QtCore import Qt
+    from qtcompat.QtTest import QTest
+
+    viewer = SpectrumViewer()
+    viewer.show()
+    spin = viewer.aspect_label
+    spin.setFocus()
+    spin.selectAll()
+    QTest.keyClicks(spin, "0")
+    assert spin.text() == "0" and viewer.aspect_slider.value() == 0
+    QTest.keyClicks(spin, ".1")
+    assert viewer.aspect_slider.value() == 0
+    QTest.keyClick(spin, Qt.Key.Key_Return)
+    assert spin.value() == 0.1 and viewer.aspect_slider.value() == 10
+    assert viewer.plot.getViewBox().state["aspectLocked"] == 0.1
+    spin.stepUp()
+    assert spin.value() == 0.15
+    assert spin.singleStep() == 0.05
+    assert viewer.level_label.singleStep() == 0.1
+    fired = []
+    monkeypatch.setattr(viewer, "_update_levels", lambda: fired.append(1))
+    viewer.level_label.setValue(50.0)
+    viewer.level_label.stepUp()
+    assert viewer.level_label.value() == 50.1
+    assert viewer._level_fraction() == pytest.approx(0.501)
+    assert len(fired) == 2
+    viewer.save_contour_state("typed")
+    viewer.level_label.setValue(2)
+    viewer.restore_contour_state("typed")
+    assert viewer.level_label.value() == 50.1
+    fired.clear()
+    viewer.level_slider.setValue(40)
+    assert fired == []
+    viewer.level_slider.sliderReleased.emit()
+    assert fired == [1]
     viewer.close()
 
 
@@ -580,7 +706,7 @@ def test_data_bounds_item_tracks_spectrum(qapp: QApplication) -> None:
     assert item.parentItem() is vb.childGroup
     # ignoreBounds=True: not in addedItems, so it does not take part in auto-scaling
     assert item in vb.addedItems
-        # 0.2.150: removed ignoreBounds (box now in addedItems)
+    # 0.2.150: removed ignoreBounds (box now in addedItems)
     # removed together with the spectrum on clear (it no longer exists)
     viewer.clear()
     assert viewer._data_bounds_item is None
@@ -595,22 +721,24 @@ def test_slice_point_and_ppm_editable(qapp: QApplication) -> None:
     from viewer.spectrum3d_panel import Spectrum3DPanel
 
     axes = [
-        SpectrumAxis(label="H", size=24, sw_hz=3000.0, obs_mhz=500.0,
-                     carrier_ppm=4.7, orig_hz=4.7 * 500.0),
-        SpectrumAxis(label="N", size=16, sw_hz=1200.0, obs_mhz=50.0,
-                     carrier_ppm=118.0, orig_hz=118.0 * 50.0),
-        SpectrumAxis(label="C", size=12, sw_hz=4000.0, obs_mhz=125.0,
-                     carrier_ppm=55.0, orig_hz=55.0 * 125.0),
+        SpectrumAxis(
+            label="H", size=24, sw_hz=3000.0, obs_mhz=500.0, carrier_ppm=4.7, orig_hz=4.7 * 500.0
+        ),
+        SpectrumAxis(
+            label="N", size=16, sw_hz=1200.0, obs_mhz=50.0, carrier_ppm=118.0, orig_hz=118.0 * 50.0
+        ),
+        SpectrumAxis(
+            label="C", size=12, sw_hz=4000.0, obs_mhz=125.0, carrier_ppm=55.0, orig_hz=55.0 * 125.0
+        ),
     ]
     spec = Spectrum3D(data=np.zeros((24, 16, 12)), axes=axes)
     panel = Spectrum3DPanel()
     fired: list[int] = []
     panel.slice_changed.connect(lambda: fired.append(1))
     panel.set_spectrum3d(spec)
-    # 0.2.199-patch29bh: the CH plane comes first (H/N/C labels -> N pinned); the fallback
-    # assertion uses axes[2]
-    assert panel._slice_axis == 1
-    axis = axes[1]  # default CH plane, N pinned
+
+    assert panel._slice_axis == 0
+    axis = axes[0]
     mid = axis.size // 2
     assert panel.slice_slider.value() == mid
     assert panel.point_spin.value() == mid
@@ -627,13 +755,14 @@ def test_slice_point_and_ppm_editable(qapp: QApplication) -> None:
     panel.slice_slider.setValue(9)
     assert panel.point_spin.value() == 9
     assert abs(panel.ppm_spin.value() - axis.ppm_at(9)) < 1e-2
-    assert fired  # both set_spectrum3d and input trigger a redraw
+
+    panel.plane_combo.setCurrentIndex(0)
+    assert panel._slice_axis == 2
+    assert fired
     panel.clear()
     assert not panel.point_spin.isEnabled()
     assert not panel.ppm_spin.isEnabled()
     panel.close()
-
-
 
 
 def test_highlight_pans_view_to_peak(qapp: QApplication) -> None:
@@ -644,7 +773,7 @@ def test_highlight_pans_view_to_peak(qapp: QApplication) -> None:
     viewer.add_spectrum(spectrum)
     viewer.set_peaks(
         [
-            {'H_shift': spectrum.x_axis.ppm_at(30), 'N_shift': spectrum.y_axis.ppm_at(20)},
+            {"H_shift": spectrum.x_axis.ppm_at(30), "N_shift": spectrum.y_axis.ppm_at(20)},
         ]
     )
     vb = viewer.plot.getViewBox()
@@ -657,7 +786,6 @@ def test_highlight_pans_view_to_peak(qapp: QApplication) -> None:
     viewer.close()
 
 
-
 def test_peak_label_leader_line(qapp: QApplication) -> None:
     # 0.2.199-patch29bm: a horizontal leader line from the label to the peak marker, with a
     # gap; hiding the label hides the line too
@@ -667,9 +795,9 @@ def test_peak_label_leader_line(qapp: QApplication) -> None:
     viewer.set_peaks(
         [
             {
-                'H_shift': spectrum.x_axis.ppm_at(30),
-                'N_shift': spectrum.y_axis.ppm_at(20),
-                'label': 'G1',
+                "H_shift": spectrum.x_axis.ppm_at(30),
+                "N_shift": spectrum.y_axis.ppm_at(20),
+                "label": "G1",
             }
         ]
     )
@@ -679,6 +807,7 @@ def test_peak_label_leader_line(qapp: QApplication) -> None:
     viewer.set_peak_labels_visible(True)
     assert viewer._label_overlay.visible_label_count() == 1
     viewer.close()
+
 
 def test_label_positions_magnified_about_center(qapp: QApplication) -> None:
     """0.2.199-patch29cl/patch29cm: assignment = the peak layer magnified 1.25 x about the
@@ -691,14 +820,14 @@ def test_label_positions_magnified_about_center(qapp: QApplication) -> None:
     viewer.set_peaks(
         [
             {
-                'H_shift': spectrum.x_axis.ppm_at(30),
-                'N_shift': spectrum.y_axis.ppm_at(20),
-                'label': 'G1',
+                "H_shift": spectrum.x_axis.ppm_at(30),
+                "N_shift": spectrum.y_axis.ppm_at(20),
+                "label": "G1",
             },
             {
-                'H_shift': spectrum.x_axis.ppm_at(40),
-                'N_shift': spectrum.y_axis.ppm_at(30),
-                'label': 'G2',
+                "H_shift": spectrum.x_axis.ppm_at(40),
+                "N_shift": spectrum.y_axis.ppm_at(30),
+                "label": "G2",
             },
         ]
     )
@@ -709,9 +838,7 @@ def test_label_positions_magnified_about_center(qapp: QApplication) -> None:
     vb = viewer.plot.getViewBox()
     for row, (xi, yi) in enumerate(viewer._peak_data_xy):
         lp = viewer._label_widget_pos(row)
-        pp = viewer.plot.mapFromScene(
-            vb.mapViewToScene(QPointF(float(xi), float(yi)))
-        )
+        pp = viewer.plot.mapFromScene(vb.mapViewToScene(QPointF(float(xi), float(yi))))
         assert lp is not None
         assert abs((lp.x() - cx) - 1.25 * (pp.x() - cx)) < 2.0
         assert abs((lp.y() - cy) - 1.25 * (pp.y() - cy)) < 2.0
@@ -720,9 +847,7 @@ def test_label_positions_magnified_about_center(qapp: QApplication) -> None:
     qapp.processEvents()
     for row, (xi, yi) in enumerate(viewer._peak_data_xy):
         lp = viewer._label_widget_pos(row)
-        pp = viewer.plot.mapFromScene(
-            vb.mapViewToScene(QPointF(float(xi), float(yi)))
-        )
+        pp = viewer.plot.mapFromScene(vb.mapViewToScene(QPointF(float(xi), float(yi))))
         assert lp is not None
         assert abs((lp.x() - cx) - 1.25 * (pp.x() - cx)) < 2.0
         assert abs((lp.y() - cy) - 1.25 * (pp.y() - cy)) < 2.0
@@ -739,9 +864,9 @@ def test_label_drag_updates_position(qapp: QApplication) -> None:
     viewer.set_peaks(
         [
             {
-                'H_shift': spectrum.x_axis.ppm_at(30),
-                'N_shift': spectrum.y_axis.ppm_at(20),
-                'label': 'G1',
+                "H_shift": spectrum.x_axis.ppm_at(30),
+                "N_shift": spectrum.y_axis.ppm_at(20),
+                "label": "G1",
             }
         ]
     )
@@ -765,8 +890,8 @@ def test_highlight_flash_only_when_requested(qapp: QApplication) -> None:
     viewer.set_peaks(
         [
             {
-                'H_shift': spectrum.x_axis.ppm_at(30),
-                'N_shift': spectrum.y_axis.ppm_at(20),
+                "H_shift": spectrum.x_axis.ppm_at(30),
+                "N_shift": spectrum.y_axis.ppm_at(20),
             }
         ]
     )

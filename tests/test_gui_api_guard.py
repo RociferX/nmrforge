@@ -54,9 +54,7 @@ def test_no_cross_object_private_access_in_gui() -> None:
     offenders = []
     for path in sorted((ROOT / "gui").rglob("*.py")):
         rel = path.relative_to(ROOT).as_posix()
-        for lineno, line in enumerate(
-            path.read_text(encoding="utf-8").splitlines(), 1
-        ):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if not CROSS_PRIVATE_RE.search(line):
                 continue
             if f"{rel}:{line.strip()}" in ALLOWED:
@@ -78,9 +76,7 @@ def test_controller_data_facts_is_public(tmp_path: Path) -> None:
     assert not hasattr(controller, "data_facts_private")
 
 
-def test_panel_public_accessors(
-    tmp_path: Path, qapp: QApplication, host
-) -> None:
+def test_panel_public_accessors(tmp_path: Path, qapp: QApplication, host) -> None:
     from core.workspace import WorkspaceManager
     from gui.pipeline_panel import PipelinePanel
     from gui.project_tree import ProjectTreePanel

@@ -67,13 +67,10 @@ grid, or the sampling list contains duplicate or out-of-range coordinates.
 3. Fixing the classification matters more than it looks: uniform and NUS change the meaning of
    every processing parameter, which is why there is no "process anyway" flag.
 
-## "Gaussian peak fitting is currently supported only for 2D spectra."
+## A call requests a removed peak-localization method
 
-Gaussian localisation is a 2D model, so it is refused for 1D and 3D spectra rather than silently
-falling back to parabolic refinement. Use `localization: parabolic`, or run the 2D plane.
-
-If a Gaussian fit fails for a specific peak, that single peak falls back to parabolic and the
-reason is recorded in `<peak table>.localization.json` and in the run parameters.
+Only three-point parabolic localization is supported. Older Gaussian-fitting or combined-method
+requests are rejected rather than silently substituted; use the supported `parabolic` method.
 
 ## The AppImage does not start
 

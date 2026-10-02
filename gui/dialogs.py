@@ -1,6 +1,7 @@
 """GUI Dialog component: information/confirm/Import experiments/project form. Do not use
 QMessageBox (when triggering the modal QMessageBox from the menu under Windows + Qt6, it will
-print "This plugin supports grabbing the mouse only for popup windows"), use ordinary QDialog."""
+print "This plugin supports grabbing the mouse only for popup windows"), use ordinary QDialog.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +16,6 @@ from qtcompat.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
-    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -31,6 +31,7 @@ from qtcompat.QtWidgets import (
     QWidget,
 )
 
+from gui.file_dialogs import choose_directory
 from gui.notes import (
     DIMENSION_OPTIONS,
     EXPERIMENT_CATEGORY_OPTIONS,
@@ -40,12 +41,13 @@ from gui.notes import (
 )
 from qtcompat import Signal
 from ui_support.i18n import tr
-from ui_support.theme import TEXT_MUTED, TEXT_PRIMARY
+from ui_support.theme import STATUS_COLORS, TEXT_MUTED, TEXT_PRIMARY
 
 
 def _center_on_screen(dialog: QDialog) -> None:
     """Move the dialog box to the centre of the screen where it is located (all pop-up windows are
-    centered, 0.2.112)."""
+    centered, 0.2.112).
+    """
     parent = dialog.parentWidget()
     screen = None
     if parent is not None:
@@ -73,7 +75,8 @@ class _DialogCenteringFilter(QObject):
 
 def install_dialog_centering(app) -> None:
     """Installs the application-level dialog centering filter (main window/Independent viewer entry
-    call)."""
+    call).
+    """
     app._dialog_centering_filter = _DialogCenteringFilter(app)
     app.installEventFilter(app._dialog_centering_filter)
 
@@ -83,7 +86,8 @@ class InfoDialog(QDialog):
     0.2.199-patch29et: Popup type + show front screen centre -- The move() of ordinary QDialog
     under native Wayland is ignored by the synthesizer (the pop-up window falls in the upper
     left corner), and the Popup moves to the xdg_popup positioner and can be reliably centered;
-    click outside to close (small information pop-up window semantics)."""
+    click outside to close (small information pop-up window semantics).
+    """
 
     def __init__(self, parent: QWidget | None, title: str, text: str) -> None:
         super().__init__(parent)
@@ -97,8 +101,7 @@ class InfoDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
         buttons.accepted.connect(self.accept)
         layout.addWidget(buttons)
-        # 0.2.199-patch29et: Centered in front of show (Wayland xdg_popup is anchored at the initial
-        # position when displayed, and moving after show is invalid).
+
         self.adjustSize()
         _center_on_screen(self)
 
@@ -109,7 +112,8 @@ class InfoDialog(QDialog):
 
 class MultiSelectDataDialog(QDialog):
     """Multi-select sample data dialog box (used to add other data to the data group). items:
-    [(data_id, label),...];selected_ids() Returns the checked data id list."""
+    [(data_id, label),...];selected_ids() Returns the checked data id list.
+    """
 
     def __init__(
         self,
@@ -123,23 +127,19 @@ class MultiSelectDataDialog(QDialog):
         layout = QVBoxLayout(self)
         hint = QLabel(
             tr(
-            "Check the sample data to be added to the group (multiple choices are "
-            "available):",
-        )
+                "Check the sample data to be added to the group (multiple choices are available):",
+            )
         )
         layout.addWidget(hint)
         self._list = QListWidget()
-        self._list.setSelectionMode(
-            QAbstractItemView.SelectionMode.MultiSelection
-        )
+        self._list.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
         for data_id, label in items:
             item = QListWidgetItem(f"{label} ({data_id})")
             item.setData(Qt.ItemDataRole.UserRole, data_id)
             self._list.addItem(item)
         layout.addWidget(self._list)
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr("Join group"))
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("Cancel"))
@@ -168,8 +168,7 @@ class ConfirmDialog(QDialog):
         message.setWordWrap(True)
         layout.addWidget(message)
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Yes
-            | QDialogButtonBox.StandardButton.No
+            QDialogButtonBox.StandardButton.Yes | QDialogButtonBox.StandardButton.No
         )
         buttons.button(QDialogButtonBox.StandardButton.Yes).setText(tr("yes"))
         buttons.button(QDialogButtonBox.StandardButton.No).setText(tr("no"))
@@ -227,9 +226,8 @@ class ImportExperimentDialog(QDialog):
         form.addRow(tr("Related projects:"), self.sample_combo)
         self.copy_check = QCheckBox(
             tr(
-            "Link raw data to project (read-only file link, copy if "
-            "necessary)",
-        )
+                "Link raw data to project (read-only file link, copy if necessary)",
+            )
         )
         self.copy_check.setChecked(True)
         self.copy_check.setToolTip(
@@ -241,10 +239,9 @@ class ImportExperimentDialog(QDialog):
             )
         )
         form.addRow("", self.copy_check)
-        # 0.2.108: Segmented collection and import (container directory, multiple subdirectories
-        # containing acqus are merged into one piece of data).
+
         self.segmented_check = QCheckBox(
-                tr(
+            tr(
                 "Segmented data or repeated experiment overlay import (container directory: "
                 "multiple subdirectories containing acqus are merged into one "
                 "data)",
@@ -254,8 +251,9 @@ class ImportExperimentDialog(QDialog):
             tr(
                 "Use this for one acquisition split into several segments (segmented NUS / "
                 "averaged repeat experiments); leave it unchecked for an ordinary single data set. "
-                "It is ticked automatically when you pick a container "
-                "directory.",
+                'The separate "segmented data or repeated experiment overlay import" entry does '
+                "the same thing — this box is for when you already have the single-import dialog "
+                "open.",
             )
         )
         self.segmented_check.setChecked(False)
@@ -263,8 +261,7 @@ class ImportExperimentDialog(QDialog):
         layout.addLayout(form)
 
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr("import"))
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("Cancel"))
@@ -273,26 +270,33 @@ class ImportExperimentDialog(QDialog):
         layout.addWidget(buttons)
 
     def _browse(self) -> None:
-        # 0.2.199-patch29gg: When empty input, start from "data directory" (default user main
-        # directory).
+
         from gui.settings import data_root_path
 
         start = self.source_edit.text().strip() or str(data_root_path())
-        path = QFileDialog.getExistingDirectory(
-            self, tr("Select Bruker dataset directory"), start
-        )
+        path = choose_directory(self, tr("Select Bruker dataset directory"), start)
         if path:
             self.source_edit.setText(path)
 
     def _update_segmented_hint(self, text: str = "") -> None:
-        """When the source directory is a container directory (>= 2 subdirectories containing
-        acqus), segmented import is automatically checked."""
+        """Suggest segmented import when the source contains at least two acqus-bearing
+        directories.
+
+        Do not select it automatically: only the user can determine whether the children are
+        segments of one dataset or independent datasets.
+        """
         try:
             from gui.processing import is_segmented_container
 
             if text and is_segmented_container(text):
-                self.segmented_check.setChecked(True)
-        except Exception:  # noqa: BLE001 - Maintain current state when directory is unreadable.
+                self.segmented_check.setToolTip(
+                    tr(
+                        "This directory holds several data subdirectories. If they are parts of "
+                        "one acquisition (complementary NUS / repeated experiment), tick this box; "
+                        "if they are independent data sets, import them one by one instead.",
+                    )
+                )
+        except Exception:  # noqa: BLE001
             pass
 
     def _validate_and_accept(self) -> None:
@@ -308,9 +312,6 @@ class ImportExperimentDialog(QDialog):
             from gui.processing import is_segmented_container
 
             if not is_segmented_container(source_path):
-                # 0.2.198: It is normal that the top level of the container does not contain acqus.
-                # It prompts to focus on the "data segment" and no longer regards "the top level is
-                # missing acqus" as a problem.
                 InfoDialog.show_info(
                     self,
                     tr("hint"),
@@ -341,7 +342,8 @@ class NotesDialog(QDialog):
     use drop-down for fields with only a few values. For sample data annotation, select
     dimension first, and then filter by presets to provide data type options; experimental
     annotations only display currently supported experimental categories; core (combination)
-    also provides common options. The remaining fields remain text input."""
+    also provides common options. The remaining fields remain text input.
+    """
 
     def __init__(
         self,
@@ -380,8 +382,6 @@ class NotesDialog(QDialog):
                 combo.setEditable(True)
                 combo.addItem("", "")
                 if kind == "experiment":
-                    # Experiment annotations only display currently supported experimental
-                    # categories.
                     combo.addItems(EXPERIMENT_CATEGORY_OPTIONS)
                 else:
                     self._type_combo = combo
@@ -418,16 +418,14 @@ class NotesDialog(QDialog):
                 form.addRow(f"{label}:", edit)
         layout.addLayout(form)
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr("Sure"))
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("Cancel"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-        # Sample data annotation: After dimension is determined, fill in the data type option
-        # (select dimension first, then type).
+
         self._on_dimension_changed()
 
     def _dimension_value(self) -> str:
@@ -469,49 +467,48 @@ class NotesDialog(QDialog):
                 fields[key] = text
         return fields
 
+
 class ScriptEditorDialog(QDialog):
     """Script editor (a simple text editor that imitates VSCode). Load.com content from
     render_scripts / manual_scripts; save written data to process directory (or fid.com of raw
     directory); "Run" issues run_requested(content), which is executed and registered by the
     main window via ProcessingController.run_manual_spectrum / run_manual_fid_com and registers
-    WorkflowRun."""
+    WorkflowRun.
+    """
 
-    run_requested = Signal(str)  # Script content: emitted when "Run" is clicked.
+    run_requested = Signal(str)
 
     @staticmethod
     def _hint_text(script_name: str) -> str:
         """Corresponding prompts are given according to the script type: fid.com is a Bruker
         conversion script, and the processing script (process/nus) is NMRPipe spectrum
-        processing. The prompts are different."""
+        processing. The prompts are different.
+        """
         if script_name == "fid.com":
-            return (
-                tr(
-                    "fid.com converts the raw Bruker data into an NMRPipe fid; the backend "
-                    "generates it from the acquisition parameters, so it usually needs no "
-                    "changes.\n- Conversion parameters (OBS/CAR/SW and friends) come from the "
-                    "Bruker parameters; do not change them casually;\n- To adjust the spectrum "
-                    "reference or carrier, edit the CAR entries such as -xCAR/-yCAR;\n- For NUS "
-                    "data keep the nuslist handling; do not delete the sampling information;\n- "
-                    "The output name is already {data id}.fid (Bruker's default test.fid is\n  "
-                    "rewritten automatically by the backend; 3D slices keep test%03d.fid); after "
-                    "the run the\n  backend moves it back to process/, so there is no need to move "
-                    "or rename it by "
-                    "hand.",
-                )
+            return tr(
+                "fid.com converts the raw Bruker data into an NMRPipe fid; the backend "
+                "generates it from the acquisition parameters, so it usually needs no "
+                "changes.\n- Conversion parameters (OBS/CAR/SW and friends) come from the "
+                "Bruker parameters; do not change them casually;\n- To adjust the spectrum "
+                "reference or carrier, edit the CAR entries such as -xCAR/-yCAR;\n- For NUS "
+                "data keep the nuslist handling; do not delete the sampling information;\n- "
+                "The output name is already {data id}.fid (Bruker's default test.fid is\n  "
+                "rewritten automatically by the backend; 3D slices keep test%03d.fid); after "
+                "the run the\n  backend moves it back to process/, so there is no need to move "
+                "or rename it by "
+                "hand.",
             )
-        return (
-            tr(
-                "The processing script is generated automatically by the backend from the sampling "
-                "mode and usually needs no changes.\n- Poor baseline (wavy spectrum / spurious "
-                "peaks): append `| nmrPipe -fn POLY -auto` after the FT of that dimension, or "
-                "fine-tune POLY -ord;\n- Poor peak shape or resolution: adjust -off/-end/-pow/-c "
-                "of the SP window function, or increase ZF -size;\n- Poor phase: adjust PS -p0/-p1 "
-                "(auto phasing fills them in; normally leave them alone);\n- The -alt/-neg/-real "
-                "flags of the FT are decided automatically from the sampling mode; if you believe "
-                "the choice is wrong you can edit them: -neg flips the spectrum, -alt shifts it by "
-                "half the spectral "
-                "width.",
-            )
+        return tr(
+            "The processing script is generated automatically by the backend from the sampling "
+            "mode and usually needs no changes.\n- Poor baseline (wavy spectrum / spurious "
+            "peaks): append `| nmrPipe -fn POLY -auto` after the FT of that dimension, or "
+            "fine-tune POLY -ord;\n- Poor peak shape or resolution: adjust -off/-end/-pow/-c "
+            "of the SP window function, or increase ZF -size;\n- Poor phase: adjust PS -p0/-p1 "
+            "(auto phasing fills them in; normally leave them alone);\n- The -alt/-neg/-real "
+            "flags of the FT are decided automatically from the sampling mode; if you believe "
+            "the choice is wrong you can edit them: -neg flips the spectrum, -alt shifts it by "
+            "half the spectral "
+            "width.",
         )
 
     def __init__(
@@ -539,20 +536,16 @@ class ScriptEditorDialog(QDialog):
         self.editor.setFont(font)
         layout.addWidget(self.editor, 1)
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         self.save_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
         self.save_btn.setText(tr("save"))
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("Cancel"))
-        self.run_btn = buttons.addButton(
-            tr("run"), QDialogButtonBox.ButtonRole.ActionRole
-        )
+        self.run_btn = buttons.addButton(tr("run"), QDialogButtonBox.ButtonRole.ActionRole)
         self.run_btn.setToolTip(
             tr(
-            "Save the current script to the data directory and run (register "
-            "WorkflowRun)",
-        )
+                "Save the current script to the data directory and run (register WorkflowRun)",
+            )
         )
         self.run_btn.clicked.connect(self._on_run)
         buttons.accepted.connect(self._on_save)
@@ -564,13 +557,15 @@ class ScriptEditorDialog(QDialog):
 
     def _on_save(self) -> None:
         """"Save": write back the data directory and then close (0.2.192 Repair: the previous save
-        did not save to disk)."""
+        did not save to disk).
+        """
         self.save_script()
         self.accept()
 
     def _on_run(self) -> None:
         """"Run": Save the current script first, then automatically close after sending the content
-        (0.2.192)."""
+        (0.2.192).
+        """
         self.save_script()
         self.run_requested.emit(self.editor.toPlainText())
         self.close()
@@ -580,7 +575,8 @@ class ScriptEditorDialog(QDialog):
 
     def save_script(self) -> Path | None:
         """Save the current content to the data directory (returns None if there is no
-        directory)."""
+        directory).
+        """
         if self.save_dir is None:
             self.save_message.setText(tr("No save directory specified (data needs to be selected)"))
             return None
@@ -606,7 +602,7 @@ class RunHistoryDialog(QDialog):
         project_root: Path | str | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(tr("run history - {p0}", p0=project_name or 'NMRForge'))
+        self.setWindowTitle(tr("run history - {p0}", p0=project_name or "NMRForge"))
         self.project_root = Path(project_root) if project_root else None
         self._current_snapshot = ""
         self.resize(720, 480)
@@ -654,7 +650,7 @@ class RunHistoryDialog(QDialog):
             return
         outputs = "\n".join(f"  {k}: {v}" for k, v in run.outputs.items()) or tr(" (none)")
         snapshot = run.snapshot_dir or ""
-        scripts = ",".join(run.scripts) if run.scripts else tr("(none)")
+        scripts = "、".join(run.scripts) if run.scripts else tr("(none)")
         self._current_snapshot = ""
         if snapshot and self.project_root is not None:
             candidate = self.project_root / snapshot
@@ -669,8 +665,8 @@ class RunHistoryDialog(QDialog):
                 p1=run.status,
                 p2=run.workflow_ref,
                 p3=run.experiment_id,
-                p4=run.message or '-',
-                p5=snapshot or '(none)',
+                p4=run.message or "-",
+                p5=snapshot or "(none)",
                 p6=scripts,
                 p7=outputs,
             )
@@ -685,9 +681,11 @@ class RunHistoryDialog(QDialog):
 
         QDesktopServices.openUrl(QUrl.fromLocalFile(self._current_snapshot))
 
+
 class BatchSummaryDialog(QDialog):
     """Batch processing summary: success/failure list; Double-click the failed item to locate the
-    data (stage C1)."""
+    data (stage C1).
+    """
 
     locate_requested = Signal(str)  # data_id
 
@@ -698,7 +696,7 @@ class BatchSummaryDialog(QDialog):
         project_name: str = "",
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(tr("Batch processing summary - {p0}", p0=project_name or 'NMRForge'))
+        self.setWindowTitle(tr("Batch processing summary - {p0}", p0=project_name or "NMRForge"))
         self.resize(520, 380)
         layout = QVBoxLayout(self)
         info = QLabel(str(summary.get("info", "")))
@@ -707,11 +705,7 @@ class BatchSummaryDialog(QDialog):
         self.list_widget = QListWidget()
         layout.addWidget(self.list_widget, 1)
         for item in summary.get("items", []):
-            status = (
-                tr("success")
-                if item.get("ok")
-                else tr("fail: ") + str(item.get("error", ""))
-            )
+            status = tr("success") if item.get("ok") else tr("fail: ") + str(item.get("error", ""))
             list_item = QListWidgetItem(
                 f"{item.get('data_id', '')} {item.get('step', '')} · {status}"
             )
@@ -720,10 +714,10 @@ class BatchSummaryDialog(QDialog):
         self.list_widget.itemDoubleClicked.connect(self._on_item_activated)
         hint = QLabel(
             tr(
-            "Double-click an entry to locate the corresponding data (failed items) or view the "
-            "status on the "
-            "left",
-        )
+                "Double-click an entry to locate the corresponding data (failed items) or view the "
+                "status on the "
+                "left",
+            )
         )
         hint.setStyleSheet(f"color: {TEXT_MUTED};")
         layout.addWidget(hint)
@@ -740,13 +734,13 @@ class BatchSummaryDialog(QDialog):
 class SettingsDialog(QDialog):
     """Software settings (simplification, stage C3): interface language, NMRPipe path, default
     line width, simple mode; line width access generates spectrum parameter; save to
-    nmrforge_data/config/nmrforge.local.yaml, restart to take effect."""
+    nmrforge_data/config/nmrforge.local.yaml, restart to take effect.
+    """
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(tr("Software settings"))
-        # 0.2.199-patch29gh(user):The window is too short causing row content to be
-        # cropped/Incomplete text display.
+
         self.resize(560, 480)
         self.setMinimumWidth(520)
         from gui.settings import (
@@ -762,8 +756,16 @@ class SettingsDialog(QDialog):
         self.nmrpipe_edit = QLineEdit(str(settings.get("nmrpipe_path", "")))
         self.nmrpipe_edit.setPlaceholderText(tr("Not configured (auto-find)"))
         form.addRow(tr("NMRPipe path"), self.nmrpipe_edit)
-        # 0.2.199-patch29gg(user): data directory (empty = user main directory, import browsing
-        # starting point).
+
+        self.bruker_edit = QLineEdit(str(settings.get("bruker_path", "")))
+        self.bruker_edit.setPlaceholderText(tr("Not configured (auto-find)"))
+        form.addRow(tr("bruker path"), self.bruker_edit)
+        self.proj3d_edit = QLineEdit(str(settings.get("proj3d_path", "")))
+        self.proj3d_edit.setPlaceholderText(tr("Not configured (auto-find)"))
+        form.addRow(tr("proj3D.tcl path"), self.proj3d_edit)
+
+        form.addRow(tr("SMILE plugin"), self._build_smile_status(settings))
+
         self.data_root_edit = QLineEdit(str(settings.get("data_root", "")))
         self.data_root_edit.setPlaceholderText(tr("default: {p0}", p0=Path.home()))
         data_root_browse = QPushButton(tr("Browse..."))
@@ -774,9 +776,7 @@ class SettingsDialog(QDialog):
         data_root_widget = QWidget()
         data_root_widget.setLayout(data_root_row)
         form.addRow(tr("Data directory"), data_root_widget)
-        # 2026-09-21 (user): the interface language can be pinned here instead of relying on
-        # the system locale / NMRFORGE_LANG. Same order as the resolver: auto follows the
-        # system, zh/en pin it (an environment variable can still override it per run).
+
         self.language_combo = QComboBox()
         for _label, _code in (
             (tr("Follow the system language"), "auto"),
@@ -802,19 +802,13 @@ class SettingsDialog(QDialog):
             spin.setValue(float(settings["linewidth_hz"].get(nucleus, default)))
             form.addRow(tr("{p0} Default line width (Hz)", p0=nucleus), spin)
             self.linewidth_spins[nucleus] = spin
-            # 0.2.199-patch29fx(user): Alignment tolerance and line width are set at the same place.
-            # Default Poky kr: 1H +/-0.02, 15N/13C +/-0.2 ppm.
-            tol_default = float(
-                DEFAULTS["alignment_tolerance_ppm"].get(nucleus, 0.2)
-            )
+
+            tol_default = float(DEFAULTS["alignment_tolerance_ppm"].get(nucleus, 0.2))
             tol_spin = QDoubleSpinBox()
             tol_spin.setRange(0.001, 2.0)
             tol_spin.setDecimals(3)
             tol_spin.setValue(
-                float(
-                    (settings.get("alignment_tolerance_ppm") or {})
-                    .get(nucleus, tol_default)
-                )
+                float((settings.get("alignment_tolerance_ppm") or {}).get(nucleus, tol_default))
             )
             tol_spin.setToolTip(
                 tr(
@@ -825,9 +819,9 @@ class SettingsDialog(QDialog):
             )
             form.addRow(tr("{p0} alignment tolerance (ppm)", p0=nucleus), tol_spin)
             self.tolerance_spins[nucleus] = tol_spin
-        # 0.2.199-patch29hq(user):SMILE Number of threads (default 2; upper limit = number of
-        # machine cores - 2, <= 3 cores can only be 1).
+
         from backend.config import smile_thread_limit
+
         sm_limit = smile_thread_limit()
         self.smile_thread_spin = QSpinBox()
         self.smile_thread_spin.setRange(1, max(1, sm_limit))
@@ -855,23 +849,19 @@ class SettingsDialog(QDialog):
                 "When on, the Pipeline only checks whether the output files exist "
                 "(.fid/.ft2/.ft3/.list/report); it no longer compares input or script "
                 "fingerprints, and it does not show "
-                "\"stale\"",
+                '"stale"',
             )
         )
-        self.simple_mode_check.setChecked(
-            bool(pipeline.get("simple_mode", False))
-        )
-        # 0.2.199-patch29gb(user):AppImage hides "simple mode" when packaging and running.
+        self.simple_mode_check.setChecked(bool(pipeline.get("simple_mode", False)))
+
         self.simple_mode_check.setVisible(not is_appimage())
         layout.addWidget(self.simple_mode_check)
         if is_appimage():
-            dest = str(
-                Path.home() / ".config" / "NMRForge" / SETTINGS_FILENAME
-            )
+            dest = str(Path.home() / ".config" / "NMRForge" / SETTINGS_FILENAME)
         else:
             dest = "nmrforge_data/config/" + SETTINGS_FILENAME
         hint = QLabel(
-                tr(
+            tr(
                 "save to {p0}, it will take effect after restarting; the default value will be "
                 "displayed when not "
                 "configured",
@@ -882,19 +872,46 @@ class SettingsDialog(QDialog):
         hint.setStyleSheet(f"color: {TEXT_MUTED};")
         layout.addWidget(hint)
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+    def _build_smile_status(self, settings: dict) -> QWidget:
+        """Show read-only SMILE plugin availability rather than an editable path.
+
+        Startup probing records smile_status as available or missing. Display the detected
+        version when available, otherwise indicate that the plugin has not been detected.
+        """
+        status = str(settings.get("smile_status", "") or "")
+        version = str(settings.get("smile_version", "") or "")
+        if status == "available":
+            text = tr("Available ({p0})", p0=version) if version else tr("Available")
+        elif status == "missing":
+            text = tr(
+                "Not detected (SMILE is an NMRPipe plugin; install it to enable NUS reconstruction)"
+            )
+        else:
+            text = tr("Not checked yet")
+        label = QLabel(text)
+        label.setWordWrap(True)
+
+        if status != "available":
+            label.setStyleSheet(f"color: {STATUS_COLORS['FAILED']};")
+        label.setToolTip(
+            tr(
+                "SMILE ships as an NMRPipe plugin (-fn SMILE) rather than a separate "
+                "program, so there is no path to configure. It is detected through the "
+                "csh environment at startup.",
+            )
+        )
+        return label
+
     def _browse_data_root(self) -> None:
         """Select data directory (0.2.199-patch29gg)."""
         start = self.data_root_edit.text().strip() or str(Path.home())
-        path = QFileDialog.getExistingDirectory(
-            self, tr("Select the data directory"), start
-        )
+        path = choose_directory(self, tr("Select the data directory"), start)
         if path:
             self.data_root_edit.setText(path)
 
@@ -904,14 +921,14 @@ class SettingsDialog(QDialog):
         settings = {
             "language": str(self.language_combo.currentData() or "auto"),
             "nmrpipe_path": self.nmrpipe_edit.text().strip(),
+            "bruker_path": self.bruker_edit.text().strip(),
+            "proj3d_path": self.proj3d_edit.text().strip(),
             "data_root": self.data_root_edit.text().strip(),
             "linewidth_hz": {
-                nucleus: spin.value()
-                for nucleus, spin in self.linewidth_spins.items()
+                nucleus: spin.value() for nucleus, spin in self.linewidth_spins.items()
             },
             "alignment_tolerance_ppm": {
-                nucleus: spin.value()
-                for nucleus, spin in self.tolerance_spins.items()
+                nucleus: spin.value() for nucleus, spin in self.tolerance_spins.items()
             },
             "pipeline": {
                 "simple_mode": self.simple_mode_check.isChecked(),
@@ -922,4 +939,3 @@ class SettingsDialog(QDialog):
         }
         save_settings(settings)
         self.accept()
-

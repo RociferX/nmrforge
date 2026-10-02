@@ -1,5 +1,6 @@
 """SNR metrics: peak_height/sigma and peak_volume/noise; global / median / top
-(framework §18)."""
+(framework §18).
+"""
 
 from __future__ import annotations
 

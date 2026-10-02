@@ -41,12 +41,10 @@ python -m nmrforge_api status    --study ./study
 --reference REFERENCE             要对照的参考,例如 study 或 study#condition
 --combos COMBOS                   显式组合表(CSV/TSV/YAML/JSON)
 --direct-range HIGH_PPM LOW_PPM   直接维窗,施加在 workflow 默认值之上
+--allow-ext-override              允许直接维窗与参考冻结范围不一致
 --max-runs MAX_RUNS               限制执行的 workflow 数量
---localization {parabolic,gaussian,both}
-                                  组合所用的峰定位方法
+--localize-peaks CSV              只精修该 CSV(含 peak_id 列)里的峰
 --edge-margin-ppm EDGE_MARGIN_PPM 选峰的边缘排除量
---gaussian-roi-f1-ppm / --gaussian-roi-f2-ppm
-                                  高斯拟合 ROI 半径(间接维 / 直接维,ppm)
 --no-resume                       忽略此前已完成的 workflow 并重跑
 ```
 
@@ -59,11 +57,16 @@ window.F1.off: [0.35, 0.45, 0.55]
 
 ## 峰定位方法
 
+峰定位只有三点抛物线一种方法:每个 workflow 出一张 `peak_table_parabolic.csv`。
+
 | 取值 | 含义 |
 | --- | --- |
-| `parabolic` | 默认。三点抛物线精修,适用于任意维度。 |
-| `gaussian` | 2D 高斯拟合;对非 2D 谱会以显式错误拒绝。 |
-| `both` | 两种都跑,两张峰表都保留。 |
+| `parabolic` | 唯一方法。三点抛物线精修,适用于任意维度。 |
+
+二维高斯拟合算法与其 CLI 表面(`--localization`、`--localize-peaks-gaussian`、
+`--localize-peaks-parabolic`、`--gaussian-roi-*`)已于 2026-09-26(用户需求⑦)
+整体删除;`localization` 只接受 `"parabolic"`,`"gaussian"`/`"both"` 报
+`SweepError`。想限定只精修部分峰,用 `--localize-peaks`(普通 CSV)。
 
 ## 采样判定是硬门槛
 

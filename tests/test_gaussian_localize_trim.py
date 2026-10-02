@@ -14,9 +14,9 @@ def _records(n: int) -> list[dict]:
         {
             "Peak_ID": i,
             "label": "",
-            "requested_method": "gaussian",
-            "actual_method": "gaussian",
-            "gaussian_fit_success": True,
+            "requested_method": "parabolic",
+            "actual_method": "parabolic",
+            "boundary_hit": False,
             "fallback": False,
         }
         for i in range(1, n + 1)
@@ -32,7 +32,7 @@ def test_trim_localization_records_keeps_rows_aligned(tmp_path: Path) -> None:
             for i in range(6)
         ],
     )
-    lz.write_localization_records(peak_path, _records(6), meta={"method": "gaussian"})
+    lz.write_localization_records(peak_path, _records(6), meta={"method": "parabolic"})
     assert len(lz.read_localization_records(peak_path)) == 6
 
     # Same sequence as _keep_top_peaks: first cut the peak table (max_peaks), then truncate the

@@ -15,7 +15,7 @@ that importing the core does not pull a Qt module into the process.
 | `data/` | Bruker directory and container readers, dtype handling, NUS schedule reading, the internal data model |
 | `experiment/` | `acqus`/`acqu2s`/`acqu3s` parsing, experiment-type classification, uniform-vs-NUS detection |
 | `planning/` | method selection and the processing plan |
-| `peaks/` | peak tables, parabolic and 2D Gaussian localisation, axis units |
+| `peaks/` | peak tables, three-point parabolic localisation (the only method), axis units |
 | `qc/` | FID-level, sampling-level and spectrum-level quality metrics |
 | `optimization/` | phase search, phase consensus, projection phase, scoring |
 | `processing/` | axis conventions, phase and baseline primitives |

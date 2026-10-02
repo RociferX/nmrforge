@@ -8,7 +8,7 @@
 ```python
 from nmrforge_api import run_reference_study, run_combination_study
 
-# 1) 参考模式:导入数据 + 自动优化参考谱/脚本 + 两张参考峰表
+# 1) 参考模式:导入数据 + 自动优化参考谱/脚本 + 一张参考峰表
 reference = run_reference_study(
     "~/studies/hsqc_params",              # 研究根(可复用/断点续跑)
     datasets={"A": "~/data/bmr12345/1"},  # 条件 A(原始 Bruker 目录)
@@ -23,25 +23,25 @@ result = run_combination_study(
         {"zero_fill": 2},
         {"zero_fill": 1, "window.F1.off": 0.45},
     ],
-    localization="both",                   # parabolic(默认)/ gaussian / both
 )
 
 print(result.summary["workflow_ids"])      # ['W0001', 'W0002', 'W0003']
 print(result.summary["reference_spec"])    # 显式指定的参考
 for run in result.runs:
     print(run.workflow_id, run.condition, run.status,
-          run.peak_table_path("parabolic"), run.peak_table_path("gaussian"))
+          run.peak_table_path("parabolic"))
 ```
 
-- 参考模式只建参考(1 个脚本 + 2 张峰表),不跑任何组合;选峰阈值在这里确定,
+- 参考模式只建参考(1 个脚本 + 1 张峰表),不跑任何组合;选峰阈值在这里确定,
   之后**全程锁定**(组合表里写阈值键直接报错,要改阈值请重建参考);
 - 组合模式不生成参考:参数基底取参考的有效参数,组合表只覆盖它显式指定的键;
   参考不存在或峰表缺失 → `ReferenceError`(提示先跑参考模式);
 - **组合独立选峰**(2026-09-14):每个组合在自己的候选谱上用参考的锁定阈值独立
   选峰 → 该组合自己的完整峰表;`reference_peak_id`/`assignment` 留空,峰与参考
   峰表的匹配由使用者自己的分析完成;
-- 精修方式外部指定:`localization="parabolic"`(默认)/ `"gaussian"`(仅 2D)/
-  `"both"`(两张峰表都出);
+- 峰定位只有三点抛物线一种方法(2026-09-26 用户需求⑦:二维高斯拟合算法整体
+  删除),`localization` 只接受 `"parabolic"`;`"gaussian"`/`"both"` 抛
+  `SweepError`,不再有「按方法出两张表」这回事;
 - `run_parameter_study(...)` 仍是一键便利入口(内部 = 参考模式 + 用研究根显式
   调用组合模式),供快速试用;
 - 不需要外部峰表;`peaks=<外部峰表>` 只在研究方另有公开库/已指认峰表时才用;
@@ -63,12 +63,9 @@ result = run_parameter_study(
 同一个 `W0001` 对 A、B 使用**同一份**用户参数,各自输出峰值表:
 
 ```text
-study/workflows/W0001/A/peak_table_parabolic.csv      # 默认精修方式
+study/workflows/W0001/A/peak_table_parabolic.csv      # 唯一方法:三点抛物线
 study/workflows/W0001/B/peak_table_parabolic.csv
 ```
-
-(要高斯表显式写 `localization="gaussian"`,或 `"both"` 同时出
-`peak_table_gaussian.csv`。)
 
 组合模式的峰表是**该组合自己那张谱**的峰表:`peak_id` 是本谱峰序号,
 `reference_peak_id`/`assignment` 留空——把峰匹配回参考峰身份由你的分析程序做。
@@ -85,10 +82,10 @@ from nmrforge_api import (
 session = open_study("~/studies/step_by_step")          # 或名称
 add_dataset(session, "~/data/bmr12345/1", condition="A")
 reference = build_reference(session)                     # 参考谱 + 参考脚本
-reference = ensure_reference_peaks(session, reference)   # 峰身份 + 两张参考峰表
+reference = ensure_reference_peaks(session, reference)   # 峰身份 + 一张参考峰表
 
 plan = plan_sweep(reference, combos=[{"zero_fill": 1}, {"zero_fill": 2}])
-runs = run_sweep(session, plan, reference=reference, localization="both")
+runs = run_sweep(session, plan, reference=reference)
 records = write_records(session, references={reference.dataset_key: reference},
                         plan=plan, runs=runs)
 print(records)
@@ -102,7 +99,7 @@ python -m nmrforge_api init      --study ~/studies/s1 --dataset ~/data/b --condi
 python -m nmrforge_api reference --study ~/studies/s1
 python -m nmrforge_api peaks     --study ~/studies/s1
 python -m nmrforge_api sweep     --study ~/studies/s1 --reference ~/studies/s1 \
-    --combos design.csv --localization both
+    --combos design.csv
 python -m nmrforge_api status    --study ~/studies/s1
 python -m nmrforge_api report    --study ~/studies/s1
 ```
@@ -113,7 +110,7 @@ python -m nmrforge_api report    --study ~/studies/s1
 | --- | --- |
 | 每个组合是什么、状态如何 | `study/workflows/<id>/workflow.json` |
 | 实际用了哪些参数 | `run.json.parameters_used` + `parameters_resolved` |
-| 峰表(使用者分析入口) | `study/workflows/<id>/<条件>/peak_table_*.csv`;长表见 `study/records/peak_table_*.csv` |
+| 峰表(使用者分析入口) | `study/workflows/<id>/<条件>/peak_table_parabolic.csv`;长表见 `study/records/peak_table_parabolic.csv` |
 | 处理脚本 / 谱 | `study/workflows/<id>/<条件>/process.com` / `spectrum.ft2` |
 | 日志 | `study/workflows/<id>/<条件>/log.txt`(完整)+ `workflows/<id>/log.txt` |
 | 版本与哈希 | `run.json.versions` / `manifest.json` |

@@ -285,12 +285,8 @@ def evaluate(
             {
                 "tol_h": tol_h,
                 "tol_n": tol_n,
-                "zero_shift": _clean_stats(
-                    detection_stats(zero_rows, n_detected=len(detected))
-                ),
-                "calibrated": _clean_stats(
-                    detection_stats(cal_rows, n_detected=len(detected))
-                ),
+                "zero_shift": _clean_stats(detection_stats(zero_rows, n_detected=len(detected))),
+                "calibrated": _clean_stats(detection_stats(cal_rows, n_detected=len(detected))),
                 "chance_per_peak_decoy": _clean_stats(chance),
             }
         )
@@ -363,7 +359,8 @@ def main(argv: list[str] | None = None) -> int:
     h_span = _axis_span(axes, "1H")
     n_span = _axis_span(axes, "15N")
     expected = [
-        row for row in raw_expected
+        row
+        for row in raw_expected
         if _in_span(float(row["H_ppm"]), h_span) and _in_span(float(row["N_ppm"]), n_span)
     ]
     quality = _quality(axes.data)
@@ -373,9 +370,7 @@ def main(argv: list[str] | None = None) -> int:
         "H_span_ppm": [_round(h_span[0], 4), _round(h_span[1], 4)] if h_span else None,
         "N_span_ppm": [_round(n_span[0], 4), _round(n_span[1], 4)] if n_span else None,
         "processing_lines": _window_lines(run["scripts"]),
-        "seconds": {
-            "import": run["import_s"], "fid": run["fid_s"], "spectrum": run["spectrum_s"]
-        },
+        "seconds": {"import": run["import_s"], "fid": run["fid_s"], "spectrum": run["spectrum_s"]},
     }
     report["expected_table"]["rows_in_spectrum_window"] = len(expected)
 

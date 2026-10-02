@@ -7,27 +7,33 @@ The official semantics confirmed by the user on 2026-09-25 (the basis of this im
   manipulated with pointer operations is no longer advanced automatically);
 * the ``mc`` expansion contains ``wr``/``if``/``zd``; at an mc boundary ``zd`` resets **all**
   phase-program pointers to index 0, and only afterwards are the phase values of
-  ``F1PH(...)``/``F2PH(...)`` modified => the **receiver phase cycle of the two States partners is
+  ``F1PH(...)``/``F2PH(...)`` modified => the **receiver phase cycle of the two States partners
+  is
   exactly the same** => when comparing handedness **``dphi_rec = 0``** (it is not that "the
   receiver has no phase cycling");
 * ``ipN``/``dpN``/``calph`` change the **phase values** of that phase program (adding a constant
   overall), and only ``rpN`` resets; **``zd`` only resets the pointers** and does not clear the
   offset accumulated by ``ip``;
-* the write order of a 3D raw ``ser`` is fixed by ``AQSEQ``: ``312`` => td1 on the inside and td2
-  on the outside; ``321`` => the other way round; the smallest unit written to ``ser`` is **one 1D
+* the write order of a 3D raw ``ser`` is fixed by ``AQSEQ``: ``312`` => td1 on the inside and
+td2
+  on the outside; ``321`` => the other way round; the smallest unit written to ``ser`` is **one
+  1D
   FID** (the direct dimension).
 
-The two spellings of ``AQSEQ`` (self-evidenced by this corpus + lab data): the pulse program says
+The two spellings of ``AQSEQ`` (self-evidenced by this corpus + lab data): the pulse program
+says
 ``aqseq 321`` / ``aqseq 312``, and ``acqus`` says ``##$AQSEQ= 0`` (=>321) / ``= 1`` (=>312).
 
 **One decidable conclusion that follows from this** (this project had implicitly assumed 321
 before):
 
-* ``AQSEQ=321``: the 1D FIDs are written as direct dimension (3) -> dimension 2 -> dimension 1 =>
+* ``AQSEQ=321``: the 1D FIDs are written as direct dimension (3) -> dimension 2 -> dimension 1
+=>
   the innermost indirect dimension is **Bruker dimension 2** (= ``acqu2s`` = logical F2) =>
   NMRPipe's ``y`` axis <-> **logical F2**;
 * ``AQSEQ=312``: the innermost indirect dimension is **Bruker dimension 1** (= ``acqu3s`` =
-  logical F1) => ``y`` <-> **logical F1** -- i.e. **the correspondence between y/z and F2/F1 flips
+  logical F1) => ``y`` <-> **logical F1** -- i.e. **the correspondence between y/z and F2/F1
+  flips
   with AQSEQ**, and the conversion script's ``-yMODE/-zMODE`` (as well as ``-yN/-yT/-zN/-zT``)
   must flip with it, otherwise the two dimensions get each other's parameters.
 
@@ -189,7 +195,8 @@ def _pair_stride(text: str | None, ndim: int) -> tuple[dict[str, str], str]:
 
     * expanded form: the first ``times 2`` block in the tail is the **innermost** one => its two
       partners are adjacent and the rest are separated;
-    * unexpanded form: manual §11.2 -- the clause written **first** inside ``mc`` is on the inside
+    * unexpanded form: manual §11.2 -- the clause written **first** inside ``mc`` is on the
+    inside
       => the axis written first is the adjacent one.
     """
     axes = ["F2", "F1"] if ndim >= 3 else ["F1"]
@@ -242,9 +249,7 @@ def acquisition_model(
     source = "acqus" if acqus_code else ("pulseprogram" if pp_code else "")
     y_axis, z_axis = y_z_axes(ndim, code)
     stride, inner_hint = _pair_stride(text, ndim)
-    expected_inner = (
-        {"321": "F2", "312": "F1"}.get(code or "") if int(ndim) >= 3 else None
-    )
+    expected_inner = {"321": "F2", "312": "F1"}.get(code or "") if int(ndim) >= 3 else None
     notes: list[str] = []
     if code is None:
         notes.append(

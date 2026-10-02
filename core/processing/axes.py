@@ -32,7 +32,8 @@ def axis_index(axis: str, ndim: int) -> int:
 
 def file_axis_index(axis: str, ndim: int) -> int:
     """NMRPipe output-file layout (measured): the numpy axis index of a logical axis in the
-    spectrum array."""
+    spectrum array.
+    """
     axis = axis.upper()
     index = (_FILE_INDEX_3D if ndim >= 3 else _FILE_INDEX_2D).get(axis)
     if index is None or index >= ndim:

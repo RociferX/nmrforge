@@ -53,11 +53,10 @@ def smile_iteration_ft_size(td: int) -> int:
     return max(1 << ((int(FT_SIM_FACTOR * v) - 1).bit_length()), FT_MIN_3D)
 
 
-def direct_points_after_ext(
-    experiment: Any, zf_size: int, ext_lo: Any, ext_hi: Any
-) -> int:
+def direct_points_after_ext(experiment: Any, zf_size: int, ext_lo: Any, ext_hi: Any) -> int:
     """Number of sampling points inside the direct-dimension EXT window
-    (approximately SMILE's per-plane size)."""
+    (approximately SMILE's per-plane size).
+    """
     dims = getattr(experiment, "dimensions", None) or []
     zf = max(int(zf_size or 1), 1)
     if not dims:
@@ -103,7 +102,8 @@ def estimate_smile_peak_mb(
 
 def available_memory_mb() -> int:
     """Available system memory (Linux /proc/meminfo MemAvailable; 4096MB as a
-    fallback)."""
+    fallback).
+    """
     try:
         with open("/proc/meminfo", encoding="utf-8") as fh:
             for line in fh:

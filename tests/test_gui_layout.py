@@ -11,12 +11,14 @@ import numpy as np
 import pytest
 from qtcompat.QtWidgets import QApplication, QDialog, QLabel, QMenu
 
-from core.project import ProjectManager
+from core.project import JsonRecentProjectsStore, ProjectManager
 from gui.log_panel import LogPanel
 from gui.main_window import MainWindow
 from gui.pipeline_panel import (
     PIPELINE_STEPS,
+    STEP_LOG_SEPARATOR,
     PipelinePanel,
+    PipelineStepRow,
     compute_step_statuses,
 )
 from gui.project_tree import ProjectTreePanel
@@ -39,6 +41,18 @@ class SyncThread:
         self._target()
 
 
+class DeferredThread:
+    "Regression coverage: DeferredThread."
+
+    pending: list = []
+
+    def __init__(self, target=None, daemon=None) -> None:
+        self._target = target
+
+    def start(self) -> None:
+        type(self).pending.append(self._target)
+
+
 def _manager_with_experiment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch | None = None
 ) -> ProjectManager:
@@ -46,7 +60,7 @@ def _manager_with_experiment(
     workspace = tmp_path / "ws"
     workspace.mkdir()
     manager = ProjectManager.create_project(workspace / "proj", "demo")
-    for source, title in (("/sampleD", "HSQC"), ("/sampleE", "HNCACB")):
+    for source, title in (("/data/1", "HSQC"), ("/data/2", "HNCACB")):
         entry = manager.add_experiment(source, title=title)
         entry.status = "registered"
     manager.save()
@@ -71,6 +85,7 @@ class _TempWorkspace:
     def ensure(self) -> Path:
         self.root.mkdir(parents=True, exist_ok=True)
         return self.root
+
     def delete_project(self, name: str, trash: bool = True) -> None:
         target = self.root / name
         if target.exists():
@@ -87,9 +102,7 @@ class _TempWorkspace:
 
     def list_projects(self) -> list[Path]:
         return sorted(
-            p
-            for p in self.root.iterdir()
-            if p.is_dir() and (p / "project.json").is_file()
+            p for p in self.root.iterdir() if p.is_dir() and (p / "project.json").is_file()
         )
 
     def create_project(self, name: str, **kwargs):
@@ -240,16 +253,14 @@ def test_pipeline_spectrum_row_ext_range_button_before_run(
     button_row = spectrum_row.layout().itemAt(1)
     assert button_row is not None and hasattr(button_row, "count")
     widgets = [button_row.itemAt(i).widget() for i in range(button_row.count())]
-    assert widgets.index(spectrum_row.ext_range_button) < widgets.index(
-        spectrum_row.run_button
-    )
+    assert widgets.index(spectrum_row.ext_range_button) < widgets.index(spectrum_row.run_button)
     panel.close()
 
 
 def test_pipeline_run_guard_blocks_repeat(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.199-patch12: a second click while running is rejected; no duplicate start."""
+    "0.2.199-patch12: a second click while running is rejected; no duplicate start."
     from gui.pipeline_panel import PipelinePanel
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
@@ -257,11 +268,25 @@ def test_pipeline_run_guard_blocks_repeat(
     panel.set_selection("data", "exp_001", "d_001")
     messages: list[str] = []
     panel.log_message.connect(messages.append)
-    panel._run_active = True
-    panel._on_run_requested("spectrum")
-    assert any("已有任务正在运行" in m for m in messages)
-    panel._run_active = False
+    panel._running_targets[("exp_001", "d_001", "fid")] = 2
+    panel._on_run_requested("fid")
+    assert any("该数据已有任务正在运行" in m for m in messages)
     panel.close()
+
+
+def test_pipeline_step_row_stylesheet_has_no_parse_warning(qapp: QApplication) -> None:
+    "Regression coverage: test pipeline step row stylesheet has no parse warning."
+    from qtcompat.QtCore import qInstallMessageHandler
+
+    messages: list[str] = []
+    previous = qInstallMessageHandler(lambda _kind, _context, message: messages.append(message))
+    try:
+        row = PipelineStepRow("fid", "FID", "description")
+        qapp.processEvents()
+        row.close()
+    finally:
+        qInstallMessageHandler(previous)
+    assert not any("Could not parse stylesheet" in message for message in messages)
 
 
 def test_spectrum_report_cache_by_fingerprint(
@@ -274,12 +299,8 @@ def test_spectrum_report_cache_by_fingerprint(
     panel = PipelinePanel(manager, FakeProcessingController())
     panel.set_selection("data", "exp_001", "d_001")
     missing = str(tmp_path / "no.ft3")
-    text1 = panel._cached_spectrum_report(
-        {"diagnostics": {"reports": []}}, missing
-    )
-    text2 = panel._cached_spectrum_report(
-        {"diagnostics": {"reports": []}}, missing
-    )
+    text1 = panel._cached_spectrum_report({"diagnostics": {"reports": []}}, missing)
+    text2 = panel._cached_spectrum_report({"diagnostics": {"reports": []}}, missing)
     assert text1 == text2
     # 0.2.199-patch29e: no record prompts a rerun instead of generating on the spot,
     # so nothing is written to the cache
@@ -374,10 +395,7 @@ def test_pipeline_ext_button_text_reflects_override(
     assert panel._rows["spectrum"].ext_range_button.text() == "直接维范围"
     panel._final_ext[("exp_001", "d_001")] = ("11.0", "5.5", True)
     panel.refresh()
-    assert (
-        panel._rows["spectrum"].ext_range_button.text()
-        == "直接维范围 11.0/5.5 · 含优化"
-    )
+    assert panel._rows["spectrum"].ext_range_button.text() == "直接维范围 11.0/5.5 · 含优化"
     panel.close()
     assert (
         panel._rows["spectrum"].ext_range_button.toolTip()
@@ -391,12 +409,9 @@ def test_pipeline_ext_button_text_reflects_override(
     panel.close()
 
 
-
 def test_pipeline_steps_include_optional_smile() -> None:
     ids = [step[0] for step in PIPELINE_STEPS]
-    assert ids == [
-        "fid", "spectrum", "smile", "peaks"
-    ]
+    assert ids == ["fid", "spectrum", "smile", "peaks"]
     deps = {step[0]: step[3] for step in PIPELINE_STEPS}
     # SMILE optimisation is optional: peak picking does not depend on it
     assert "smile" not in deps["peaks"]
@@ -431,9 +446,7 @@ def test_pipeline_status_after_spectrum(tmp_path: Path, qapp: QApplication) -> N
     assert statuses["peaks"] == "READY"
 
 
-def test_pipeline_fid_unlocks_spectrum(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_pipeline_fid_unlocks_spectrum(tmp_path: Path, qapp: QApplication) -> None:
     """After generating FID, the spectrum step unlocks to READY (regression: fid used to be
     judged by the spectrum)."""
     manager = _manager_with_experiment(tmp_path)
@@ -477,26 +490,150 @@ def test_pipeline_panel_run_generate_fid(
     log.set_scope("data", "exp_001", "d_001")
     panel._on_run_requested("fid")
     assert controller.calls == ["generate_fid"]
-    assert "完成 生成 FID" in log.text.toPlainText()
-    # after the run, status is re-inferred from artefacts (without ft2, fid returns to READY)
+    assert "✓ 已完成：生成 FID" in log.text.toPlainText()
+
     assert panel._rows["fid"].status_label.text().startswith("▶")
     panel.close()
     log.close()
 
 
+def test_pipeline_running_state_and_worker_stay_with_original_data(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    "Regression coverage: test pipeline running state and worker stay with original data."
+    DeferredThread.pending.clear()
+    monkeypatch.setattr("threading.Thread", DeferredThread)
+    manager = _manager_with_experiment(tmp_path)
+    second = manager.import_data("exp_001", "/data/second")
+    controller = FakeProcessingController()
+    panel = PipelinePanel(manager, controller)
+    panel.set_selection("data", "exp_001", "d_001")
+
+    panel._on_run_requested("fid")
+    assert "运行中" in panel._rows["fid"].status_label.text()
+    assert len(DeferredThread.pending) == 1
+
+    panel.set_selection("data", "exp_001", second.id)
+    assert "运行中" not in panel._rows["fid"].status_label.text()
+    panel.set_selection("data", "exp_001", "d_001")
+    assert "运行中" in panel._rows["fid"].status_label.text()
+
+    panel.set_selection("data", "exp_001", second.id)
+    DeferredThread.pending.pop()()
+    assert controller.last_entry.id == "d_001"
+    assert not panel._running_targets
+    panel.close()
+
+
+def test_pipeline_allows_different_2d_data_to_run_in_parallel(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    "Regression coverage: test pipeline allows different 2d data to run in parallel."
+    DeferredThread.pending.clear()
+    monkeypatch.setattr("threading.Thread", DeferredThread)
+    manager = _manager_with_experiment(tmp_path)
+    second = manager.import_data("exp_001", "/data/second")
+    controller = FakeProcessingController()
+    panel = PipelinePanel(manager, controller)
+    monkeypatch.setattr(panel, "_data_ndim", lambda _exp_id, _data_id: 2)
+
+    panel.set_selection("data", "exp_001", "d_001")
+    panel._on_run_requested("fid")
+    panel.set_selection("data", "exp_001", second.id)
+    panel._on_run_requested("fid")
+
+    assert len(DeferredThread.pending) == 2
+    assert len(panel._running_targets) == 2
+    DeferredThread.pending.pop(0)()
+    assert len(panel._running_targets) == 1
+    assert ("exp_001", second.id, "fid") in panel._running_targets
+    DeferredThread.pending.pop(0)()
+    assert not panel._running_targets
+    panel.close()
+
+
+def test_pipeline_keeps_3d_processing_exclusive(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    "Regression coverage: test pipeline keeps 3d processing exclusive."
+    DeferredThread.pending.clear()
+    monkeypatch.setattr("threading.Thread", DeferredThread)
+    manager = _manager_with_experiment(tmp_path)
+    second = manager.import_data("exp_001", "/data/second")
+    controller = FakeProcessingController()
+    panel = PipelinePanel(manager, controller)
+    messages: list[str] = []
+    panel.log_message.connect(messages.append)
+    monkeypatch.setattr(
+        panel,
+        "_data_ndim",
+        lambda _exp_id, data_id: 3 if data_id == second.id else 2,
+    )
+
+    panel.set_selection("data", "exp_001", "d_001")
+    panel._on_run_requested("fid")
+    panel.set_selection("data", "exp_001", second.id)
+    panel._on_run_requested("fid")
+
+    assert len(DeferredThread.pending) == 1
+    assert any("只有不同的 2D 数据可以并行处理" in message for message in messages)
+    DeferredThread.pending.pop(0)()
+    panel.close()
+
+
+def test_pipeline_finish_clears_only_its_data_from_project_tree(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    "Regression coverage: test pipeline finish clears only its data from project tree."
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    second = manager.import_data("exp_001", "/data/second")
+    window = MainWindow(manager=manager, controller=FakeProcessingController())
+    window.project_tree.mark_running("exp_001", "d_001")
+    window.project_tree.mark_running("exp_001", second.id)
+
+    window._on_pipeline_run_finished("exp_001", "d_001")
+
+    assert ("exp_001", "d_001") not in window.project_tree._running
+    assert ("exp_001", second.id) in window.project_tree._running
+    window.close()
+
+
+def test_pipeline_step_log_emits_separator_before_start(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    "Regression coverage: test pipeline step log emits separator before start."
+    monkeypatch.setattr("threading.Thread", SyncThread)
+    manager = _manager_with_experiment(tmp_path)
+    controller = FakeProcessingController()
+    panel = PipelinePanel(manager, controller)
+    emitted: list[tuple[str, object]] = []
+    panel.log_scoped.connect(lambda msg, scope: emitted.append((msg, scope)))
+    panel.set_selection("data", "exp_001", "d_001")
+    panel._on_run_requested("fid")
+    messages = [msg for msg, _ in emitted]
+    assert STEP_LOG_SEPARATOR in messages, messages
+    sep_index = messages.index(STEP_LOG_SEPARATOR)
+
+    start_prefix = "▶"
+    start_index = next(i for i, msg in enumerate(messages) if msg.startswith(start_prefix))
+    assert sep_index < start_index, messages
+
+    scopes = {scope for msg, scope in emitted if msg == STEP_LOG_SEPARATOR}
+    assert scopes == {emitted[start_index][1]}
+    panel.close()
+
+
 # ----------------------------------------------------------------------
 # Spectrum panel
 # ----------------------------------------------------------------------
-def test_spectrum_panel_lists_and_loads_spectrum(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_spectrum_panel_lists_and_loads_spectrum(tmp_path: Path, qapp: QApplication) -> None:
     manager = _manager_with_experiment(tmp_path)
     spectra = manager.data_dir("exp_001", "d_001", "spectra")
     spectra.mkdir(parents=True, exist_ok=True)
-    spectrum = spectra / "hsqc_2d.ft2"   # backend names it after dataset_id
+    spectrum = spectra / "hsqc_2d.ft2"  # backend names it after dataset_id
     _write_ft2(spectrum)
     panel = SpectrumPanel(manager)
-    panel.set_context("exp_001")          # experiment level: all data spectra of the experiment
+    panel.set_context("exp_001")  # experiment level: all data spectra of the experiment
     assert panel.file_list.count() == 1
     assert panel.file_list.item(0).text() == "hsqc_2d.ft2"
     assert panel.open_spectrum(spectrum) is True
@@ -504,9 +641,7 @@ def test_spectrum_panel_lists_and_loads_spectrum(
     panel.close()
 
 
-def test_spectrum_panel_open_corrupt_returns_false(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_spectrum_panel_open_corrupt_returns_false(tmp_path: Path, qapp: QApplication) -> None:
     manager = _manager_with_experiment(tmp_path)
     panel = SpectrumPanel(manager)
     bad = tmp_path / "bad.ft2"
@@ -600,9 +735,7 @@ def test_main_window_spectrum_expand_toggle(
     QApplication.processEvents()
     lay = panel.layout()
     header_item = lay.itemAt(0)
-    title = next(
-        lb for lb in panel.findChildren(QLabel) if lb.text() == "谱图"
-    )
+    title = next(lb for lb in panel.findChildren(QLabel) if lb.text() == "谱图")
     assert header_item.geometry().height() <= 40  # was 311px (blank block)
     assert title.height() <= 40
     assert panel._expand_splitter is not None
@@ -631,7 +764,8 @@ def test_spectrum_panel_file_help_menus(
     assert panel.file_button.menu() is panel.file_menu
     assert panel.help_button.menu() is panel.help_menu
     row = panel.lists_row
-    assert row.indexOf(panel.expand_button) < row.indexOf(panel.file_button)
+    assert row.indexOf(panel.expand_button) < row.indexOf(panel.compare_button)
+    assert row.indexOf(panel.compare_button) < row.indexOf(panel.file_button)
     assert row.indexOf(panel.file_button) < row.indexOf(panel.help_button)
     file_texts = [a.text() for a in panel.file_menu.actions()]
     assert "打开当前数据谱图" in file_texts and "清空谱图" in file_texts
@@ -647,6 +781,125 @@ def test_spectrum_panel_file_help_menus(
     texts = [a.text() for a in view_menu.actions()]
     assert not any("谱图查看器" in t for t in texts)
     window.close()
+
+
+def test_expanded_spectrum_can_compare_two_results_with_independent_controls(
+    tmp_path: Path, qapp: QApplication
+) -> None:
+    manager = _manager_with_experiment(tmp_path)
+    first = manager.data_dir("exp_001", "d_001", "spectra") / "first.ft2"
+    second = manager.data_dir("exp_002", "d_001", "spectra") / "second.ft2"
+    first.parent.mkdir(parents=True, exist_ok=True)
+    second.parent.mkdir(parents=True, exist_ok=True)
+    _write_ft2(first)
+    _write_ft2(second)
+
+    panel = SpectrumPanel(manager)
+    panel.set_context("exp_001", "d_001")
+    assert panel.load_current_spectrum()
+    panel.expand_button.setChecked(True)
+    assert not panel.compare_button.isHidden()
+
+    panel._refresh_compare_menu()
+    action = next(
+        action
+        for action in panel.compare_menu.actions()
+        if action.data() and action.data() != "__close__"
+    )
+    panel._on_compare_action(action)
+
+    assert panel._comparison_active
+    assert panel._expand_splitter is not None
+    assert panel._expand_splitter.count() == 3
+    assert panel._compare_viewer is not None
+    assert panel._expand_splitter.widget(0) is panel._compare_column
+    assert panel._expand_splitter.widget(1) is panel._current_column
+    assert panel.viewer.controls_layout.parentWidget().parent() is panel.viewer.view_splitter
+    assert (
+        panel._compare_viewer.controls_layout.parentWidget().parent()
+        is panel._compare_viewer.view_splitter
+    )
+    assert panel.viewer.level_slider is not panel._compare_viewer.level_slider
+    main_level = panel.viewer.level_slider.value()
+    panel._compare_viewer.level_slider.setValue(
+        min(panel._compare_viewer.level_slider.maximum(), main_level + 3)
+    )
+    assert panel.viewer.level_slider.value() == main_level
+
+    panel._deactivate_comparison()
+    assert not panel._comparison_active
+    assert panel._expand_splitter.count() == 2
+    panel.expand_button.setChecked(False)
+    assert panel.compare_button.isHidden()
+    assert panel.viewer.plot_area.parent() is panel.viewer.view_splitter
+    panel.close()
+
+
+@pytest.mark.parametrize("current_3d", [False, True])
+@pytest.mark.parametrize("compare_3d", [False, True])
+def test_comparison_plot_heights_match_after_open_resize_and_drag(
+    tmp_path,
+    qapp,
+    monkeypatch,
+    current_3d,
+    compare_3d,
+) -> None:
+    from qtcompat.QtTest import QTest
+
+    from tests.test_viewer3d import _synthetic3d, _write_ft3
+
+    manager = _manager_with_experiment(tmp_path)
+    first = manager.data_dir("exp_001", "d_001", "spectra") / (
+        "first.ft3" if current_3d else "first.ft2"
+    )
+    second = manager.data_dir("exp_002", "d_001", "spectra") / (
+        "second.ft3" if compare_3d else "second.ft2"
+    )
+    for path, is_3d in ((first, current_3d), (second, compare_3d)):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if is_3d:
+            _write_ft3(path, _synthetic3d())
+        else:
+            _write_ft2(path)
+    panel = SpectrumPanel(manager)
+    monkeypatch.setattr(panel, "_ensure_plane_stream", lambda: None)
+    panel.resize(1800, 950)
+    panel.show()
+    panel.set_context("exp_001", "d_001")
+    QTest.qWait(20)
+
+    panel.viewer.view_splitter.setSizes([800, 110])
+    panel.expand_button.setChecked(True)
+    assert panel._load_compare_spectrum(second)
+    panel._activate_comparison(second)
+    QTest.qWait(20)
+    left, middle = panel._compare_viewer, panel.viewer
+
+    def assert_equal_height():
+        assert abs(left.plot_area.height() - middle.plot_area.height()) <= 1
+        assert abs(left.plot.height() - middle.plot.height()) <= 1
+        assert left.plot_area.height() >= 300
+        for viewer in (left, middle):
+            controls = viewer.controls_layout.parentWidget()
+            assert controls.height() >= controls.minimumSizeHint().height()
+
+    assert_equal_height()
+    panel.resize(1800, 740)
+    QTest.qWait(20)
+    assert_equal_height()
+    for viewer in (left, middle):
+        viewer.view_splitter.moveSplitter(viewer.plot_area.height() - 25, 1)
+        QTest.qWait(20)
+        assert_equal_height()
+    main_level = middle.level_label.value()
+    left.level_label.setValue(main_level + 1)
+    assert middle.level_label.value() == main_level
+    panel._deactivate_comparison()
+    panel.expand_button.setChecked(False)
+    assert middle.plot_area.parent() is middle.view_splitter
+
+    assert not panel._comparison_layout_timer.isActive()
+    panel.close()
 
 
 def test_main_window_has_app_icon(
@@ -674,9 +927,7 @@ def test_tools_menu_standalone_quality_entries(
     idx = menus.index("工具(&T)")
     assert menus[idx - 1] == "查看(&V)"
     assert menus[idx + 1] == "设置(&S)"
-    tools_menu = next(
-        a.menu() for a in window.menuBar().actions() if a.text() == "工具(&T)"
-    )
+    tools_menu = next(a.menu() for a in window.menuBar().actions() if a.text() == "工具(&T)")
     labels = [a.text() for a in tools_menu.actions()]
     assert "数据质量检测..." in labels
     assert "谱图质量评估..." in labels
@@ -730,11 +981,7 @@ def test_menu_mnemonics_unique_and_activate(
     assert len(set(letters)) == len(letters), f"助记键重复: {letters}"
     # Alt+T -> Tools; Alt+S -> Settings
     for key, title in ((Qt.Key.Key_T, "工具(&T)"), (Qt.Key.Key_S, "设置(&S)")):
-        target = next(
-            a.menu()
-            for a in bar.actions()
-            if a.text() == title
-        )
+        target = next(a.menu() for a in bar.actions() if a.text() == title)
         bar.setFocus()
         QTest.keyClick(bar, key, Qt.KeyboardModifier.AltModifier)
         qapp.processEvents()
@@ -802,10 +1049,95 @@ def test_main_window_log_panel_expands_on_message(
     window = MainWindow(manager=manager, controller=FakeProcessingController())
     # 0.2.143: the log is always visible
     assert not window.log_panel.isHidden()
-    window.center_panel.set_selection("data", "exp_001", "d_001")
+    window._update_context("data", "exp_001", "d_001")
     window.pipeline._on_run_requested("fid")
     assert not window.log_panel.isHidden()
     assert "生成 FID" in window.log_panel.text.toPlainText()
+    window.close()
+
+
+@pytest.mark.parametrize("view", ["target", "group", "other_data"])
+def test_member_run_does_not_replace_selected_log(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch, view: str
+) -> None:
+    "Regression coverage: test member run does not replace selected log."
+    DeferredThread.pending.clear()
+    monkeypatch.setattr("threading.Thread", DeferredThread)
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    second = manager.import_data("exp_001", "/data/second")
+    group = manager.create_data_group("exp_001", data_ids=["d_001", second.id])
+    window = MainWindow(manager=manager, controller=FakeProcessingController())
+    monkeypatch.setattr(window.pipeline, "_data_ndim", lambda *_: 2)
+    group_scope = LogPanel.scope_key("group", "exp_001", "", group.id)
+    data_scope = LogPanel.scope_key("data", "exp_001", "d_001")
+    window._append_log("正在依次运行组内数据", group_scope)
+    window._update_context("data", "exp_001", "d_001")
+    window.pipeline._on_run_requested("fid")
+    if view == "group":
+        window._update_context("group", "exp_001", "", group.id)
+    elif view == "other_data":
+        window._update_context("data", "exp_001", second.id)
+    selected_scope = window.log_panel.current_scope()
+    DeferredThread.pending.pop(0)()
+    window._append_log("组任务仍在继续", group_scope)
+    assert window.log_panel.current_scope() == selected_scope
+    visible = window.log_panel.text.toPlainText()
+    assert ("组任务仍在继续" in visible) == (view == "group")
+    assert ("生成 FID" in visible) == (view == "target")
+    assert any("生成 FID" in line for line in window.log_panel._buffers[data_scope])
+    assert not any("生成 FID" in line for line in window.log_panel._buffers[group_scope])
+    window.close()
+
+
+def test_group_summary_stays_in_group_log_after_member_selected(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    "Regression coverage: test group summary stays in group log after member selected."
+    DeferredThread.pending.clear()
+    monkeypatch.setattr("threading.Thread", DeferredThread)
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    group = manager.create_data_group("exp_001", data_ids=["d_001"])
+    controller = FakeProcessingController()
+    controller.run_group_batch = lambda *_a, **_k: {
+        "summary": {"success": 1, "total": 1},
+        "results": {"d_001": {"status": "success"}},
+    }
+    window = MainWindow(manager=manager, controller=controller)
+    window._update_context("group", "exp_001", "", group.id)
+    window._run_group_batch("exp_001", group.id, ["spectrum"])
+    window._update_context("data", "exp_001", "d_001")
+    DeferredThread.pending.pop(0)()
+    assert "batch finished" not in window.log_panel.text.toPlainText()
+    assert "批量处理完成" not in window.log_panel.text.toPlainText()
+    group_scope = LogPanel.scope_key("group", "exp_001", "", group.id)
+    group_text = "\n".join(window.log_panel._buffers[group_scope])
+    assert "d_001" in group_text
+    assert "Done" in group_text or "完成" in group_text
+    window.close()
+
+
+def test_rank1_logs_keep_target_after_selection_changes(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    DeferredThread.pending.clear()
+    monkeypatch.setattr("threading.Thread", DeferredThread)
+    manager = _manager_with_experiment(tmp_path, monkeypatch)
+    group = manager.create_data_group("exp_001", data_ids=["d_001"])
+    controller = FakeProcessingController()
+
+    def rerun(*_args, progress):
+        progress("Rank1 目标数据的脚本输出")
+        return "result.ft2"
+
+    controller.rerun_smile_rank1 = rerun
+    window = MainWindow(manager=manager, controller=controller)
+    window._update_context("data", "exp_001", "d_001")
+    window._on_rank1_rerun()
+    window._update_context("group", "exp_001", "", group.id)
+    DeferredThread.pending.pop(0)()
+    assert "Rank1" not in window.log_panel.text.toPlainText()
+    window._update_context("data", "exp_001", "d_001")
+    assert "Rank1 目标数据的脚本输出" in window.log_panel.text.toPlainText()
     window.close()
 
 
@@ -864,6 +1196,7 @@ def test_main_window_empty_state(qapp: QApplication) -> None:
     assert window.pipeline.current_experiment_id() == ""
     window.close()
 
+
 def test_tree_data_node_context_menu_actions(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -872,9 +1205,7 @@ def test_tree_data_node_context_menu_actions(
     panel = ProjectTreePanel(manager)
     data_item = panel.tree.topLevelItem(0).child(0).child(0).child(0)
     actions: list[tuple[str, str]] = []
-    panel.data_action_requested.connect(
-        lambda action, data_id: actions.append((action, data_id))
-    )
+    panel.data_action_requested.connect(lambda action, data_id: actions.append((action, data_id)))
     menu = QMenu()
     panel._on_context_menu_impl(menu, data_item)
     labels = [a.text() for a in menu.actions()]
@@ -914,9 +1245,7 @@ def test_terminal_argv_prefers_csh(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(
         "shutil.which",
-        lambda name: f"/usr/bin/{name}"
-        if name in ("csh", "gnome-terminal")
-        else None,
+        lambda name: f"/usr/bin/{name}" if name in ("csh", "gnome-terminal") else None,
     )
     argv = _terminal_argv("/data/raw")
     assert argv is not None
@@ -926,9 +1255,11 @@ def test_terminal_argv_prefers_csh(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(
         "shutil.which",
-        lambda name: "C:/cygwin/bin/csh.exe"
-        if name == "csh"
-        else (r"C:\Windows\System32\cmd.exe" if name == "cmd" else None),
+        lambda name: (
+            "C:/cygwin/bin/csh.exe"
+            if name == "csh"
+            else (r"C:\Windows\System32\cmd.exe" if name == "cmd" else None)
+        ),
     )
     argv = _terminal_argv("C:/data/raw")
     assert argv is not None
@@ -984,13 +1315,25 @@ def test_delete_project_action(
     from gui.dialogs import ConfirmDialog
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
-    window = MainWindow(manager=manager)
+    window = MainWindow(
+        manager=manager,
+        recent=JsonRecentProjectsStore(tmp_path / "recent_projects.json"),
+    )
     monkeypatch.setattr(ConfirmDialog, "confirm", staticmethod(lambda *a, **k: True))
+
+    def fake_trash(path, fallback_dir, rel=None):
+        return path
+
+    # Keep this GUI wiring test isolated from the real Windows recycle bin.  The
+    # recycle-bin/fallback behaviour is covered by the workspace tests; invoking
+    # it here can block indefinitely on restricted or headless Windows runners.
+    monkeypatch.setattr("core.workspace.send_to_trash", fake_trash)
     window._delete_project()
     assert window.manager.project is None
     assert window.project_tree.tree.topLevelItemCount() == 1  # Workspace root remains
     assert "欢迎" in window.windowTitle()
     window.close()
+
 
 def test_welcome_page_shows_workspace_and_recent(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
@@ -1020,6 +1363,7 @@ def test_main_window_welcome_page_on_startup(qapp: QApplication) -> None:
     assert window.center_panel.stack.currentIndex() == 0  # Workspace page
     window.close()
 
+
 def test_data_selected_shows_pipeline_page(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1033,6 +1377,7 @@ def test_data_selected_shows_pipeline_page(
     assert window.pipeline.current_experiment_id() == "exp_001"
     assert "import" not in window.pipeline._rows  # 0.2.162-patch12: pipeline has no import step
     window.close()
+
 
 def test_import_failure_handled_on_main_thread(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
@@ -1070,18 +1415,12 @@ def test_kinetics_import_failure_is_explicit_rejection(
     messages: list[tuple[str, str]] = []
     monkeypatch.setattr(
         "gui.main_window.InfoDialog.show_info",
-        staticmethod(
-            lambda parent, title, text_: messages.append((title, text_))
-        ),
+        staticmethod(lambda parent, title, text_: messages.append((title, text_))),
     )
     window = MainWindow(manager=manager)
-    window._on_import_failed(
-        "KineticsUnsupportedError: 检测到动力学实验，当前产品不支持导入"
-    )
+    window._on_import_failed("KineticsUnsupportedError: 检测到动力学实验，当前产品不支持导入")
 
-    assert messages == [
-        ("不支持导入", "检测到动力学实验，当前产品不支持导入")
-    ]
+    assert messages == [("不支持导入", "检测到动力学实验，当前产品不支持导入")]
     log = window.log_panel.text.toPlainText()
     assert "导入已拒绝" in log
     assert "数据已导入" not in log
@@ -1094,6 +1433,7 @@ class _SyncThread:
 
     def start(self) -> None:
         self._target()
+
 
 def test_spectrum_panel_open_current_data_spectrum(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
@@ -1168,9 +1508,7 @@ def test_spectrum_panel_excludes_fid_from_list(
     panel.close()
 
 
-def test_spectrum_panel_empty_spectra_clears_viewer(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_spectrum_panel_empty_spectra_clears_viewer(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.85: with no spectra the right side stays empty (no stale spectrum after switching)."""
     manager = ProjectManager.create_project(tmp_path / "proj2", "demo")
     entry = manager.create_experiment("A")
@@ -1190,9 +1528,7 @@ def test_spectrum_panel_empty_spectra_clears_viewer(
     panel.close()
 
 
-def test_spectrum_panel_finds_dataset_id_named_spectrum(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_spectrum_panel_finds_dataset_id_named_spectrum(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.112: a spectrum named after dataset_id (not exp_id-data_id) is also found."""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("A")
@@ -1209,7 +1545,7 @@ def test_spectrum_panel_finds_dataset_id_named_spectrum(
 
 
 def test_spectrum_param_report_shows_phase_results() -> None:
-    """0.2.108: the param report shows per-dimension phase / direct-dim phase / backend runs."""
+    "0.2.108: the param report shows per-dimension phase / direct-dim phase / backend runs."
     from gui.pipeline_panel import _spectrum_param_report
 
     report = _spectrum_param_report(
@@ -1221,14 +1557,14 @@ def test_spectrum_param_report_shows_phase_results() -> None:
             "extract": True,
         }
     )
-    assert "相位优化途径: 统一自动处理" in report
-    assert "逐维相位" in report
-    assert "F1: p0=-45.0° p1=0.0°" in report
-    assert "F2: p0=0.0° p1=10.0°" in report
+    assert "自动优化" in report
+    assert "各维相位" in report
+    assert "F1: p0=-45.00° p1=0.00°" in report
+    assert "F2: p0=0.00° p1=10.00°" in report
     assert "直接维相位" in report
-    assert "后端运行次数: 3" in report
-    assert "◆ 处理参数与优化" in report
-    # 0.2.155: trimmed -- internal parameters (e.g. the extraction window) leave the report
+    assert "后端运行次数" not in report
+    assert "◆ 处理设置" in report
+
     assert "extract" not in report
     assert "提取窗口" not in report
 
@@ -1321,7 +1657,7 @@ def test_pipeline_rerun_group_holds_the_flip_before_the_button(
     visible = [w for w in widgets if not w.isHidden()]
     assert visible == [
         row.flip_group_label,
-        row.flip_indirect_check,   # 2D: checkbox visible, dropdown hidden
+        row.flip_indirect_check,  # 2D: checkbox visible, dropdown hidden
         row.rerun_final_button,
     ]
     # in the whole row the group is a single flow-layout item (no longer two widgets)
@@ -1395,9 +1731,7 @@ def test_pipeline_peaks_step_runs_pick_peaks(
     _write_ft2(spectra_dir / "exp_001-d_001.ft2")
 
     class PeaksController(FakeProcessingController):
-        def pick_peaks(
-            self, data, exp_id=None, data_id=None, sigma_multiplier=None
-        ) -> dict:
+        def pick_peaks(self, data, exp_id=None, data_id=None, sigma_multiplier=None) -> dict:
             self.calls.append("pick_peaks")
             peaks_dir = manager.data_dir(exp_id, data_id, "peaks")
             peaks_dir.mkdir(parents=True, exist_ok=True)
@@ -1456,6 +1790,7 @@ def test_data_rename_persists_title(
     assert data_item.text(0) == "重命名后"
     window.close()
 
+
 def test_double_click_data_keeps_pipeline_and_opens_path(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1495,6 +1830,7 @@ def test_double_click_folder_opens_folder_path(
     assert window.center_panel.stack.currentIndex() == 3
     window.close()
 
+
 def test_right_click_open_path_emits_signal(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1518,9 +1854,7 @@ def test_right_click_open_path_emits_signal(
     opened: list[str] = []
     opened_term: list[str] = []
     window.project_tree.open_path_requested.connect(lambda p: opened.append(p))
-    window.project_tree.open_terminal_requested.connect(
-        lambda p: opened_term.append(p)
-    )
+    window.project_tree.open_terminal_requested.connect(lambda p: opened_term.append(p))
 
     data_menu = window.project_tree._on_context_menu_impl(QMenu(), data_item)
     data_acts = [a for a in data_menu.actions() if a.text() == "打开所在目录"]
@@ -1529,9 +1863,7 @@ def test_right_click_open_path_emits_signal(
     # 0.2.199-patch29ge: right-click opens the d_xxx base directory, not raw
     assert opened and Path(opened[0]) == base
     # 0.2.199-patch29gf: the data node's terminal also opens d_xxx (raw children open their own)
-    data_terms = [
-        a for a in data_menu.actions() if a.text() == "在终端中打开"
-    ]
+    data_terms = [a for a in data_menu.actions() if a.text() == "在终端中打开"]
     assert len(data_terms) == 1
     data_terms[0].trigger()
     assert opened_term and Path(opened_term[0]) == base
@@ -1543,6 +1875,7 @@ def test_right_click_open_path_emits_signal(
     assert len(opened) == 2 and Path(opened[1]) == spectra_dir
     assert window.center_panel.stack.currentIndex() == 3  # Pipeline page
     window.close()
+
 
 def test_spectrum_panel_vertical_layout(qapp: QApplication) -> None:
     """Spectrum panel vertical layout: file list on top, viewer below."""
@@ -1565,6 +1898,7 @@ def test_spectrum_panel_vertical_layout(qapp: QApplication) -> None:
     assert splitter.count() == 4  # viewer / file list / toolbar / peak table
     assert panel.file_list.maximumWidth() > 1000  # no horizontal width limit
     panel.close()
+
 
 def test_viewer_internal_vertical_layout(qapp: QApplication) -> None:
     """SpectrumViewer internal vertical layout: plot on top, controls below."""
@@ -1589,6 +1923,7 @@ def test_viewer_internal_vertical_layout(qapp: QApplication) -> None:
     assert splitter.count() == 2
     assert splitter.widget(0) is viewer.plot_area  # upper spectrum area
     viewer.close()
+
 
 def test_project_dashboard_stats_and_runs(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
@@ -1664,6 +1999,7 @@ def test_spectrum_peak_linkage(
     assert panel.peak_table.currentRow() == 0
     panel.close()
 
+
 def test_export_poky_button_generates_list(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1729,6 +2065,7 @@ def test_peak_linkage_via_load_peaks(
     assert panel.viewer._selected_peak == 1
     panel.close()
 
+
 def test_spectrum_auto_shown_on_data_select(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1764,13 +2101,17 @@ def test_spectrum_auto_shown_on_data_select(
     pipe.write(str(spectra / "exp_001-d_001.ft2"), dic, data, overwrite=True)
     panel = SpectrumPanel(manager)
     panel.set_context("exp_001", "d_001")
-    assert panel.viewer.layer_list.count() == 0  # 0.2.88: not auto-shown
-    assert panel.load_current_spectrum() is True
     assert panel.viewer.layer_list.count() == 1
     assert panel._current_spectrum is not None
+    monkeypatch.setattr(
+        panel,
+        "open_spectrum",
+        lambda *_a, **_k: pytest.fail("普通刷新不应重复加载已有谱图"),
+    )
     panel.refresh()
     assert panel.viewer.layer_list.count() == 1  # refresh does not reopen
     panel.close()
+
 
 def test_folder_node_shows_files(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
@@ -1787,6 +2128,7 @@ def test_folder_node_shows_files(
     names = [raw_item.child(i).text(0) for i in range(raw_item.childCount())]
     assert "acqus" in names and "ser" in names
     panel.close()
+
 
 def test_spectrum_file_double_click_opens_in_panel(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
@@ -1852,6 +2194,7 @@ def test_viewer_default_dir_matches_current_data(
     viewer.close()
     window.close()
 
+
 def test_run_step_uses_selected_data_id(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1860,7 +2203,7 @@ def test_run_step_uses_selected_data_id(
     from gui.pipeline_panel import PipelinePanel
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
-    manager.import_data("exp_001", "/sampleE")
+    manager.import_data("exp_001", "/data/2")
     manager.save()
     # 0.2.163-patch14: unfinished prerequisites block the next step -- first make
     # d_002's fid ready
@@ -1907,14 +2250,13 @@ def test_reset_view_union_of_all_layers(qapp: QApplication) -> None:
     assert x_range[1] >= 255 and y_range[1] >= 63  # covers both spectra
     viewer.close()
 
+
 def test_rename_project_to_sample_wording(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Three-level naming: project -> experiment -> sample data (menus/welcome/context bar)."""
     workspace = tmp_path / "ws2"
-    monkeypatch.setattr(
-        "gui.main_window.WorkspaceManager", lambda: _TempWorkspace(workspace)
-    )
+    monkeypatch.setattr("gui.main_window.WorkspaceManager", lambda: _TempWorkspace(workspace))
     monkeypatch.setattr(
         "core.workspace.WorkspaceManager",
         lambda *a, **k: _TempWorkspace(workspace),
@@ -1927,9 +2269,7 @@ def test_rename_project_to_sample_wording(
     menus = [action.text() for action in window.menuBar().actions()]
     assert "实验(&E)" in menus
     experiment_menu = next(
-        action.menu()
-        for action in window.menuBar().actions()
-        if action.text() == "实验(&E)"
+        action.menu() for action in window.menuBar().actions() if action.text() == "实验(&E)"
     )
     labels = [action.text() for action in experiment_menu.actions()]
     assert "新建实验..." in labels
@@ -2005,9 +2345,7 @@ def test_tree_inline_create_experiment_editor_commit(
             return "HNCACB"
 
     window.project_tree._on_editor_commit_data(_Editor())
-    window.project_tree._on_editor_closed(
-        None, QAbstractItemDelegate.EndEditHint.NoHint
-    )
+    window.project_tree._on_editor_closed(None, QAbstractItemDelegate.EndEditHint.NoHint)
     assert manager.project is not None
     assert any(e.title == "HNCACB" for e in manager.project.experiments)
     window.close()
@@ -2025,9 +2363,7 @@ def test_tree_inline_create_cancel_removes_pending(
     before = len(manager.project.experiments)
     window._create_experiment()
     assert window.project_tree._pending_item is not None
-    window.project_tree._on_editor_closed(
-        None, QAbstractItemDelegate.EndEditHint.RevertModelCache
-    )
+    window.project_tree._on_editor_closed(None, QAbstractItemDelegate.EndEditHint.RevertModelCache)
     assert window.project_tree._pending_item is None
     assert len(manager.project.experiments) == before
     window.close()
@@ -2235,6 +2571,7 @@ def test_default_column_widths_1920(qapp: QApplication) -> None:
         assert window.width() == avail.width()
     window.close()
 
+
 def test_phase_panel_visible_only_in_1d(qapp: QApplication) -> None:
     """0.2.147: the p0/p1 phase panel is one row and appears only in 1D mode."""
     from viewer.spectrum_viewer import SpectrumViewer
@@ -2282,16 +2619,24 @@ def _synthetic_spectrum_2d():
     from viewer.spectrum import Spectrum, SpectrumAxis
 
     axis_x = SpectrumAxis(
-        label="1H", size=64, sw_hz=6000.0, obs_mhz=600.0,
-        carrier_ppm=4.7, orig_hz=4.7 * 600.0,
+        label="1H",
+        size=64,
+        sw_hz=6000.0,
+        obs_mhz=600.0,
+        carrier_ppm=4.7,
+        orig_hz=4.7 * 600.0,
     )
     axis_y = SpectrumAxis(
-        label="15N", size=32, sw_hz=2000.0, obs_mhz=60.0,
-        carrier_ppm=118.0, orig_hz=118.0 * 60.0,
+        label="15N",
+        size=32,
+        sw_hz=2000.0,
+        obs_mhz=60.0,
+        carrier_ppm=118.0,
+        orig_hz=118.0 * 60.0,
     )
     import numpy as np
-    return Spectrum(data=np.zeros((32, 64)), axes=[axis_y, axis_x])
 
+    return Spectrum(data=np.zeros((32, 64)), axes=[axis_y, axis_x])
 
 
 def test_spectrum_param_report_has_no_data_quality_section() -> None:
@@ -2316,25 +2661,28 @@ def test_spectrum_param_report_has_no_data_quality_section() -> None:
     )
     assert "◆ 数据质量诊断" not in report
     assert "直流偏置" not in report
-    assert "◆ 处理参数与优化" in report
+    assert "◆ 处理设置" in report
 
 
-def test_experiment_page_import_buttons(
-    tmp_path: Path, qapp: QApplication
+def test_experiment_page_import_panel_is_inline_and_scrollable(
+    qapp: QApplication,
 ) -> None:
-    """0.2.162-patch12: the experiment page (where the import block was) holds an
-    "import data" button and dropdown ("between-group analysis" hidden since 2026-09-03)."""
-    from gui.main_window import MainWindow
+    "Regression coverage: test experiment page import panel is inline and scrollable."
+    from qtcompat.QtCore import Qt
 
-    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
-    manager.create_experiment()
-    manager.save()
-    window = MainWindow(manager=manager)
-    page = window.center_panel.experiment_page
-    assert page.import_dropdown_button.text() == "导入数据"
-    page._open_import_dropdown()
-    assert page._import_dropdown is not None
-    window.close()
+    from gui.dashboards import ExperimentDashboard
+
+    page = ExperimentDashboard()
+    assert not hasattr(page, "import_dropdown_button")
+    assert not page.import_panel.isHidden()
+    assert page.import_panel.parentWidget() is page.page_content
+    assert page.scroll_area.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+
+    page.resize(640, 300)
+    page.show()
+    QApplication.processEvents()
+    assert page.scroll_area.verticalScrollBar().maximum() > 0
+    page.close()
 
 
 def test_rename_editor_text_color(qapp: QApplication) -> None:
@@ -2348,157 +2696,22 @@ def test_rename_editor_text_color(qapp: QApplication) -> None:
     editor.close()
 
 
-def test_experiment_page_dropdown_not_covering_button(
-    tmp_path: Path, qapp: QApplication
-) -> None:
-    """0.2.163-patch3: an overlong dropdown is height-capped with a scrollbar and does
-    not cover the trigger button."""
-    from qtcompat.QtCore import QPoint
-
-    from gui.main_window import MainWindow
-
-    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
-    manager.create_experiment()
-    manager.save()
-    window = MainWindow(manager=manager)
-    window.show()
-    QApplication.processEvents()
-    # 0.2.194-patch2: the dropdown is a child of the experiment page, so select that
-    # page first (as in real use); widening the window lets the middle column fit the
-    # 560-wide dropdown (avoiding x clamping)
-    window.center_panel.set_selection("experiment", "exp_001")
-    window.resize(1400, 900)
-    window.main_splitter.setSizes([300, 720, 180, 200])
-    QApplication.processEvents()
-    page = window.center_panel.experiment_page
-    btn = page.import_dropdown_button
-    btn_top = btn.mapTo(page, QPoint(0, 0)).y()
-    btn_bottom = btn.mapTo(page, QPoint(0, btn.height())).y()
-    page._open_import_dropdown()
-    drop = page._import_dropdown
-    assert drop.isVisible()
-    # the dropdown must not cover the button: below it (top >= button bottom) or above it
-    # 0.2.194-patch2: the dropdown is a child of the experiment page; pos() is page-relative
-    covering = drop.pos().y() < btn_bottom and (
-        drop.pos().y() + drop.height() > btn_top
-    )
-    msg = (
-        f"下拉 {drop.pos().y()}..{drop.pos().y() + drop.height()}"
-        f" 遮住按钮 {btn_top}..{btn_bottom}"
-    )
-    assert not covering, msg
-    # height capped: never above the page height, and a scroll area appears when too long
-    assert drop.height() <= page.height()
-    assert hasattr(drop, "_scroll") and drop._scroll.isVisible()
-    window.close()
-
-
-def test_experiment_page_dropdown_switch(
-    tmp_path: Path, qapp: QApplication
-) -> None:
-    """0.2.162-patch13: import dropdown toggle behaviour (the between-group dropdown is gone)."""
-    from gui.main_window import MainWindow
-
-    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
-    manager.create_experiment()
-    manager.save()
-    window = MainWindow(manager=manager)
-    window.show()
-    QApplication.processEvents()
-    # 0.2.194-patch2: the dropdown is a child of the experiment page, so select that
-    # page first (as in real use); widening the window lets the middle column fit the
-    # 560-wide dropdown (avoiding x clamping)
-    window.center_panel.set_selection("experiment", "exp_001")
-    window.resize(1400, 900)
-    window.main_splitter.setSizes([300, 720, 180, 200])
-    QApplication.processEvents()
-    page = window.center_panel.experiment_page
-    page._open_import_dropdown()
-    assert page._import_dropdown.isVisible()
-    # 0.2.162-patch14: the dropdown belongs right below the button (show first, then move)
-    from qtcompat.QtCore import QPoint
-
-    # 0.2.194-patch2: the dropdown is a child of the experiment page, so positions are
-    # page-relative
-    expected = page.import_dropdown_button.mapTo(
-        page, QPoint(0, page.import_dropdown_button.height())
-    )
-    drop = page._import_dropdown
-    # left-aligned with the button; when the middle column is too narrow it is clamped
-    # to the page width (0.2.199-patch30: the dropdown no longer exceeds the page width,
-    # and the clamped form is served by a horizontal scrollbar)
-    assert drop.pos().x() == min(expected.x(), max(0, page.width() - drop.width()))
-    assert drop.width() <= page.width()
-    assert drop.pos().y() >= expected.y() - 1  # below the button
-    assert drop.pos().y() + drop.height() <= page.height() + 1
-    window.close()
-
-
-
-def test_import_dropdown_has_horizontal_scrollbar_when_host_is_narrow(
-    qapp: QApplication,
-) -> None:
-    """0.2.199-patch30 (user): when the host is narrower than the dropdown the right edge
-    may be clipped, but it must still scroll horizontally."""
-    from qtcompat.QtWidgets import QPushButton, QWidget
-
-    from gui.dashboards import ImportDataDropdown
-
-    host = QWidget()
-    host.resize(300, 480)
-    host.show()
-    button = QPushButton(host)
-    button.setGeometry(8, 8, 120, 28)
-    QApplication.processEvents()
-
-    drop = ImportDataDropdown(host)
-    drop.open_below(button, "exp_001")
-    QApplication.processEvents()
-    assert drop.isVisible()
-    # clamped to the host width: the right edge is no longer silently cut off by the
-    # parent but reachable by horizontal scrolling
-    assert drop.width() <= host.width()
-    assert drop.pos().x() >= 0
-    viewport = drop._scroll.viewport()
-    panel = drop._scroll.widget()
-    assert panel.width() > viewport.width(), "表单不应被压扁到视口宽度"
-    bar = drop._scroll.horizontalScrollBar()
-    assert bar.maximum() > 0, "下拉被限宽后必须出现横向滚动条"
-    assert bar.value() == 0
-    bar.setValue(bar.maximum())
-    assert bar.value() == bar.maximum(), "横向滚动条要能一直拖到右缘"
-    drop.close()
-
-    # a wide host must not stay clamped: reopening the same instance re-measures the
-    # unrestricted width and shows no horizontal scrollbar
-    host.resize(900, 480)
-    QApplication.processEvents()
-    drop.open_below(button, "exp_001")
-    QApplication.processEvents()
-    assert drop.width() > 300, "宽宿主下不应残留上次的限宽"
-    # the clamp must be lifted this time: the form is no longer pinned to its natural
-    # width (whether a wide screen still shows a horizontal scrollbar depends on the
-    # form's own minimum width, out of scope here)
-    assert drop._scroll.widget().minimumWidth() == 0
-    drop.close()
-    host.close()
-
 def test_peak_threshold_range_up_to_50(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """0.2.199-patch29bo/patch29cn: peak threshold ceiling 30σ -> 50σ; the spin box is uncapped."""
     manager = _manager_with_experiment(tmp_path, monkeypatch)
     panel = PipelinePanel(manager, FakeProcessingController())
-    panel.set_selection('data', 'exp_001', 'd_001')
-    row = panel._rows['peaks']
-    assert row.threshold_slider.maximum() == 500          # 50σ
-    assert row.threshold_spin.maximum() > 50.0            # no ceiling on the spin box (patch29cn)
+    panel.set_selection("data", "exp_001", "d_001")
+    row = panel._rows["peaks"]
+    assert row.threshold_slider.maximum() == 500  # 50σ
+    assert row.threshold_spin.maximum() > 50.0  # no ceiling on the spin box (patch29cn)
     assert row.threshold_spin.value() == pytest.approx(35.0)  # default 35σ (patch29hn)
     assert row.threshold_slider.value() == 350
     row.threshold_spin.setValue(28.5)
     assert row.threshold_slider.value() == 285
-    row.threshold_spin.setValue(100.0)                    # above the slider ceiling
-    assert row.threshold_slider.value() == 500            # slider stops at 50σ
+    row.threshold_spin.setValue(100.0)  # above the slider ceiling
+    assert row.threshold_slider.value() == 500  # slider stops at 50σ
     assert row.threshold_spin.value() == pytest.approx(100.0)  # not written back over
     panel.close()
 
@@ -2507,40 +2720,51 @@ def test_peaks_threshold_change_does_not_auto_run(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # 0.2.199-patch29au: changing the threshold does not auto-pick peaks; run/reprocess does
-    monkeypatch.setattr('threading.Thread', SyncThread)
+    monkeypatch.setattr("threading.Thread", SyncThread)
     manager = _manager_with_experiment(tmp_path, monkeypatch)
-    spectra_dir = manager.data_dir('exp_001', 'd_001', 'spectra')
+    spectra_dir = manager.data_dir("exp_001", "d_001", "spectra")
     spectra_dir.mkdir(parents=True, exist_ok=True)
-    _write_ft2(spectra_dir / 'exp_001-d_001.ft2')
+    _write_ft2(spectra_dir / "exp_001-d_001.ft2")
 
     class PeaksController(FakeProcessingController):
-        def pick_peaks(
-            self, data, exp_id=None, data_id=None, sigma_multiplier=None
-        ) -> dict:
-            self.calls.append(('pick_peaks', sigma_multiplier))
-            peaks_dir = manager.data_dir(exp_id, data_id, 'peaks')
+        def pick_peaks(self, data, exp_id=None, data_id=None, sigma_multiplier=None) -> dict:
+            self.calls.append(("pick_peaks", sigma_multiplier))
+            peaks_dir = manager.data_dir(exp_id, data_id, "peaks")
             peaks_dir.mkdir(parents=True, exist_ok=True)
-            (peaks_dir / f'{exp_id}-{data_id}.list').write_text(
-                'Assignment w1 w2 Data Height Volume\n'
-                'G1  115.000  8.000  0  100  0\n',
-                encoding='utf-8',
+            (peaks_dir / f"{exp_id}-{data_id}.list").write_text(
+                "Assignment w1 w2 Data Height Volume\nG1  115.000  8.000  0  100  0\n",
+                encoding="utf-8",
             )
-            return {'status': 'success', 'peak_count': 1}
+            return {"status": "success", "peak_count": 1}
 
     controller = PeaksController()
     panel = PipelinePanel(manager, controller)
     log = LogPanel()
     panel.log_message.connect(log.append)
-    panel.set_selection('data', 'exp_001', 'd_001')
-    row = panel._rows['peaks']
+    panel.set_selection("data", "exp_001", "d_001")
+    row = panel._rows["peaks"]
     row.threshold_spin.setValue(8.0)
     row.threshold_slider.sliderReleased.emit()
-    assert controller.calls == []  # threshold change does not auto-run
-    panel._on_run_requested('peaks')
-    assert controller.calls == [('pick_peaks', 8.0)]  # running uses the new threshold
+    assert controller.calls == []
+    from qtcompat.QtCore import Qt
+    from qtcompat.QtTest import QTest
+
+    panel.show()
+    row.threshold_spin.setFocus()
+    row.threshold_spin.selectAll()
+    QTest.keyClicks(row.threshold_spin, "100")
+    assert row.threshold_spin.value() == 8.0
+    assert row.threshold_slider.value() == 80
+    QTest.keyClick(row.threshold_spin, Qt.Key.Key_Return)
+    assert row.threshold_spin.value() == 100.0
+    assert row.threshold_slider.value() == 500
+    assert controller.calls == []
+    assert row.threshold_spin.singleStep() == 0.5
+    row.threshold_spin.setValue(8.0)
+    panel._on_run_requested("peaks")
+    assert controller.calls == [("pick_peaks", 8.0)]  # running uses the new threshold
     panel.close()
     log.close()
-
 
 
 def test_project_tree_data_status_shows_picked(
@@ -2550,18 +2774,15 @@ def test_project_tree_data_status_shows_picked(
     from gui.project_tree import ProjectTreePanel
 
     manager = _manager_with_experiment(tmp_path, monkeypatch)
-    spectra = manager.data_dir('exp_001', 'd_001', 'spectra')
+    spectra = manager.data_dir("exp_001", "d_001", "spectra")
     spectra.mkdir(parents=True, exist_ok=True)
-    _write_ft2(spectra / 'exp_001-d_001.ft2')
-    manager.set_data_spectrum(
-        'exp_001', 'd_001', str(spectra / 'exp_001-d_001.ft2')
-    )
-    peaks = manager.data_dir('exp_001', 'd_001', 'peaks')
+    _write_ft2(spectra / "exp_001-d_001.ft2")
+    manager.set_data_spectrum("exp_001", "d_001", str(spectra / "exp_001-d_001.ft2"))
+    peaks = manager.data_dir("exp_001", "d_001", "peaks")
     peaks.mkdir(parents=True, exist_ok=True)
-    (peaks / 'exp_001-d_001.list').write_text(
-        'Assignment w1 w2 Data Height Volume\n'
-        'G1  115.000  8.000  0  100  0\n',
-        encoding='utf-8',
+    (peaks / "exp_001-d_001.list").write_text(
+        "Assignment w1 w2 Data Height Volume\nG1  115.000  8.000  0  100  0\n",
+        encoding="utf-8",
     )
     manager.save()
     panel = ProjectTreePanel(manager)
@@ -2569,7 +2790,7 @@ def test_project_tree_data_status_shows_picked(
     def _data_item():
         return panel.tree.topLevelItem(0).child(0).child(0).child(0)
 
-    assert _data_item().text(1) == '已选峰'
+    assert _data_item().text(1) == "已选峰"
     panel.close()
 
 
@@ -2599,7 +2820,9 @@ def test_spectrum_display_settings_isolated_per_data(
     panel.viewer.aspect_slider.setValue(80)
     panel.peak_size_spin.setValue(2.0)
     assert panel._display_states[(exp.id, d1_id)]["level_slider"] == 60
-    # d_002 opens with defaults on first use, unaffected by d_001
+    panel.viewer.level_label.setValue(21.7)
+    assert panel._display_states[(exp.id, d1_id)]["level_percent"] == 21.7
+
     panel.set_context(exp.id, d2.id)
     assert panel.load_current_spectrum() is True
     assert panel.viewer.level_slider.value() == 31
@@ -2610,15 +2833,14 @@ def test_spectrum_display_settings_isolated_per_data(
     panel.set_context(exp.id, d1_id)
     assert panel.load_current_spectrum() is True
     assert panel.viewer.level_slider.value() == 60
+    assert panel.viewer.level_label.value() == 21.7
     assert panel.viewer.count_slider.value() == 12
     assert panel.viewer.aspect_slider.value() == 80
     assert panel.peak_size_spin.value() == 2.0
     panel.close()
 
 
-def test_log_panel_data_scope_persists_to_data_folder(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_log_panel_data_scope_persists_to_data_folder(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.199-patch29ga: the single-data log persists to d_xxx/log.txt, and a new panel
     reads it back."""
     from core.project import ProjectManager
@@ -2639,9 +2861,7 @@ def test_log_panel_data_scope_persists_to_data_folder(
     log2 = LogPanel()
     log2.set_manager(manager)
     log2.set_scope("data", exp.id, data.id)
-    assert any(
-        "第一次处理完成" in line for line in log2._buffers[scope]
-    )
+    assert any("第一次处理完成" in line for line in log2._buffers[scope])
     # clearing the panel also clears the record file (keeping the title line)
     log2.clear()
     text2 = path.read_text(encoding="utf-8")
@@ -2671,6 +2891,7 @@ def test_spectrum_display_settings_persisted_in_data_folder(
     panel.set_context(exp.id, d1_id)
     assert panel.load_current_spectrum() is True
     panel.viewer.level_slider.setValue(55)
+    panel.viewer.level_label.setValue(16.7)
     panel.viewer.count_slider.setValue(11)
     panel.viewer.aspect_slider.setValue(70)
     panel.peak_size_spin.setValue(2.5)
@@ -2679,6 +2900,7 @@ def test_spectrum_display_settings_persisted_in_data_folder(
     payload = json.loads(path.read_text(encoding="utf-8"))
     spectrum = payload["spectrum"]
     assert spectrum["level_slider"] == 55
+    assert spectrum["level_percent"] == 16.7
     assert spectrum["level_count"] == 11
     assert spectrum["aspect"] == 70
     assert spectrum["peak_size"] == 2.5
@@ -2687,6 +2909,7 @@ def test_spectrum_display_settings_persisted_in_data_folder(
     panel2.set_context(exp.id, d1_id)
     assert panel2.load_current_spectrum() is True
     assert panel2.viewer.level_slider.value() == 55
+    assert panel2.viewer.level_label.value() == 16.7
     assert panel2.viewer.count_slider.value() == 11
     assert panel2.viewer.aspect_slider.value() == 70
     assert panel2.peak_size_spin.value() == 2.5
@@ -2694,9 +2917,7 @@ def test_spectrum_display_settings_persisted_in_data_folder(
     panel2.close()
 
 
-def test_log_panel_group_scope_persists_to_group_folder(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_log_panel_group_scope_persists_to_group_folder(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.199-patch29gb: the data-group log also lands on disk (group log.txt), and a
     new panel reads it back."""
     from core.project import ProjectManager
@@ -2710,22 +2931,13 @@ def test_log_panel_group_scope_persists_to_group_folder(
     log.set_manager(manager)
     scope = log.scope_key("group", exp.id, "", group.id)
     log.append("组日志第一行", scope=scope)
-    path = (
-        manager.root
-        / exp.id
-        / "groups"
-        / group.id
-        / "report"
-        / "log.txt"
-    )
+    path = manager.root / exp.id / "groups" / group.id / "report" / "log.txt"
     assert path.is_file()
     assert "组日志第一行" in path.read_text(encoding="utf-8")
     log2 = LogPanel()
     log2.set_manager(manager)
     log2.set_scope("group", exp.id, "", group.id)
-    assert any(
-        "组日志第一行" in line for line in log2._buffers[scope]
-    )
+    assert any("组日志第一行" in line for line in log2._buffers[scope])
     log2.clear()
     assert "组日志第一行" not in path.read_text(encoding="utf-8")
     log.close()

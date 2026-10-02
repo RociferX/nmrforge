@@ -8,9 +8,9 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from qtcompat.QtWidgets import QApplication, QDialog, QFileDialog
+from qtcompat.QtWidgets import QApplication, QDialog
 
-from core.project import ProjectManager
+from core.project import JsonRecentProjectsStore, ProjectManager
 from gui.dialogs import ConfirmDialog
 from gui.main_window import MainWindow
 
@@ -21,22 +21,16 @@ def qapp() -> QApplication:
     yield app
 
 
-def _build_manager(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch | None = None
-) -> ProjectManager:
+def _build_manager(tmp_path: Path, monkeypatch: pytest.MonkeyPatch | None = None) -> ProjectManager:
     ws = tmp_path / "ws"
     ws.mkdir(exist_ok=True)
     manager = ProjectManager.create_project(ws / "proj", "demo")
-    manager.add_experiment("/sampleD", title="HSQC")
-    manager.add_experiment("/sampleE", title="HNCACB")
+    manager.add_experiment("/data/1", title="HSQC")
+    manager.add_experiment("/data/2", title="HNCACB")
     manager.save()
     if monkeypatch is not None:
-        monkeypatch.setattr(
-            "gui.main_window.WorkspaceManager", lambda: _TempWorkspace(ws)
-        )
-        monkeypatch.setattr(
-            "core.workspace.WorkspaceManager", lambda *a, **k: _TempWorkspace(ws)
-        )
+        monkeypatch.setattr("gui.main_window.WorkspaceManager", lambda: _TempWorkspace(ws))
+        monkeypatch.setattr("core.workspace.WorkspaceManager", lambda *a, **k: _TempWorkspace(ws))
     return manager
 
 
@@ -50,9 +44,7 @@ class _TempWorkspace:
 
     def list_projects(self) -> list[Path]:
         return sorted(
-            p
-            for p in self.root.iterdir()
-            if p.is_dir() and (p / "project.json").is_file()
+            p for p in self.root.iterdir() if p.is_dir() and (p / "project.json").is_file()
         )
 
     def create_project(self, name: str, **kwargs):
@@ -91,7 +83,7 @@ def test_new_project_action(
         "gui.main_window.WorkspaceManager",
         lambda: _WorkspaceStub(workspace),
     )
-    window = MainWindow()
+    window = MainWindow(recent=JsonRecentProjectsStore(tmp_path / "recent_projects.json"))
 
     class _FakeNotesDialog:
         DialogCode = QDialog.DialogCode
@@ -141,7 +133,10 @@ def test_new_project_tree_inline_when_project_open(
             return {}
 
     monkeypatch.setattr("gui.main_window.NotesDialog", _FakeNotesDialog)
-    window = MainWindow(manager=manager)
+    window = MainWindow(
+        manager=manager,
+        recent=JsonRecentProjectsStore(tmp_path / "recent_projects.json"),
+    )
     window.new_project()
     assert window.project_tree._pending_kind == "project"
     window.project_tree._commit_pending_create("demo2")
@@ -165,9 +160,7 @@ class _WorkspaceStub:
 
     def list_projects(self) -> list[Path]:
         return sorted(
-            p
-            for p in self.root.iterdir()
-            if p.is_dir() and (p / "project.json").is_file()
+            p for p in self.root.iterdir() if p.is_dir() and (p / "project.json").is_file()
         )
 
 
@@ -176,12 +169,8 @@ def test_open_project_action(
 ) -> None:
     root = tmp_path / "proj"
     ProjectManager.create_project(root, "demo")
-    monkeypatch.setattr(
-        QFileDialog,
-        "getExistingDirectory",
-        staticmethod(lambda *args, **kwargs: str(root)),
-    )
-    window = MainWindow()
+    monkeypatch.setattr("gui.main_window.choose_directory", lambda *args, **kwargs: str(root))
+    window = MainWindow(recent=JsonRecentProjectsStore(tmp_path / "recent_projects.json"))
     window.open_project()
     assert window.manager.project is not None
     assert window.manager.project.name == "demo"
@@ -267,12 +256,8 @@ def test_import_workflow_e2e(
     workflow.import_workflow.import_data."""
     ws = tmp_path / "ws"
     ws.mkdir(exist_ok=True)
-    monkeypatch.setattr(
-        "gui.main_window.WorkspaceManager", lambda: _TempWorkspace(ws)
-    )
-    monkeypatch.setattr(
-        "core.workspace.WorkspaceManager", lambda *a, **k: _TempWorkspace(ws)
-    )
+    monkeypatch.setattr("gui.main_window.WorkspaceManager", lambda: _TempWorkspace(ws))
+    monkeypatch.setattr("core.workspace.WorkspaceManager", lambda *a, **k: _TempWorkspace(ws))
     manager = ProjectManager.create_project(ws / "proj", "demo")
     dataset = tmp_path / "dataset"
     dataset.mkdir()
@@ -296,9 +281,7 @@ def test_import_workflow_e2e(
         staticmethod(lambda *args, **kwargs: None),
     )
     window = MainWindow(manager=manager)
-    window._import_experiment_async(
-        {"source": str(dataset), "title": "HSQC", "copy": True}
-    )
+    window._import_experiment_async({"source": str(dataset), "title": "HSQC", "copy": True})
     assert manager.project is not None
     entry = manager.project.experiment("exp_001")
     assert entry is not None and entry.title == "HSQC"

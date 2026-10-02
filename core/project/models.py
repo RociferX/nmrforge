@@ -91,19 +91,19 @@ class DataEntry:
     """One imported dataset (an independent entry under the experiment, d_001..., schema 1.2)."""
 
     id: str
-    title: str = ""                   # dataset title (empty default; GUI falls back to id)
-    source: str = ""                 # external Bruker dataset directory (at import time)
-    raw_dir: str = ""                # in-project copy under raw/<exp_id>/<data_id>/
+    title: str = ""  # dataset title (empty default; GUI falls back to id)
+    source: str = ""  # external Bruker dataset directory (at import time)
+    raw_dir: str = ""  # in-project copy under raw/<exp_id>/<data_id>/
     segments: list[str] = field(default_factory=list)
-    status: str = "imported"         # imported / fid_ready / processed
+    status: str = "imported"  # imported / fid_ready / processed
     imported_at: str = ""
-    metadata_path: str = ""          # metadata/<exp_id>-<data_id>.json (relative path)
-    fid_path: str = ""               # set once the FID exists (empty = not generated)
-    spectrum_path: str = ""          # set once the spectrum exists (not generated = empty)
+    metadata_path: str = ""  # metadata/<exp_id>-<data_id>.json (relative path)
+    fid_path: str = ""  # set once the FID exists (empty = not generated)
+    spectrum_path: str = ""  # set once the spectrum exists (not generated = empty)
     checksums: dict[str, str] = field(default_factory=dict)
     migrated_from_1_1: bool = False
-    trashed: bool = False                # soft delete: the files are in the trash, restorable
-    trashed_at: str = ""                 # soft-delete timestamp (empty = not deleted)
+    trashed: bool = False  # soft delete: the files are in the trash, restorable
+    trashed_at: str = ""  # soft-delete timestamp (empty = not deleted)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DataEntry:
@@ -146,10 +146,11 @@ class DataEntry:
 @dataclass
 class DataGroupEntry:
     """A data group under the experiment (the batch-processing unit, schema 1.4): its data_ids
-    are ordered."""
+    are ordered.
+    """
 
     id: str
-    title: str = ""                  # group title (empty by default; the GUI falls back to the id)
+    title: str = ""  # group title (empty by default; the GUI falls back to the id)
     data_ids: list[str] = field(default_factory=list)
     created_at: str = ""
 
@@ -174,7 +175,8 @@ class DataGroupEntry:
 @dataclass
 class ExperimentEntry:
     """An experiment (may be created empty); datasets hang off it through the data list
-    (schema 1.2)."""
+    (schema 1.2).
+    """
 
     id: str
     title: str = ""
@@ -185,14 +187,15 @@ class ExperimentEntry:
     groups: list[DataGroupEntry] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
-    trashed: bool = False                # soft delete: the files are in the trash, restorable
-    trashed_at: str = ""                 # soft-delete timestamp (empty = not deleted)
+    trashed: bool = False  # soft delete: the files are in the trash, restorable
+    trashed_at: str = ""  # soft-delete timestamp (empty = not deleted)
 
     # ---- schema 1.1 compatibility read-only properties (pointing at data[0]) -----------
     @property
     def source(self) -> str:
         """Legacy-field compatibility: the directory of the first dataset (in-project copy
-        first)."""
+        first).
+        """
         if not self.data:
             return ""
         first = self.data[0]
@@ -213,9 +216,7 @@ class ExperimentEntry:
         exp_id = str(data.get("id", ""))
         entries = [DataEntry.from_dict(d) for d in (data.get("data") or [])]
         # schema 1.0/1.1 migration: the old top-level source/segments/imported_at -> data[0]
-        if not entries and (
-            data.get("source") or data.get("segments") or data.get("imported_at")
-        ):
+        if not entries and (data.get("source") or data.get("segments") or data.get("imported_at")):
             entries = [
                 DataEntry(
                     id="d_001",
@@ -234,9 +235,7 @@ class ExperimentEntry:
             sample_id=str(data.get("sample_id", "")),
             notes=str(data.get("notes", "")),
             data=entries,
-            groups=[
-                DataGroupEntry.from_dict(g) for g in (data.get("groups") or [])
-            ],
+            groups=[DataGroupEntry.from_dict(g) for g in (data.get("groups") or [])],
             metadata=dict(data.get("metadata") or {}),
             created_at=str(data.get("created_at", "") or data.get("imported_at", "")),
             trashed=bool(data.get("trashed", False)),
@@ -328,7 +327,8 @@ class HistoryEntry:
 @dataclass
 class WorkflowRun:
     """One processing run (append-only, R-YYYYMMDD-NNN): input SHA-256, parameters, artifacts,
-    snapshot reference."""
+    snapshot reference.
+    """
 
     run_id: str
     experiment_id: str = ""

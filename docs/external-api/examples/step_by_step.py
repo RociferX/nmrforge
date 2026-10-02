@@ -1,6 +1,10 @@
-r"""Example 2: Step by step execution (Reference -> Peak Table -> plan -> Batch -> Record). Usage::
-python docs/external-api/examples/step_by_step.py --study ~/studies/s2 \ --dataset ~/data/apo
---combos combos.csv."""
+r"""Example 2: build a reference, run a parameter table, and write records.
+
+Usage::
+
+    python docs/external-api/examples/step_by_step.py --study ./study \
+        --dataset /path/to/bruker --combos combos.csv
+"""
 
 from __future__ import annotations
 
@@ -25,12 +29,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset", required=True, help="Bruker directory")
     parser.add_argument("--condition", default="A", help="Conditional label (default A)")
     parser.add_argument("--combos", required=True, help="combination table")
-    parser.add_argument(
-        "--localization",
-        choices=("parabolic", "gaussian", "both"),
-        default="parabolic",
-        help="Combined mode peak position refinement method (both = both peak tables are output)",
-    )
     args = parser.parse_args(argv)
 
     session = open_study(args.study)
@@ -40,8 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     reference = build_reference(session, progress=print)
     reference = ensure_reference_peaks(session, reference)
     print("Reference script:", reference.script_path)
-    print("Reference peak table:", reference.peak_table_parabolic_path,
-          "|", reference.peak_table_gaussian_path)
+    print("Reference peak table:", reference.peak_table_parabolic_path)
     print("Automatic phase actual value:", reference.phase_record())
 
     plan = plan_sweep(reference, combos=load_combo_table(args.combos))
@@ -50,7 +47,6 @@ def main(argv: list[str] | None = None) -> int:
         session,
         plan,
         reference=reference,
-        localization=args.localization,
         progress=print,
     )
     records = write_records(

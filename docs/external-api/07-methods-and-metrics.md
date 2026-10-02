@@ -11,13 +11,16 @@
    (NMRPipe pipeline + unified phase route; NUS go SMILE reconstruction);
 2. Freeze **reference spectrum** and **reference script **(`process.com`, with SHA-256) -- reference script is the condition.
    Template for all subsequent workflows;
-3. Reference peak position: The software automatically selects the peak on the reference spectrum (threshold `sigma_multiplier` when **generating the reference**.
-   Can be specified externally, default 35σ;API `sigma_multiplier=` / CLI `peaks --sigma`).
-   Axial peaks are culled by physical margins, or using an external peak table; peaks get stable identities in row order `R0001…`;
+3. Reference peak position: the software selects peaks on the reference spectrum (threshold
+   `sigma_multiplier` is set when **generating the reference**, default 35σ; API `sigma_multiplier=` /
+   CLI `peaks --sigma`). Automatic axial screening requires compatible experiment/acquisition
+   priors and evidence from many narrow, aligned candidates at original spectrum edges; it does
+   not use a blanket edge margin. An explicit margin is a manual override. Peaks receive stable
+   identities in row order `R0001…`;
    **The threshold is frozen together with the reference**: All subsequent workflows can only use the reference threshold and give different thresholds.
    An error will be reported (if you want to change the threshold, you must rebuild the reference);
-4. Use **parabolic** and **2D gaussian** to locate the same reference spectrum respectively, and write two.
-   Reference peak table;
+4. Apply the single supported localisation method, a **three-point parabola**, and write
+   `reference_peak_table_parabolic.csv`;
 5. The reference is only used as a benchmark for parameter perturbation and does not claim global optimality.
 
 ## 7.2 parameter perturbation (workflow)
@@ -32,78 +35,59 @@
 
 ## 7.2b sampling route (full sampling -> uniform)
 
-Valid sampling is determined during the data reading stage: mark NUS but `nuslist` covers the whole grid, or 2D `ser` is "full grid +.
-"zero filling" and **no zero rows** -> judged as **actual full sampling**,`sampling="uniform"`.
-`sampling_schedule="full_sampling"`, and record the evidence; handle `process()` as usual FT.
-**Does not run SMILE**. True NUS (the sampling schedule only covers a subset, or the sparse file has no sampling schedule) still runs.
-`reconstruct_nus()`;3D NUS Maintain the original state (only supports reference creation).
+Sampling is classified from supported metadata, the valid data grid and schedule order. Only a
+standard `nuslist` or a file explicitly named by `acqus.NUSLIST` is used. A full grid in standard
+order may use uniform processing; full coverage in another order still requires schedule-based
+placement. Explicit NUS data with a missing schedule or unrecoverable positions is rejected at
+import. Trailing zero padding is not counted as missing samples. API parameter-combination support
+for 3D NUS remains limited as described in [09](09-limitations-and-roadmap.md).
 
-## 7.3 Two kinds of peak positioning
+## 7.3 Peak localisation: three-point parabola
 
 | Method | Practice | Scope of application |
 | --- | --- | --- |
-| `parabolic` (Reference method) | Take the \| intensity\| extreme value in the window near the reference peak position, and then do +/-1 point three-point parabolic sub-pixel refine for each participating axis | Arbitrary dimension |
-| `gaussian` | Take the parabola's integer-grid result as the centre, then least-squares fit a 2D Gaussian **on the same candidate** (no rotation, axially separable, with a local constant baseline), returning centre/FWHM/amplitude/rmse | **2D only** |
+| `parabolic` | Refine the detected maximum independently along each requested axis using the local three points | Any dimension; only method |
 
-The two run independently on the exact same candidate, and the results can be directly compared (the peak position difference is the algorithm difference).
-
-- **Reference mode**: Do two positions for each peak in the reference peak table. The two reference peak tables use the same batch
-  `reference_peak_id`;
+- **Reference mode**: refine each peak in the reference peak table and write one parabolic table;
 - **Combination mode** (2026-09-14): each combination first picks peaks independently on **its own
-  candidate spectrum** with the reference-locked threshold, then refines them with `localization`
-  (parabolic default / gaussian / both). `reference_peak_id` stays blank in the peak table --
+  candidate spectrum** with the reference-locked threshold, then refines them with the parabola.
+  `reference_peak_id` stays blank in the peak table --
   matching peaks between combinations, and against the reference, is downstream work.
 
-When Gaussian fails (ROI too small/Not convergent/hit the border/sick): fall back to the parabola position and return to the peak table.
-`fallback`/`fallback_reason`/`fit_success` and `run.json.peak_localization`.
-Reason for peak-by-peak recording, workflow status upgraded to `success_with_warning` -- **Silence is not allowed**.
+Localisation is a deterministic closed-form calculation, not an iterative fit. `boundary_hit`
+marks a vertex offset at ±0.5 points. `fit_success` indicates whether a finite equivalent linewidth
+could be calculated; it differs from the localisation record's `success` (which indicates that
+localisation ran). `fallback` and `fallback_reason` remain compatibility fields and do not imply
+an algorithm switch. Removed method requests such as `gaussian` or `both` raise an error.
 
-### Fitting cost and result caliber (2026-09-14)
-
-The cost of peak-by-peak 2D Gaussian = iteration number x ROI points; three constraints prevent the cost from linear expansion with zero filling:
-
-| Mechanism | Default | Impact on results |
-| --- | --- | --- |
-| Analytical Jacobian | On | **None**: The same model, the same objective function and convergence criterion; measured peak difference <= 3e-05 ppm(15N)/3e-06 ppm(1H), method zero rollover, backoff count unchanged |
-| The upper limit of the half-width of each axis of the fitting window (`peaks.localization.gaussian_roi_max_points`) | **0 = no limit (default)** | The default is no truncation at all -> the result is consistent with the old version; setting a positive value (such as 48) can limit the fine grid fitting scale in exchange for speed, **will change the result**: real machine 4 x maximum 0.39 ppm (3 peaks flipped), two-dimensional 2 x maximum 0.71 ppm(1 flip); trigger peak-by-peak retention `roi_capped`, if the fitting fails after truncation, it will automatically retry with the complete ROI (`fit_retry_uncapped`/`retry_n_iter`) |
-| The upper limit of single-peak evaluation (`peaks.localization.gaussian_max_nfev`) | 200 | only affects the difficult-to-converge peaks that originally require more evaluations; 1 iteration in the numerical difference period ≈7 evaluations, 1 iteration = 1 evaluation under the analytical Jacobian, so 200 evaluations ≈ 200 iterations (more relaxed than the original ~57 iterations), just halving the "worst cost" |
-
-Real machine comparison (248 peak tracking, same as reference peak table; default configuration = no upper limit):
-
-| Grid | Old version | New version (default) | Speed up | Peak difference (15N/1H)/method flip |
-| --- | --- | --- | --- | --- |
-| F1 1× | 2.02 s | 1.46 s | 1.38× | 3e-05 / 3e-06 ppm,0 |
-| F1 2× | 3.67 s | 2.24 s | 1.64× | 7e-06 / 3e-06 ppm,0 |
-| F1 4× | 6.43 s | 3.89 s | 1.65× | 1e-06 / 0 ppm,**0** |
-| F1 2× + F2 2× | 4.98 s | 3.13 s | 1.59× | 0 / 0 ppm,**0** |
-
-If `gaussian_roi_max_points` is set to 48 (optional): 4 x 1.73 x, two dimensions 2 x 1.84 x, but the cost is.
-Changes in peak positions listed above (keep files available for audit).
+Parabolic localisation needs only the local three-point neighbourhood on each axis. There is no
+ROI size or iterative evaluation budget.
 
 ## 7.4 Peak selection threshold and margin (physical width caliber)
 
 - Peak selection threshold = **Noise σ multiple** (`sigma_multiplier`, internally as `min_snr`):
   The reference mode is determined (default 35σ), the combination mode is **locked and inherited**, and is archived by workflow.
   `parameters_resolved.detection`(`source="reference(locked)"`);
-- Edge axis peak exclusion margin default = **3 x nuclide line width of this axis (Hz) converted into ppm**
-  (`core.peaks.axis_units`);`edge_margin_ppm` can explicitly give the physical width;
-  At run time the point count is derived from the point spacing of the current candidate spectrum, e.g. after zero filling k times: only the point spacing changes, the margin's ppm coverage does not.
-  The ppm width;
+- Default edge handling uses experiment/acquisition priors and evidence from many narrow, aligned
+  peaks at the original spectrum edges. No unconditional edge band is excluded. An isolated edge
+  peak, internal carrier peak, unknown experiment or uncertain crop boundary is retained. An
+  explicit `edge_margin_ppm` or `edge_margin_points` is a manual override and is recorded apart
+  from automatic screening;
 - The conversion results are archived group by group: `run.json.window`(points/ppm/effective_ppm/
   Ppm_per_point/source) and `records/measurement.json`;
-- The combination mode **does not** `max_peaks`, nor does it have a "reference peak search window" (the reference peak table is not tracked);
-  Reference mode/Lower floor `measure_peak_positions` remains `window_ppm` (default 1.5 x line width).
-  With `window_pts` escape hatch;
-- `window_ppm`/`window_pts` are an **upper bound** only: with the default
-  `exclusive_windows=True` each reference peak's search region is truncated at the midpoints
-  to its neighbours, so a record only takes the extremum inside its own cell. Otherwise a
-  window wider than the spacing between neighbouring peaks relocates two reference records
-  onto one grid point and the reference table gets duplicate rows differing only in
-  `reference_peak_id` (fixed 2026-09-19; on a real 2D HSQC data set, condition A: 253 rows, 184 unique
-  coordinates). `exclusive_windows=False` reproduces the previous wording;
-- Gaussian ROI is also defined according to the physical width (ppm) (`peaks.localization.gaussian_roi_f1_ppm`
-  / `_f2_ppm`,or function/CLI parameter), convert points according to point distance;
+- The combination mode has no `max_peaks`; each workflow detects the peaks allowed by the
+  reference-locked threshold. Reference measurements may use explicit search windows; these are
+  not a blanket edge-exclusion rule. Automatic axial screening is separate and documented in
+  [Peak picking](../peak-picking.md).
 - Structural points (local maximum 3-point neighborhood, parabola +/-1 point) are not scaled -- they have nothing to do with resolution
+
+Peak height, the selection threshold, S/N and reference measurements share the global median
+background convention (`baseline_offset`, `height_reference="global_median_baseline"`). This is
+not a spatial baseline correction and it does not change the spectrum. Automatic sign handling
+follows the experiment template; phase-sensitive COSY/NOESY/ROESY retain both signs. For unknown or
+low-confidence experiment types, strong evidence for both signs can be used as a fallback. An
+explicit API request (`positive`, `negative`, `both` or `dominant`) takes precedence. The
+low-level detector uses `sign_mode="auto"` by default.
 
 ### Baseline correction caliber (corrected on 2026-09-16)
 
@@ -127,17 +111,17 @@ The same parameter may be completely different under different conditions (diffe
 | --- | --- |
 | `detected` | Whether the peak is detected on the spectrum (combination mode: only the detected peaks are in the table -> constant true; refer to the peak table
 Unmeasured reference peaks in tracking mode retain rows and `detected=false`) |.
-| `intensity` / `SNR` | The peak intensity at the extremum and `|intensity|/σ` (σ = the spectrum's robust MAD noise) |
-| `fit_success` / `FWHM_H` / `FWHM_N` / `boundary_hit` | QC of the localization method this row **actually used** (Gaussian fit / three-point parabola); since P3-7 (2026-09-19) a parabolic table carries real values too, and the parabola reports an **equivalent linewidth** (`FWHM = 2.3548 sigma`, `sigma^2 = H/(2|a|)`) |
-| `fit_rmse` | Gaussian fit residual RMS; **Gaussian only** - a parabolic table writes NaN (the three-point parabola is an exact solve) |
-| `duplicate_localization` | The row shares its coordinates with another row of the same table (ppm to 1e-6, P2-5): every row of a group is flagged true and no row is dropped; `peak_localization.<method>.n_duplicate` counts the extra rows and `run.json.warnings` gains a `duplicate_localization` code |
+| `intensity` / `SNR` | Signed peak height relative to the global median background and `|height|/σ` (σ = robust MAD noise) |
+| `fit_success` / `FWHM_H` / `FWHM_N` / `boundary_hit` | Three-point parabolic localisation QC; the equivalent linewidth is a local-curvature estimate (`FWHM = 2.3548 sigma`, `sigma^2 = H/(2|a|)`) |
+| `duplicate_localization` | The row shares its coordinates with another row of the same table (ppm to 1e-6): every row of a group is flagged true and no row is dropped; `peak_localization.parabolic.n_duplicate` counts extra rows and `run.json.warnings` gains `duplicate_localization` |
 | `fallback` / `fallback_reason` | Whether to roll back and why |
 | `cell_low_*` / `cell_high_*` / `cell_edge` / `intensity_ratio_vs_picked` / `shift_vs_picked_*` | Reference-table per-peak **cell/identity QC** (P1-3): the final search interval (closed, data-axis grid points), whether the extremum was cut by the neighbour's cell, |measured intensity| / |the identity table's `Height`|, and measured - picked in ppm; **combination tables write NaN** (the sweep picks and localizes in one step, so there is no such step) |
 
-`window_edge` and `cell_edge` are **orthogonal**: the first is true only when the extremum sits on a **physical window** bound (+-1.5x linewidth converted to points, clipped by the spectrum edge); the second is true only when the **exclusive cell** (the midpoint to the neighbouring reference peaks) truncated that peak's search interval and the extremum stopped exactly on that bound. With the historical wording `measure_peak_positions(exclusive_windows=False)` there is no neighbour truncation, so `cell_edge` is always false. Both true together means the true peak top may lie outside the window and may belong to the neighbour.
+`window_edge` and `cell_edge` describe distinct search boundaries when those fields are present in
+a reference-measurement record. They do not by themselves establish that a peak is an artifact.
 
 **How to read `cell_edge` (owner's wording, 2026-09-19 - measured, and it matters)**: it fires very
-often (a real 2D HSQC data set, condition A: 233/253; synthetic A 418/431, B 423/431) because the exclusive cell is often
+often because an exclusive cell can be narrow in a crowded spectrum
 only 1-2 points wide, so an extremum sitting on the cell bound is normal for crowded spectra. It is
 therefore **not a criterion, only a necessary-condition filter**: the caller's own criteria are
 `intensity_ratio_vs_picked` (for example >1.10) and `shift_vs_picked_*` (for example >1.5 points),
@@ -148,11 +132,8 @@ continuous quantity (in-cell maximum / physical-window maximum), with the thresh
 the downstream reader.
 
 
-Internal `PeakMeasurement`(Reference peak tracking/Low level measurement path) with `window_edge`(extreme value sticker window.
-Boundary), `boundary` (adhesion to the spectrum boundary), `out_of_range` (reference position outside the spectrum range) and `deltas`.
-(relative to the reference peak position), summarized into `run.json.peak_localization` and.
-`records/measurement.json`; Change the combination mode to use the peak detected by this spectrum -> Peak by Peak QC as.
-`fit_success`/`fit_rmse`/`FWHM_*`/`boundary_hit`/`fallback`.
+Reference-measurement records may include additional location and boundary fields; the public
+peak-table columns and meanings are listed in [outputs and records](06-outputs-and-records.md).
 
 ## 7.6 test/Detection aid (not included in the processing contract)
 
@@ -161,7 +142,6 @@ Boundary), `boundary` (adhesion to the spectrum boundary), `out_of_range` (refer
 The processing chain will not appear in `records/`; its purpose is:
 
 - **Regression detection**: σ/Δδ All 0 means that the scanned parameter is silently ignored (this defect has appeared in the history of real machines);
-- **Algorithm comparison**: Peak difference between parabolic and gaussian under the same batch of candidates;
 - **Downstream reference implementation**: The analysis side can be directly reused or implemented as such
 
 ```python

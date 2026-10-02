@@ -23,8 +23,7 @@ from core.qc import phase_quality
 from workflow.memory_phase_search import rotate_real
 from workflow.phase_routes import _axis_index, _read_complex_preview, _read_real_ft3
 
-CANDIDATES = [0.0, 30.0, 60.0, 90.0, 120.0, 150.0,
-              180.0, 210.0, 240.0, 270.0, 300.0, 330.0]
+CANDIDATES = [0.0, 30.0, 60.0, 90.0, 120.0, 150.0, 180.0, 210.0, 240.0, 270.0, 300.0, 330.0]
 
 
 def main() -> int:
@@ -51,9 +50,12 @@ def main() -> int:
     axis = axis_override or [a for a in axes if a != direct_axis][0]
     ax = _axis_index(axis, exp.ndim)
     zf_phase = {"zero_fill": {a: {"mode": "auto"} for a in axes}}
-    print(f"project={project_root} data={exp_id}/{data_id} "
-          f"dataset={exp.dataset_id} ndim={exp.ndim} axes={axes} "
-          f"axis={axis} ax={ax} planes={proc_dir / 'nus3d_rc'}", flush=True)
+    print(
+        f"project={project_root} data={exp_id}/{data_id} "
+        f"dataset={exp.dataset_id} ndim={exp.ndim} axes={axes} "
+        f"axis={axis} ax={ax} planes={proc_dir / 'nus3d_rc'}",
+        flush=True,
+    )
 
     preview = work / f"equiv_mem_{axis}.ft3"
     resp = backend.finalize_nus(
@@ -90,8 +92,7 @@ def main() -> int:
             return 2
         be_real = _read_real_ft3(str(resp2["spectrum_path"]))
         if mem_real.shape == be_real.shape:
-            scale = max(float(np.max(np.abs(mem_real))),
-                        float(np.max(np.abs(be_real))), 1e-12)
+            scale = max(float(np.max(np.abs(mem_real))), float(np.max(np.abs(be_real))), 1e-12)
             rel = float(np.max(np.abs(mem_real - be_real))) / scale
         else:
             rel = float("nan")
@@ -116,12 +117,7 @@ def main() -> int:
         f"top_mem={top_mem:g} top_be={top_be:g} max_rel_diff={max_rel_diff:.3e}",
         flush=True,
     )
-    ok = (
-        not np.isnan(rho)
-        and rho >= 0.99
-        and top_mem == top_be
-        and max_rel_diff < 1e-4
-    )
+    ok = not np.isnan(rho) and rho >= 0.99 and top_mem == top_be and max_rel_diff < 1e-4
     print(f"EQUIVALENT={ok}")
     return 0 if ok else 1
 

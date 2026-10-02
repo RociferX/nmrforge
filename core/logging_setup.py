@@ -55,7 +55,8 @@ _RUN_HANDLER_FLAG = "_nmrforge_run_handler"
 
 def resolve_level(level: str | int | None = None) -> int:
     """Resolve ``--level``/the environment variable/a number into a logging level
-    (invalid or unknown falls back to WARNING)."""
+    (invalid or unknown falls back to WARNING).
+    """
     if isinstance(level, int):
         return int(level)
     name = str(level or os.environ.get(LEVEL_ENV, DEFAULT_LEVEL)).strip().upper()
@@ -79,9 +80,7 @@ def configure_logging(
     logger = logging.getLogger(LOGGER_NAME)
     logger.setLevel(resolve_level(level))
     logger.propagate = False
-    console = next(
-        (h for h in logger.handlers if getattr(h, _OWN_HANDLER_FLAG, False)), None
-    )
+    console = next((h for h in logger.handlers if getattr(h, _OWN_HANDLER_FLAG, False)), None)
     if console is None:
         console = logging.StreamHandler(stream if stream is not None else sys.stderr)
         console.setFormatter(logging.Formatter(LOG_FORMAT))
@@ -103,7 +102,8 @@ def attach_run_log(
     directory: Path | str, *, logger: logging.Logger | None = None
 ) -> logging.Handler:
     """Attach ``<directory>/run.log`` to a single run (creating the directory), return
-    the handler."""
+    the handler.
+    """
     target_dir = Path(directory)
     target_dir.mkdir(parents=True, exist_ok=True)
     # delay=True: run.log appears only when a record is really written, so a successful run
@@ -133,7 +133,8 @@ def append_run_log_line(path: Path | str, message: str) -> None:
 
 def detach_run_log(handler: logging.Handler | None) -> None:
     """Take back the handler from :func:`attach_run_log` (safe to call repeatedly; it
-    always closes the file)."""
+    always closes the file).
+    """
     if handler is None:
         return
     for logger in (logging.getLogger(LOGGER_NAME), logging.getLogger()):
@@ -147,7 +148,8 @@ def detach_run_log(handler: logging.Handler | None) -> None:
 
 def sanitize_path(value: Any) -> str:
     """Sanitise log text: fold the user home into ``~`` (the Phase 22 "sensitive absolute
-    path" requirement)."""
+    path" requirement).
+    """
     text = str(value)
     try:
         home = str(Path.home())

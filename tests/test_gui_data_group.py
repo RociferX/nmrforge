@@ -29,9 +29,7 @@ class _TempWorkspace:
 
     def list_projects(self):
         return sorted(
-            p
-            for p in self.root.iterdir()
-            if p.is_dir() and (p / "project.json").is_file()
+            p for p in self.root.iterdir() if p.is_dir() and (p / "project.json").is_file()
         )
 
     def ensure(self) -> Path:
@@ -63,15 +61,11 @@ def _tree_items(panel: ProjectTreePanel):
     ]
 
 
-def test_tree_renders_group_node(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_tree_renders_group_node(tmp_path: Path, qapp: QApplication) -> None:
     """Under an experiment type: the data-group node is level with the ungrouped data, and group
     members sit under the group node."""
     manager, exp_id, data_ids, group_id = _manager_with_group(tmp_path)
-    panel = ProjectTreePanel(
-        manager, workspace=_TempWorkspace(tmp_path / "ws")
-    )
+    panel = ProjectTreePanel(manager, workspace=_TempWorkspace(tmp_path / "ws"))
     children = _tree_items(panel)
     kinds = [role.get("kind") for _item, role in children]
     # The group node is in the front, and the ungrouped data is in the back (same level).
@@ -82,8 +76,7 @@ def test_tree_renders_group_node(
     assert group_item.text(0) == "对比组"
     assert group_item.text(1) == "2 个数据"
     member_ids = [
-        group_item.child(i).data(0, 0x0100).get("data_id")
-        for i in range(group_item.childCount())
+        group_item.child(i).data(0, 0x0100).get("data_id") for i in range(group_item.childCount())
     ]
     assert member_ids == data_ids[:2]
     # Ungrouped data is directly linked to the experiment type.
@@ -97,9 +90,7 @@ def test_group_context_menu(tmp_path: Path, qapp: QApplication) -> None:
     """Group-node context menu: "add other data to the group/rename group/delete group tag (data
     retained)" and "delete group (including data)"."""
     manager, exp_id, _data_ids, group_id = _manager_with_group(tmp_path)
-    panel = ProjectTreePanel(
-        manager, workspace=_TempWorkspace(tmp_path / "ws")
-    )
+    panel = ProjectTreePanel(manager, workspace=_TempWorkspace(tmp_path / "ws"))
     children = _tree_items(panel)
     group_item = children[0][0]
     menu = QMenu(panel)
@@ -113,14 +104,10 @@ def test_group_context_menu(tmp_path: Path, qapp: QApplication) -> None:
     panel.close()
 
 
-def test_group_member_context_menu_remove(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_group_member_context_menu_remove(tmp_path: Path, qapp: QApplication) -> None:
     """Right-clicking data inside the group offers "move this data out of the group"."""
     manager, exp_id, data_ids, group_id = _manager_with_group(tmp_path)
-    panel = ProjectTreePanel(
-        manager, workspace=_TempWorkspace(tmp_path / "ws")
-    )
+    panel = ProjectTreePanel(manager, workspace=_TempWorkspace(tmp_path / "ws"))
     children = _tree_items(panel)
     group_item = children[0][0]
     member = group_item.child(0)
@@ -132,14 +119,10 @@ def test_group_member_context_menu_remove(
     panel.close()
 
 
-def test_ungrouped_data_has_no_remove_option(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_ungrouped_data_has_no_remove_option(tmp_path: Path, qapp: QApplication) -> None:
     """Right-clicking ungrouped data does not offer "move this data out of the group"."""
     manager, exp_id, _data_ids, _group_id = _manager_with_group(tmp_path)
-    panel = ProjectTreePanel(
-        manager, workspace=_TempWorkspace(tmp_path / "ws")
-    )
+    panel = ProjectTreePanel(manager, workspace=_TempWorkspace(tmp_path / "ws"))
     children = _tree_items(panel)
     ungrouped = children[1][0]
     menu = QMenu(panel)
@@ -149,9 +132,7 @@ def test_ungrouped_data_has_no_remove_option(
     panel.close()
 
 
-def test_group_batch_panel_context(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_group_batch_panel_context(tmp_path: Path, qapp: QApplication) -> None:
     """Group batch panel: members are shown, and the reference drop-down lists only data whose
     spectrum has been generated."""
     manager, exp_id, data_ids, group_id = _manager_with_group(tmp_path)
@@ -162,10 +143,7 @@ def test_group_batch_panel_context(
     panel.set_context(manager, exp_id, group_id)
     assert "2 个" in panel.member_label.text()
     assert panel.run_optimize_button.isEnabled()
-    refs = [
-        panel.reference_combo.itemData(i)
-        for i in range(panel.reference_combo.count())
-    ]
+    refs = [panel.reference_combo.itemData(i) for i in range(panel.reference_combo.count())]
     assert data_ids[0] in refs
     assert data_ids[1] not in refs  # no spectrum generated: not used as a reference
     panel.close()
@@ -204,8 +182,7 @@ def test_remove_from_group_returns_to_ungrouped(
     group_item = experiment.child(0)
     assert group_item.childCount() == 1
     kinds = [
-        experiment.child(i).data(0, 0x0100).get("kind")
-        for i in range(experiment.childCount())
+        experiment.child(i).data(0, 0x0100).get("kind") for i in range(experiment.childCount())
     ]
     # Group + two ordinary single data (d1 moved out and d3 originally not included in the group).
     assert kinds == ["group", "data", "data"]
@@ -227,6 +204,3 @@ def test_group_batch_stop_steps(tmp_path: Path, qapp: QApplication) -> None:
     panel.stop_combo.setCurrentIndex(1)  # Generate spectrum
     assert panel._stop_steps() == ["fid", "spectrum"]
     panel.close()
-
-
-

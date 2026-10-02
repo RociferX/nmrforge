@@ -34,12 +34,14 @@ def _load(path: Path, name: str):
 
 # --------------------------------------------------------------------------- checker
 
+
 def test_shipped_licence_texts_and_notice_are_consistent() -> None:
     done = subprocess.run(
         [sys.executable, str(CHECKER), "--quiet"],
         cwd=ROOT,
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=120,
         check=False,
     )
@@ -90,6 +92,7 @@ def test_licence_checker_detects_a_removed_notice_statement(tmp_path: Path) -> N
 
 
 # --------------------------------------------------------------------------- auditor
+
 
 @pytest.mark.parametrize(
     ("expression", "expected"),
@@ -157,12 +160,14 @@ def test_audit_reports_no_strong_copyleft_dependency() -> None:
         cwd=ROOT,
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=300,
         check=False,
     )
     assert done.returncode in (0, 1), done.stdout + done.stderr
     assert "strong-copyleft only       : 0" in done.stdout, done.stdout
     assert "PySide6" in done.stdout, done.stdout
+
 
 def test_licence_texts_are_not_line_ending_converted() -> None:
     """The GNU licence texts are verified byte-for-byte, so git must not rewrite their line endings.

@@ -10,7 +10,7 @@ from core.qc import artifact_detection, spectrum_quality
 
 def _peaks_spectrum(shape=(128, 256), peaks=((60, 180), (70, 120))) -> np.ndarray:
     real = np.zeros(shape)
-    for (y, x) in peaks:
+    for y, x in peaks:
         real[y, x] = 100.0
     return gaussian_filter(real, sigma=(1.5, 1.5)) + 0j
 
@@ -53,9 +53,7 @@ def test_spectrum_quality_resolution_penalty() -> None:
     """
     small = _peaks_spectrum(shape=(16, 32), peaks=((8, 20), (10, 12)))
     base = spectrum_quality.evaluate(small).score.overall
-    penalized = spectrum_quality.evaluate(
-        small, min_shape=(128, 256)
-    ).score.overall
+    penalized = spectrum_quality.evaluate(small, min_shape=(128, 256)).score.overall
     assert penalized < base
     # a spectrum that meets the bar is not penalized
     full = spectrum_quality.evaluate(small, min_shape=(16, 32)).score.overall

@@ -2,7 +2,8 @@
 Shared fields in the disk are uniformly used backend.nmrpipe.path, processing.linewidth_hz,
 smile.nthread; GUI exclusive fields continue to retain the top level. It is compatible when
 reading the old top level nmrpipe_path / linewidth_hz, and will automatically migrate to the
-canonical structure the next time it is saved."""
+canonical structure the next time it is saved.
+"""
 
 from __future__ import annotations
 
@@ -22,14 +23,16 @@ def is_appimage() -> bool:
 
 
 DEFAULTS: dict = {
-    # The following two keys are the GUI view; switch to the backend/processing canonical structure
-    # when loading.
     "nmrpipe_path": "",
+    "bruker_path": "",
+    "proj3d_path": "",
+    "smile_status": "",
+    "smile_version": "",
+    "environment_warning_dismissed": False,
     "linewidth_hz": {"1H": 8, "15N": 15, "13C": 20},
     "data_root": "",
     "alignment_tolerance_ppm": {"1H": 0.02, "15N": 0.2, "13C": 0.2},
     "guide": {"first_import_hint_shown": False},
-    # interface-language preference (user, 2026-09-21): auto = follow the system, zh/en = pin it
     "language": "auto",
     "pipeline": {"simple_mode": False},
     "smile": {"nthread": 2},
@@ -62,7 +65,8 @@ def _language_value(raw: object) -> str:
     Locale-style values (``zh_CN`` / ``zh-Hans`` / ``en_US.UTF-8``) go through
     :func:`ui_support.i18n.normalize_language`, the same ruler the language layer uses. Without
     it the dialog showed "follow the system" for a value the language layer honoured, and saving
-    any other setting rewrote ``language: zh_CN`` as ``auto`` - silently changing the language the
+    any other setting rewrote ``language: zh_CN`` as ``auto`` - silently changing the language
+    the
     user sees.
     """
     text = str(raw or "").strip()
@@ -82,15 +86,12 @@ def _safe_nthread(raw: object) -> int:
 
 def load_settings() -> dict:
     """Reads shared configuration and returns GUI stable view; compatible with legacy top-level
-    keys."""
+    keys.
+    """
     raw = _read_raw()
     backend = raw.get("backend") if isinstance(raw.get("backend"), dict) else {}
-    nmrpipe = (
-        backend.get("nmrpipe") if isinstance(backend.get("nmrpipe"), dict) else {}
-    )
-    processing = (
-        raw.get("processing") if isinstance(raw.get("processing"), dict) else {}
-    )
+    nmrpipe = backend.get("nmrpipe") if isinstance(backend.get("nmrpipe"), dict) else {}
+    processing = raw.get("processing") if isinstance(raw.get("processing"), dict) else {}
 
     nmrpipe_value = nmrpipe.get("path") or nmrpipe.get("nmrpipe_bin")
     if not nmrpipe_value:
@@ -101,6 +102,16 @@ def load_settings() -> dict:
 
     return {
         "nmrpipe_path": str(nmrpipe_value or ""),
+        "bruker_path": str(raw.get("bruker_path", DEFAULTS["bruker_path"]) or ""),
+        "proj3d_path": str(raw.get("proj3d_path", DEFAULTS["proj3d_path"]) or ""),
+        "smile_status": str(raw.get("smile_status", DEFAULTS["smile_status"]) or ""),
+        "smile_version": str(raw.get("smile_version", DEFAULTS["smile_version"]) or ""),
+        "environment_warning_dismissed": bool(
+            raw.get(
+                "environment_warning_dismissed",
+                DEFAULTS["environment_warning_dismissed"],
+            )
+        ),
         "linewidth_hz": _map_view(linewidth, DEFAULTS["linewidth_hz"]),
         "data_root": str(raw.get("data_root", DEFAULTS["data_root"]) or ""),
         "alignment_tolerance_ppm": _map_view(
@@ -135,11 +146,17 @@ def load_settings() -> dict:
 def _merged_view(settings: dict) -> dict:
     current = load_settings()
     merged = dict(current)
-    # Scalar keys are replaced as a whole. The interface language is a scalar key as well: an
-    # earlier version merged dict-typed keys only, so the language chosen in the settings dialog
-    # was dropped and the stale value on disk was written back, which looked like "I changed it,
-    # restarted the program, and it is the same as before".
-    for key in ("nmrpipe_path", "data_root", USER_CONFIG_KEY):
+
+    for key in (
+        "nmrpipe_path",
+        "bruker_path",
+        "proj3d_path",
+        "smile_status",
+        "smile_version",
+        "environment_warning_dismissed",
+        "data_root",
+        USER_CONFIG_KEY,
+    ):
         if key in settings:
             merged[key] = settings[key]
     for key in (
@@ -156,7 +173,8 @@ def _merged_view(settings: dict) -> dict:
 
 def save_settings(settings: dict) -> Path:
     """Save the canonical configuration; old top-level shared keys will be migrated on this
-    write."""
+    write.
+    """
     import yaml
 
     merged = _merged_view(settings)
@@ -176,21 +194,25 @@ def save_settings(settings: dict) -> Path:
     smile = {**dict(raw.get("smile") or {}), **merged["smile"]}
     smile.pop("thread_offset", None)
     raw["smile"] = smile
-    for key in ("data_root", "alignment_tolerance_ppm", "guide", "pipeline"):
+    for key in (
+        "data_root",
+        "alignment_tolerance_ppm",
+        "guide",
+        "pipeline",
+        "bruker_path",
+        "proj3d_path",
+        "smile_status",
+        "smile_version",
+        "environment_warning_dismissed",
+    ):
         raw[key] = merged[key]
     raw[USER_CONFIG_KEY] = _language_value(merged.get(USER_CONFIG_KEY))
 
-    # Atomic replacement: an interrupted write leaves either the complete old configuration or
-    # the complete new one. The previous direct overwrite could leave half a YAML file, which
-    # _read_raw() silently swallows, dropping every setting back to its default.
     from core.project.manager import atomic_write_text
 
     path = _settings_path()
-    atomic_write_text(
-        path, yaml.safe_dump(raw, allow_unicode=True, sort_keys=False)
-    )
-    # let the language layer see the new preference right away (the dialog still says the
-    # interface itself takes effect after a restart)
+    atomic_write_text(path, yaml.safe_dump(raw, allow_unicode=True, sort_keys=False))
+
     from ui_support.i18n import reload_user_preference
 
     reload_user_preference()

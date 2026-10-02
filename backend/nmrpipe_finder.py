@@ -27,6 +27,7 @@ def _csh_which(name: str) -> str | None:
             [shell, "-c", script],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=15,
             check=False,
         )
@@ -59,10 +60,58 @@ def find_nmrpipe_bin(explicit: str = "") -> Path | None:
     return None
 
 
+def csh_run(command: str, timeout: float = 15.0) -> tuple[int, str]:
+    """Run a command in the csh login environment and return ``(return_code, combined_output)``.
+
+    This must use csh because SMILE is an NMRPipe plugin registered through the
+    ``NMR_PLUGIN_EXE`` and ``NMR_PLUGIN_FN`` environment variables in the user's shell setup.
+    A plain shell reports ``unknown function SMILE`` for ``nmrPipe -fn SMILE -help``; the
+    configured csh environment reports the plugin version. Therefore SMILE availability must
+    be checked through csh rather than by running ``nmrPipe`` directly with
+    ``subprocess.run``.
+
+    Parameters
+    ----------
+    command : str
+        Command to run after sourcing the user's csh startup file.
+    timeout : float
+        Timeout in seconds.
+
+    Returns
+    -------
+    tuple[int, str]
+        ``(return_code, stdout+stderr)``; returns ``(-1, "")`` if csh is unavailable or times
+        out. Standard input is connected to ``/dev/null`` because ``nmrPipe`` may otherwise wait
+        for terminal input.
+
+    Side effects
+    ------------
+    Read-only: starts a csh subprocess.
+    """
+    shell = shutil.which("tcsh") or shutil.which("csh")
+    if shell is None:
+        return -1, ""
+    script = f"if (-e ~/.cshrc) source ~/.cshrc; {command}"
+    try:
+        proc = subprocess.run(
+            [shell, "-c", script],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=timeout,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return -1, ""
+    return proc.returncode, f"{proc.stdout or ''}\n{proc.stderr or ''}"
+
+
 def find_tool(name: str, nmrpipe_bin: Path | None = None) -> Path | None:
     """Find an NMRPipe companion tool (bruker and similar live in com/).
 
-    The csh answer wins; otherwise the bin directory and its parent levels are searched, including
+    The csh answer wins; otherwise the bin directory and its parent levels are searched,
+    including
     their com/ subdirectories.
     """
     csh = _csh_which(name)

@@ -41,7 +41,8 @@ class ArtifactReport:
 
 def detect(data: Any) -> ArtifactReport:
     """Detect spectrum artefacts (isolated peaks, normalised by the peak density of the
-    spectrum itself, 0.2.199-patch29el)."""
+    spectrum itself, 0.2.199-patch29el).
+    """
     arr = np.asarray(data)
     peaks = peak_detection.detect(arr)
     isolated = 0
@@ -59,9 +60,7 @@ def detect(data: Any) -> ArtifactReport:
             comparable = heights >= 0.5 * heights[i]
             comparable[i] = False
             m = int(comparable.sum())
-            edge_dist = float(
-                min(min(p, arr.shape[a] - 1 - p) for a, p in enumerate(pos))
-            )
+            edge_dist = float(min(min(p, arr.shape[a] - 1 - p) for a, p in enumerate(pos)))
             if m == 0:
                 # no comparable peak at all: suspicious only when the overall peak count is
                 # high enough (a dense-spectrum context); in a sparse spectrum isolation is
@@ -74,9 +73,7 @@ def detect(data: Any) -> ArtifactReport:
             dmin = float(np.min(dists))
             spacing = (volume / m) ** (1.0 / ndim)
             near_edge = edge_dist <= 0.02 * max(arr.shape)
-            if dmin > 5.0 * spacing and (
-                near_edge or dmin > 8.0 * spacing
-            ):
+            if dmin > 5.0 * spacing and (near_edge or dmin > 8.0 * spacing):
                 isolated += 1
                 excess = min(
                     1.0,

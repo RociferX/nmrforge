@@ -37,10 +37,7 @@ TAIL_MARKER = "\n\n__all__"
 
 def _display_width(text: str) -> int:
     """Display width: East Asian Wide/Fullwidth counts as 2 columns (matching ruff E501)."""
-    return sum(
-        2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
-        for char in text
-    )
+    return sum(2 if unicodedata.east_asian_width(char) in ("W", "F") else 1 for char in text)
 
 
 def _load() -> dict:
@@ -85,15 +82,14 @@ def main(argv: list[str] | None = None) -> int:
         help="comma-separated downstream steps (reference, localization, ...)",
     )
     parser.add_argument(
-        "--note", default=None,
+        "--note",
+        default=None,
         help="one line saying what changed; keeps the current value when omitted",
     )
     parser.add_argument(
         "--updated", default=None, help="date (keeps the current value when omitted)"
     )
-    parser.add_argument(
-        "--no-golden", action="store_true", help="do not re-run the golden vector"
-    )
+    parser.add_argument("--no-golden", action="store_true", help="do not re-run the golden vector")
     args = parser.parse_args(argv)
 
     declaration = _load()

@@ -1,5 +1,6 @@
 """Processing plan: the complete processing scheme for one experiment
-(DAG + method choices + rationale + confidence)."""
+(DAG + method choices + rationale + confidence).
+"""
 
 from __future__ import annotations
 

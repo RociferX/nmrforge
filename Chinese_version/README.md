@@ -18,27 +18,24 @@ nmrForge 读取一个 Bruker 数据集,判定它是什么实验、用了哪种�
 > 目标不是做一个套在 NMRPipe 外面的图形界面。nmrForge 先*理解*实验与采样方式,
 > 再生成可解释的处理方案,并把证据(质量指标、解析后的参数、运行记录)与谱图放在一起。
 
-当前版本:**1.0.1** · 状态:**正式版(Production/Stable)**
+源码版本:**1.0.2** · 发布通道:**稳定版（Stable）**
 作者:**李宣锋(Xuanfeng Li),中国科学技术大学** · 源码许可:Apache-2.0(见 [LICENSE](../LICENSE) 与 [NOTICE](../NOTICE))
 分发方式:源码 + Linux AppImage(一份产物,界面语言运行时切换)
 发布页:<https://github.com/RociferX/nmrforge/releases>
 仓库:<https://github.com/RociferX/nmrforge>
-归档与 DOI:Zenodo [10.5281/zenodo.22909416](https://doi.org/10.5281/zenodo.22909416)(全部版本 [10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415))
+Zenodo 概念 DOI（全部归档版本）：[10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415)。版本专用 DOI 只对应其归档快照。
 
-> **nmrForge 1.0.1 是正式版:桌面程序与 Python/CLI 接口(`nmrforge_api`,契约版本 1.0)都按第一版
-> 发布。** 这里写明的行为都有测试覆盖(见测试套件);此后的行为变化按 compat 流程声明
+> 本页说明 **1.0.2 源码**与桌面/Python/CLI 接口（`nmrforge_api`，契约版本 1.0）。
+> 已发布的二进制以 GitHub Releases 为准。回归覆盖见测试套件，行为变化按 compat 流程声明
 > (`same/additive/behavior_changed/contract_changed` 四级)。
 
-> ### 两条线:桌面程序与 Python/CLI 接口
+> ### 桌面程序与 Python/CLI 接口
 >
-> - **A 线 —— 桌面程序(成熟)**:GUI 把整条链路走完 —— 从 Bruker 数据集到处理好的谱、峰表、
->   质量控制与溯源记录;Linux AppImage 由它构建,日常使用推荐这条;
-> - **B 线 —— Python/CLI 接口(`nmrforge_api`,第一版)**:参数研究接口(`StudySession`、参数扫描、
->   目标峰清单、QC 记录、行为指纹)是**第一版**(契约版本 `API_VERSION = "1.0"`,2026-09-22 起);
->   名字、默认值与它写出的记录按 `nmrforge_api.compat_manifest()`(`behavior_digest`、
->   `compat_level`、`affected`)的流程管理。要把一批数字当作可比较的,仍建议钉住 commit 并核对行为指纹。
+> 桌面程序与 `nmrforge_api` 是同一源码树中的受支持接口。Python API 单独版本化
+> (`API_VERSION = "1.0"`)，并提供兼容清单识别行为与契约变化。GitHub Releases 中的
+> AppImage 对应特定版本和源码提交；更新源码不会自动更新已发布的二进制。
 >
-> 两条线同在一个仓库、同属第一版;接口给出的数字请拿你自己的数据核对。
+> 跨版本比较数值前，请查看兼容清单和发布说明，并结合自己的数据与实验验证结果。
 
 > ### 支持边界
 >
@@ -54,7 +51,7 @@ nmrForge 读取一个 Bruker 数据集,判定它是什么实验、用了哪种�
   填零、常规傅里叶变换,以及用 SMILE 做 2D/3D NUS 重构。
 - **质量控制** —— FID 层诊断(直流偏置、坏点、非有限值、异常迹线)、采样一致性校验,
   以及谱图层质量指标(信噪比、相位质量、基线质量、伪影)。
-- **峰分析** —— 自动选峰,支持抛物线或 2D 高斯亚格点定位;峰表按 POKY 风格导入导出。
+- **峰分析** —— 自动选峰,使用三点抛物线估算亚格点位置;峰表按 POKY 风格导入导出。
 - **带留档的自动化** —— GUI、命令行与 Python API 三种入口;批量运行;保留脚本与候选谱;
   每次运行都存下解析后的参数,以及产生它的软件/工具版本。
 - **查看** —— 独立的 1D/2D/3D 谱图查看器,支持投影与峰位叠加。
@@ -112,7 +109,7 @@ core:项目模型、数据读取、实验判定、规划、处理原语、优化
 | [`nmrforge_data/presets/`](../nmrforge_data/presets/README.md) | 实验模板;YAML 文件是唯一数据源 |
 | [`tests/`](../tests/README.md) | pytest 测试套件:unit / integration / regression |
 | [`examples/`](../examples/README.md) | 可运行的合成数据集与走查脚本 |
-| [`packaging/`](../packaging/README.md) | AppImage 构建素材(v1.0.1 已发布) |
+| [`packaging/`](../packaging/README.md) | AppImage 构建素材与发布验收要求 |
 | [`scripts/`](../scripts/README.md) | 独立命令行工具与校验脚本 |
 | [`docs/`](docs/README.md) | 中文文档索引(英文原文在 [`docs/`](../docs/README.md)) |
 | [`.github/`](../.github/) | CI 工作流与 issue/PR 模板 |
@@ -136,9 +133,9 @@ nmrForge 不会替你分发、下载或安装 NMRPipe/SMILE。它在运行时探
 
 ## 安装
 
-1.0.1 提供两样东西:**Linux AppImage**与**源码**。AppImage 自带 Python 与 Qt,
-不需要先装环境([发布页](https://github.com/RociferX/nmrforge/releases));用源码则克隆仓库
-并做可编辑安装,这样仓库根目录的运行时资源才仍然可用:
+仓库提供源码；[发布页](https://github.com/RociferX/nmrforge/releases)可能另有对应版本的
+Linux AppImage。每份 AppImage 对应其标注的版本与源码提交；更新源码不会自动更新已发布的二进制。
+使用当前源码时，请克隆仓库并做可编辑安装:
 
 ```bash
 git clone https://github.com/RociferX/nmrforge.git
@@ -158,12 +155,12 @@ AppImage 的构建配方在 [`packaging/linux/build_appimage.sh`](../packaging/l
 → 系统区域 → 本树 [`ui_support/locales/default.json`](../ui_support/locales/default.json) 声明的
 默认语言);`BUILD_INFO.txt` 记录版本、完整 commit、默认语言与捆绑的依赖版本。它会捆绑
 PySide6/Qt,这些库按 LGPL-3.0 随产物分发,许可正文与声明都在产物内
-(`./NMRForge-<版本>-x86_64.AppImage --licenses` 可查);每次发布前按维护者私有仓库里的发布
-检查清单逐项验收。构建脚本本身不构成「已发布」或「已获批准」的二进制。
+(`./NMRForge-<版本>-x86_64.AppImage --licenses` 可查)。构建脚本是源码；只有附在正式发布中的
+AppImage 才是已发布的二进制。
 
 ## 快速上手
 
-**本次发布从源码安装。** 用 `python main.py` 启动 GUI。下面的步骤也演示了在没有安装
+**从源码安装时**用 `python main.py` 启动 GUI。下面的步骤也演示了在没有安装
 NMRPipe 的情况下能走通哪些环节。
 
 下面这个例子只需要一个 Bruker 数据集目录、不需要 NMRPipe,就能走通数据理解与质量控制:
@@ -273,17 +270,15 @@ python examples/quickstart.py ./example_data/hsqc_2d
 - FID 诊断会报出直流偏置、非有限点、全零迹线与能量异常偏高的迹线,并给出受影响的索引与判定规则;
 - 凡施加过修正的地方,受影响的点与采取的动作都会写进那一次运行的处理日志;
 - 谱图层 QC 报出信噪比、相位质量、基线质量与伪影分数,并且拒绝把一次失败的运行悄悄降级成「成功」;
-- 采样元数据冲突(例如元数据声称是 NUS,而采样表其实覆盖了完整网格)一律按冲突报出,
-  而不是悄悄替它决定。
+- 采样依据结合标准采样表、采集参数和网格顺序；不能还原 NUS 位置时会在导入时报错，不编造坐标。
 
-已知缺口:这些记录目前写成结构化日志行与运行参数,还没有做到每次运行一份机器可读的质量审计记录。
-这条缺口登记在维护者的私有发布审计记录里。
+自动修正会另外写入追加式机器可读审计 `qc_audit.jsonl`；该文件记录已执行的修正，并非每次运行的完整 QC 快照。
 
 ## 可复现性与溯源
 
 每次处理都会生成一份运行记录,包含运行 id、输入引用、解析后的参数、引用的脚本、
 产物、软件版本、外部工具版本、时间戳与告警。参数扫描 API 还会在研究目录下写
-`manifest.json`、`runs.json`、`peak_positions.csv` 与 `uncertainty.csv`。
+`manifest.json`、`runs.json` 与统一峰表 `peak_table_parabolic.csv`；峰位不确定度统计是独立的分析辅助步骤。
 
 `core.__version__` 是版本号的唯一来源;`pyproject.toml` 动态读取它,
 因此包版本与写进运行记录的版本不会各说各话。
@@ -336,11 +331,10 @@ python examples/quickstart.py ./example_data/hsqc_2d
   化学位移叠加、逐峰一对一回收率(紧容差 1H 0.01 / 15N 0.05 ppm 下 **84.1%**,中容差 93.5%)、
   同口径的偶然匹配背景(**2.0%**)、QC 评分与真机重复性快照。判据在软件之外,不是自己跟自己比;它
   证明的是**软件自动处理的结果可用**,与用哪个入口(桌面程序 / 命令行 / 脚本接口)无关。
-- [验证边界:工程回归 vs 科学验证](docs/external-api/09-limitations-and-roadmap.md) §9.5 ——
-  每类证据在哪跑、产物落在哪,以及科学结论为什么由使用者自己的分析给出(含维护者做过的这层真值对照)。
-- 页内那套数据的**原始文件是公开的**,按条目编号即可自行下载、按页内命令复算;逐 run 的 JSON 与日志
-  留在装有 NMRPipe 的机器上。其它数据集的聚合数字**无法仅凭本仓库复算**,页面里给出了输入指纹
-  (SHA-256),数据持有者可以据此重跑。
+- [验证边界:工程回归 vs 科学验证](docs/external-api/09-limitations-and-roadmap.md) ——
+  区分工程回归、真实引擎验证与科学结论。
+- 这些数字是特定日期、特定公开数据集的一次历史快照；不代表当前源码修订已重新验证，
+  也不保证其他数据集或参数设置的结果。详见证据页说明。
 
 ## 测试
 
@@ -353,15 +347,8 @@ python -m pytest -m unit             # 快速子集(纯逻辑;约 45 秒,主要�
 python -m ruff check .               # 静态检查
 ```
 
-CI(GitHub Actions)会跑静态检查、Python 3.12 与 3.13 上的全量测试,以及发布就绪检查。
-另有一个自托管作业 `external-engine`:它在装有 NMRPipe 的机器上**再跑一遍同一套打桩测试**
-并把日志作为 artifact 发布 —— 它不调用引擎,性质是「对这台机器的漂移检测 + 发布时的门」,
-不是引擎测试;该作业只在注册了自托管 runner 且仓库变量 `NMRFORGE_SELF_HOSTED_CI` 为 `true`
-时才会跑,**变量未设时连打发布 tag 也不会触发它**。引擎层面的事情一律手工做:在装有 NMRPipe
-的机器上跑 `scripts/vm_test.sh`,以及在实验室数据上跑 `scripts/vm_realdata_report.py`
-(它的聚合报告只在配置了 `NMRFORGE_REAL_DATA_TARGETS` 时才作为 CI artifact 发布)。
-测试文件刻意保持扁平,用 `unit` / `integration` / `regression` 标记分类
-(`tests/categories.py` 是唯一来源)。
+CI(GitHub Actions)会运行仓库中配置的检查。常规测试使用模拟引擎边界，不会调用 NMRPipe 或
+SMILE；测试标记分类见 `tests/categories.py`。模拟测试通过不能视作真实引擎验证或科学验证。
 
 ## 贡献
 
@@ -375,17 +362,15 @@ CI(GitHub Actions)会跑静态检查、Python 3.12 与 3.13 上的全量测试,�
 是为了让许可识别工具正确识别为 Apache-2.0。
 
 **AppImage 另有一条分发边界。** 它捆绑 PySide6/Qt 与其他第三方库,这些组件按各自的许可
-(含 LGPL-3.0)随产物分发。1.0.1 的产物完成了维护者私有仓库里的发布检查清单
-(许可正文与声明在产物内、可替换/重链接、干净机器验收、记录 SHA-256)。2026-09-21 起 Release 上
-只有**一份**产物(界面语言运行时切换),它由已发布源码的提交构建,提交号记在产物的
-`usr/share/doc/NMRForge/BUILD_INFO.txt` 里。这不改变 nmrForge 自身源码的 Apache-2.0 条款。
+(含 LGPL-3.0)随产物分发。发布的 AppImage 对应特定发布版本与源码提交；源码更新不会自动
+更新它。二进制的许可声明和构建来源随发布产物提供。这不改变 nmrForge 自身源码的 Apache-2.0 条款。
 
 实际含义:
 
 - **从源码使用 nmrforge**:Apache-2.0,包括专利授权、保留署名声明的要求,以及再分发修改过的
   文件时说明改动的要求;
-- **AppImage**:1.0.1 的产物已完成上述验收;再分发前按同一清单复核;
+- **AppImage**:再分发前核对该二进制随附的声明和许可要求;
 - 第三方组件各自保留其许可;见 [THIRD_PARTY.md](../THIRD_PARTY.md),
   二进制的声明见 `packaging/linux/THIRD_PARTY_LICENSES/NOTICE.md`。
 
-这样切的理由记录在 [LICENSE_OPTIONS.md](../LICENSE_OPTIONS.md)。以上不构成法律意见。
+以上不构成法律意见。

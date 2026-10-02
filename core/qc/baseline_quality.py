@@ -1,5 +1,6 @@
 """Baseline quality: slope / curvature / low-freq drift / peak-free deviation / residual
-bias (framework §16)."""
+bias (framework §16).
+"""
 
 from __future__ import annotations
 
@@ -68,9 +69,7 @@ def stripe_penalty(data: Any, axis: int | None = None) -> float:
     return float(np.clip((ratio - 8.0) / 48.0, 0.0, 0.5))
 
 
-def evaluate(
-    data: Any, axis: int | None = None, *, max_traces: int = 8192
-) -> BaselineQuality:
+def evaluate(data: Any, axis: int | None = None, *, max_traces: int = 8192) -> BaselineQuality:
     """Evaluate baseline quality (along the chosen axis, the last one by default; uses the
     mean of both ends and of the middle, plus the stripe penalty).
 
@@ -122,10 +121,7 @@ def evaluate(
                 1.0
                 - min(
                     1.0,
-                    abs(slope) * 4.0
-                    + abs(offset) * 2.0
-                    + curvature * 6.0
-                    + stripe,
+                    abs(slope) * 4.0 + abs(offset) * 2.0 + curvature * 6.0 + stripe,
                 )
             ),
             0.0,

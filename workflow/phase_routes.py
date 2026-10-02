@@ -30,6 +30,7 @@ from core.experiment.acquisition_mode_detector import sign_sampling_flags
 from core.planning.method_selector import select_method
 from core.project.manager import atomic_write_text
 from ui_support.i18n import tr
+from workflow.optimization_report import format_phase_degrees, phase_angle_value
 
 
 def reference_optimize_switches(params: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -64,7 +65,8 @@ def window_candidates_from_switch(
     switch: Any,
 ) -> tuple[list[dict[str, Any]] | None, list[dict[str, Any]] | None]:
     """``reference_optimize.window`` → (direct-dimension candidates,
-    indirect-dimension candidates)."""
+    indirect-dimension candidates).
+    """
     if isinstance(switch, Mapping):
         direct = switch.get("direct_candidates")
         indirect = switch.get("indirect_candidates")
@@ -79,7 +81,8 @@ def _unlink_quiet(path) -> None:
     """Delete an intermediate spectrum once it has been consumed
     (0.2.199-patch29fk-fix: deleted as soon as it is used instead of waiting for
     the whole finalize to finish; on the ramdisk this frees tmpfs space right
-    away)."""
+    away).
+    """
     try:
         Path(path).unlink(missing_ok=True)
     except OSError:
@@ -88,7 +91,8 @@ def _unlink_quiet(path) -> None:
 
 def _rmtree_quiet(path: Path) -> None:
     """Delete an intermediate directory once it has been consumed (NUS
-    reconstruction planes; the final run rebuilds them)."""
+    reconstruction planes; the final run rebuilds them).
+    """
     try:
         if path.is_dir():
             shutil.rmtree(path, ignore_errors=True)
@@ -98,7 +102,8 @@ def _rmtree_quiet(path: Path) -> None:
 
 def _phase_delta(a: tuple[float, float], b: tuple[float, float]) -> float:
     """Phase difference (circular p0 difference plus p1 difference), used for the
-    iterative convergence test (0.2.199-patch29do)."""
+    iterative convergence test (0.2.199-patch29do).
+    """
     p0 = abs((a[0] - b[0] + 180.0) % 360.0 - 180.0)
     return float(p0 + abs(a[1] - b[1]))
 
@@ -114,9 +119,11 @@ def _axis_index(axis: str, ndim: int = 2) -> int:
         return {"F2": 0, "F1": 1, "F3": 2}.get(axis, 0)
     return {"F1": 0, "F2": 1}.get(axis, 0)
 
+
 def _template(experiment: Experiment) -> Any:
     """Look up a template by experiment type name (exact match first, then a
-    case-insensitive fallback)."""
+    case-insensitive fallback).
+    """
     import core.experiments  # noqa: F401  Import and register the built-in template.
     from core.experiments.registry import get as get_template
 
@@ -133,7 +140,8 @@ def _template(experiment: Experiment) -> Any:
 def _sign_mode(experiment: Experiment) -> str:
     """Return the score sign constraint from the experiment template's peak_sign
     (mixed = positive and negative peaks coexist, uniform = same sign; uniform by
-    default)."""
+    default).
+    """
     tpl = _template(experiment)
     if tpl is not None and tpl.peak_sign == "mixed":
         return "mixed"
@@ -171,6 +179,7 @@ def _disambiguate_180_mixed(
     if not regions or len(regions) < 2:
         return phase
     from workflow.memory_phase_search import rotate_real
+
     n = complex_arr.shape[axis]
     ppm = dim.o1p + (n / 2.0 - np.arange(n)) * (float(dim.sw) / (n * float(dim.sf)))
     real = rotate_real(complex_arr, axis, phase[0], phase[1])
@@ -202,14 +211,13 @@ def _disambiguate_180_mixed(
     return ((phase[0] + 180.0) % 360.0, phase[1])
 
 
-def _read_complex_preview(
-    path: Path | str, unpack_axis: int | None = None
-) -> np.ndarray:
+def _read_complex_preview(path: Path | str, unpack_axis: int | None = None) -> np.ndarray:
     """Read a complex preview file: use nmrglue's result when it reads as complex,
     otherwise unpack the interleaved real array along unpack_axis (the complex
     axis of 3D output is not fixed: preview_F2 sits on axis 0 and preview_F1 on
     axis 1, so read_pipe_complex, which unpacks only axis 0, would unpack the
-    wrong one)."""
+    wrong one).
+    """
     import nmrglue as ng
 
     from core.data.pipe_io import read_pipe_complex
@@ -223,19 +231,16 @@ def _read_complex_preview(
         moved = np.moveaxis(arr, unpack_axis, -1)
         even = moved[..., 0::2]
         odd = moved[..., 1::2]
-        return np.moveaxis(even + 1j * odd, -1, unpack_axis).astype(
-            np.complex128
-        )
+        return np.moveaxis(even + 1j * odd, -1, unpack_axis).astype(np.complex128)
     return read_pipe_complex(path)
 
 
-def _preview_memory_warning(
-    path, *, axis="", progress=None, logs=None
-) -> None:
+def _preview_memory_warning(path, *, axis="", progress=None, logs=None) -> None:
     """In-memory warning about the phase-search preview array
     (0.2.199-patch29ec): estimate a complex128 array from the file size and warn
     when it exceeds 85% of available memory (non-blocking; a failure raises an
-    explicit MemoryError separately)."""
+    explicit MemoryError separately).
+    """
     try:
         size_bytes = Path(path).stat().st_size * 2
         est_mb = size_bytes / (1024.0 * 1024.0)
@@ -243,15 +248,13 @@ def _preview_memory_warning(
 
         avail = available_memory_mb()
         if est_mb > avail * 0.85:
-            msg = (
-                tr(
-                    "Memory tips: {p0} Replica preview {p1:.0f}MB,about {p2} MB free, memory may "
-                    "be insufficient (on failure, free memory or use a smaller data "
-                    "set)",
-                    p0=axis,
-                    p1=est_mb,
-                    p2=avail,
-                )
+            msg = tr(
+                "Memory tips: {p0} Replica preview {p1:.0f}MB,about {p2} MB free, memory may "
+                "be insufficient (on failure, free memory or use a smaller data "
+                "set)",
+                p0=axis,
+                p1=est_mb,
+                p2=avail,
             )
             if progress is not None:
                 progress(msg)
@@ -266,7 +269,8 @@ def _load_preview_with_memory_guard(
 ) -> np.ndarray:
     """Read a complex preview with an in-memory warning (0.2.199-patch29ec): warn
     when the estimate exceeds the limit before reading, and turn MemoryError into
-    an explicit RuntimeError so a crash or an out-of-memory kill is not silent."""
+    an explicit RuntimeError so a crash or an out-of-memory kill is not silent.
+    """
     _preview_memory_warning(path, axis=axis, progress=progress, logs=logs)
     try:
         return _read_complex_preview(path, unpack_axis=unpack_axis)
@@ -286,7 +290,6 @@ def _load_preview_with_memory_guard(
                 p1=suffix,
             )
         ) from None
-
 
 
 def _read_complex_ft3(path: Path | str) -> np.ndarray:
@@ -403,9 +406,7 @@ def _cleanup_unified_intermediates(
     fallbacks: list[Path] = [work.parent / f"{dataset_id}.nmrpipe"]
     if experiment is not None:
         try:
-            fallbacks.append(
-                Path(experiment.source_path).parent / f"{dataset_id}.nmrpipe"
-            )
+            fallbacks.append(Path(experiment.source_path).parent / f"{dataset_id}.nmrpipe")
         except (AttributeError, TypeError, ValueError):
             # no source_path (test stubs or older objects): no fallback directory
             # is appended
@@ -443,7 +444,8 @@ def _append_final_summary(
         parameter report through format_optimization_report.
     (The data-quality diagnosis belongs to the Generate-FID step and has been
     moved out of this report, 2026-09-23 user request.)
-    Every line also goes through progress into the GUI log panel."""
+    Every line also goes through progress into the GUI log panel.
+    """
     from workflow.optimization_report import (
         format_optimization_report,
         spectrum_quality_report_lines,
@@ -451,17 +453,9 @@ def _append_final_summary(
     )
 
     lines: list[str] = [spectrum_report_title()]
-    # Storage axis order (consistent with nmrglue reads; the 3D labels were
-    # corrected in 0.2.199-patch29):
-    # 2D (F1,F2); 3D (F2,F1,F3)
-    storage_axes = (
-        ["F1", "F2"] if direct_axis == "F2" else ["F2", "F1", "F3"]
-    )
-    # 2026-09-23 (user request): the data quality diagnosis belongs to the Generate-FID
-    # step, not to this one - the whole section is gone from the spectrum report; it now
-    # only appears in that step's log and in the GUI report for it (same text from
-    # workflow.direct_diagnostics.format_fid_step_report).
-    lines.append(tr("◆ processing parameters and optimisation"))
+    # 2D (F1,F2);3D (F2,F1,F3)
+    storage_axes = ["F1", "F2"] if direct_axis == "F2" else ["F2", "F1", "F3"]
+    lines.append(tr("◆ processing settings"))
     lines += format_optimization_report(
         {
             "phase_route": "unified",
@@ -473,8 +467,6 @@ def _append_final_summary(
             "backend_runs": backend_runs,
         }
     )
-    # 0.2.199-patch29ab: report order = processing parameters and optimisation ->
-    # final spectrum quality (the data quality diagnosis moved to the Generate-FID step)
     lines += spectrum_quality_report_lines(
         str(spectrum_path),
         optimization_logs=optimization_logs,
@@ -513,7 +505,8 @@ def _template_auto_phase(experiment: Experiment) -> bool:
 def _template_peak_sign(experiment: Experiment) -> str:
     """Experiment-type peak sign (presets peak_sign): uniform = same sign, mixed =
     positive and negative coexisting. The same source as _template_auto_phase; a
-    missing template or a failed parse falls back to uniform."""
+    missing template or a failed parse falls back to uniform.
+    """
     # 0.2.199-patch29hc: an annotation on the data takes precedence.
     ov = getattr(experiment, "note_peak_sign", "")
     if ov in ("uniform", "mixed"):
@@ -555,7 +548,8 @@ def _sign_sampling(params: Mapping[str, Any] | None) -> dict[str, Any]:
 
 def _apply_ext_opt_enabled(params: dict[str, Any]) -> bool:
     """The "apply this range to the optimisation" switch (0.2.199-patch3): on by
-    default."""
+    default.
+    """
     return str(params.get("apply_ext_to_opt", "1")).strip().lower() in (
         "1",
         "true",
@@ -585,11 +579,10 @@ def _split_final_ext(
     return p, final_lo, final_hi, apply_to_opt
 
 
-def _apply_final_ext(
-    params: dict[str, Any], final_lo: Any, final_hi: Any
-) -> dict[str, Any]:
+def _apply_final_ext(params: dict[str, Any], final_lo: Any, final_hi: Any) -> dict[str, Any]:
     """Write the user's final-run direct-dimension range into the parameters (an
-    empty value keeps the existing configuration)."""
+    empty value keeps the existing configuration).
+    """
     p = dict(params)
     if final_lo is not None and str(final_lo).strip():
         p["ext_lo"] = str(final_lo)
@@ -600,7 +593,8 @@ def _apply_final_ext(
 
 def _direct_phase_width(params: dict[str, Any]) -> float:
     """Direct-dimension extraction window width (ppm): the difference between the
-    effective EXT -x1/-xn values, falling back to the configured default."""
+    effective EXT -x1/-xn values, falling back to the configured default.
+    """
     from backend.config import resolve_ext_hi, resolve_ext_lo
 
     try:
@@ -636,7 +630,8 @@ def _renormalize_direct_p1(
     return (p0, p1 * ratio)
 
 
-def unified_route(    experiment: Experiment,
+def unified_route(
+    experiment: Experiment,
     backend: Any,
     *,
     plan: Any | None = None,
@@ -740,9 +735,7 @@ def unified_route(    experiment: Experiment,
             )
         )
     else:
-        search_axes = [
-            a for a in search_axes if f"phase_{a}" in plan.dag.nodes
-        ]
+        search_axes = [a for a in search_axes if f"phase_{a}" in plan.dag.nodes]
     # 0.2.199-patch29du (user, measured on the VM with sampleI and sampleH): the
     # phase-search preview never zero fills on any axis. Zero filling is data
     # dependent: with auto zero filling sampleI F1=90 deg was right but sampleH
@@ -776,37 +769,38 @@ def unified_route(    experiment: Experiment,
         )
         backend_runs += 1
         if not resp.get("success") or not resp.get("spectrum_path"):
-            raise RuntimeError(tr(
-                "Replica preview ({p0}) failed: "
-                "{p1}",
-                p0=axis,
-                p1=resp.get('message'),
-            ))
+            raise RuntimeError(
+                tr(
+                    "Replica preview ({p0}) failed: {p1}",
+                    p0=axis,
+                    p1=resp.get("message"),
+                )
+            )
         if progress is not None:
             progress(tr("In phase optimisation: {p0} Replica preview completed", p0=axis))
         ax = _axis_index(axis, experiment.ndim)
         arr = _load_preview_with_memory_guard(
-            str(resp["spectrum_path"]), axis=axis, unpack_axis=ax,
-            progress=progress, logs=logs,
+            str(resp["spectrum_path"]),
+            axis=axis,
+            unpack_axis=ax,
+            progress=progress,
+            logs=logs,
         )
         _unlink_quiet(resp["spectrum_path"])
-        est = search_axis_memory(
-            arr, ax, sign_mode=sign_mode, cancel=cancel_requested
-        )
+        est = search_axis_memory(arr, ax, sign_mode=sign_mode, cancel=cancel_requested)
         if est is None:
             raise RuntimeError(tr("memory phase search({p0}) No trace available", p0=axis))
         if sign_mode == "mixed":
-            resolved = _disambiguate_180_mixed(
-                arr, ax, est.phase, experiment, axis
-            )
+            resolved = _disambiguate_180_mixed(arr, ax, est.phase, experiment, axis)
             if resolved != est.phase:
                 logs.append(
                     tr(
-                        "{p0}: +/-180° chemical shift partitioning disambiguation {p1} → "
-                        "{p2}",
+                        "{p0}: +/-180° chemical shift partitioning disambiguation {p1} → {p2}",
                         p0=axis,
-                        p1=est.phase,
-                        p2=resolved,
+                        p1=f"({format_phase_degrees(est.phase[0])}°, "
+                        f"{format_phase_degrees(est.phase[1])}°)",
+                        p2=f"({format_phase_degrees(resolved[0])}°, "
+                        f"{format_phase_degrees(resolved[1])}°)",
                     )
                 )
             phase = resolved
@@ -816,20 +810,20 @@ def unified_route(    experiment: Experiment,
         logs += est.logs
         logs.append(
             tr(
-                "{p0}: memory phase = ({p1:g}°, {p2:g}°) "
-                "score={p3:.2f}",
+                "{p0}: memory phase = ({p1:g}°, {p2:g}°) score={p3:.2f}",
                 p0=axis,
-                p1=phase[0],
-                p2=phase[1],
+                p1=phase_angle_value(phase[0]),
+                p2=phase_angle_value(phase[1]),
                 p3=est.score,
             )
         )
-        logs.append(tr(
-            "{p0} Phase search is completed, time-consuming {p1:.1f} "
-            "Second",
-            p0=axis,
-            p1=time.time() - t_axis,
-        ))
+        logs.append(
+            tr(
+                "{p0} Phase search is completed, time-consuming {p1:.1f} Second",
+                p0=axis,
+                p1=time.time() - t_axis,
+            )
+        )
     # 0.2.199-patch29fj (user): skip the joint review -- neither the history nor the
     # measurements (900/102/101) crossed the 0.05 gate to correct the phase order
     # (patch29dn fixed sampleI through zero filling plus a re-search once the direct
@@ -846,17 +840,17 @@ def unified_route(    experiment: Experiment,
             out_file = f"{experiment.dataset_id}_preview_{axis}_r2.{ext}"
             t_axis = time.time()
             if progress is not None:
-                progress(tr(
-                    "In phase optimisation: {p0} Replica preview (direct dimension has been "
-                    "determined)",
-                    p0=axis,
-                ))
+                progress(
+                    tr(
+                        "In phase optimisation: {p0} Replica preview (direct dimension has been "
+                        "determined)",
+                        p0=axis,
+                    )
+                )
             resp = backend.process(
                 experiment,
                 plan,
-                direct_phase_override={
-                    k: v for k, v in fixed.items() if k != axis
-                },
+                direct_phase_override={k: v for k, v in fixed.items() if k != axis},
                 params={**params, **zf_phase, "preview_axis": axis},
                 out_file=out_file,
                 script_name=f"{experiment.dataset_id}_preview_{axis}_r2.com",
@@ -866,27 +860,25 @@ def unified_route(    experiment: Experiment,
             if not resp.get("success") or not resp.get("spectrum_path"):
                 raise RuntimeError(
                     tr(
-                        "Replica preview search ({p0}) failed: "
-                        "{p1}",
+                        "Replica preview search ({p0}) failed: {p1}",
                         p0=axis,
-                        p1=resp.get('message'),
+                        p1=resp.get("message"),
                     )
                 )
             ax = _axis_index(axis, experiment.ndim)
             arr = _load_preview_with_memory_guard(
-                str(resp["spectrum_path"]), axis=axis, unpack_axis=ax,
-                progress=progress, logs=logs,
+                str(resp["spectrum_path"]),
+                axis=axis,
+                unpack_axis=ax,
+                progress=progress,
+                logs=logs,
             )
             _unlink_quiet(resp["spectrum_path"])
-            est = search_axis_memory(
-                arr, ax, sign_mode=sign_mode, cancel=cancel_requested
-            )
+            est = search_axis_memory(arr, ax, sign_mode=sign_mode, cancel=cancel_requested)
             if est is None:
                 raise RuntimeError(tr("Memory phase research({p0}) No trace available", p0=axis))
             if sign_mode == "mixed":
-                resolved = _disambiguate_180_mixed(
-                    arr, ax, est.phase, experiment, axis
-                )
+                resolved = _disambiguate_180_mixed(arr, ax, est.phase, experiment, axis)
                 phase = resolved
             else:
                 phase = est.phase
@@ -897,15 +889,14 @@ def unified_route(    experiment: Experiment,
                     "{p0}: in-memory phase re-search (direct dimension fixed) = ({p1:g}°, {p2:g}°) "
                     "score={p3:.2f}",
                     p0=axis,
-                    p1=phase[0],
-                    p2=phase[1],
+                    p1=phase_angle_value(phase[0]),
+                    p2=phase_angle_value(phase[1]),
                     p3=est.score,
                 )
             )
             logs.append(
                 tr(
-                    "{p0} Phase re-search is completed, time-consuming {p1:.1f} "
-                    "Second",
+                    "{p0} Phase re-search is completed, time-consuming {p1:.1f} Second",
                     p0=axis,
                     p1=time.time() - t_axis,
                 )
@@ -917,11 +908,14 @@ def unified_route(    experiment: Experiment,
     # window / zero fill + indirect windows), symmetric with NUS; uniform has no
     # reconstruction, so re-running the full process per candidate is faster
     if progress is not None:
-        progress(tr(
-            "The phase search is completed and processing of parameter optimisation (baseline/zero "
-            "filling/window function) "
-            "begins",
-        ))
+        progress(
+            tr(
+                "The phase search is completed and processing of parameter optimisation "
+                "(baseline/zero "
+                "filling/window function) "
+                "begins",
+            )
+        )
     t_opt = time.time()
     proc = _optimize_uniform_processing(
         experiment,
@@ -965,17 +959,15 @@ def unified_route(    experiment: Experiment,
     # direct-dimension p1 is renormalised by the window-width ratio
     fixed_final = dict(fixed)
     if direct_axis in fixed_final:
-        renormed = _renormalize_direct_p1(
-            fixed[direct_axis], params, params_final
-        )
+        renormed = _renormalize_direct_p1(fixed[direct_axis], params, params_final)
         if renormed != fixed[direct_axis]:
             logs.append(
                 tr(
                     "direct dimension phase renormalized by final run window: {p0} p1={p1:g}° → "
                     "{p2:g}°",
                     p0=direct_axis,
-                    p1=fixed[direct_axis][1],
-                    p2=renormed[1],
+                    p1=phase_angle_value(fixed[direct_axis][1]),
+                    p2=phase_angle_value(renormed[1]),
                 )
             )
         fixed_final[direct_axis] = renormed
@@ -998,15 +990,16 @@ def unified_route(    experiment: Experiment,
     )
     backend_runs += 1
     if not resp.get("success") or not resp.get("spectrum_path"):
-            raise RuntimeError(tr("Final run failed: {p0}", p0=resp.get('message')))
+        raise RuntimeError(tr("Final run failed: {p0}", p0=resp.get("message")))
     if progress is not None:
         progress(tr("Final run completed"))
     logs += list(resp.get("logs", []))
-    logs.append(tr(
-        "The final run is completed and takes time {p0:.1f} "
-        "Second",
-        p0=time.time() - t_final,
-    ))
+    logs.append(
+        tr(
+            "The final run is completed and takes time {p0:.1f} Second",
+            p0=time.time() - t_final,
+        )
+    )
     _append_final_summary(
         logs,
         str(resp["spectrum_path"]),
@@ -1037,10 +1030,20 @@ def unified_route(    experiment: Experiment,
         "diagnostics": diagnostics,
     }
 
+
 _DIRECT_PHASE_FP_KEYS = (
-    "extract", "ext_lo", "ext_hi", "nsigma", "thresh",
-    "smile_xq3", "smile_scaling", "zero_fill", "linewidth_hz",
-    "points_per_line", "segment_shift_hz", "sampling",
+    "extract",
+    "ext_lo",
+    "ext_hi",
+    "nsigma",
+    "thresh",
+    "smile_xq3",
+    "smile_scaling",
+    "zero_fill",
+    "linewidth_hz",
+    "points_per_line",
+    "segment_shift_hz",
+    "sampling",
     "window",  # 0.2.166: the direct-dim window enters the SMILE step1 recon plane
     "direct_poly_time",  # 0.2.160: the first pass drops POLY -time; the search uses the raw plane
 )
@@ -1048,7 +1051,8 @@ _DIRECT_PHASE_FP_KEYS = (
 
 def _direct_phase_params_fp(experiment: Experiment, params: dict) -> str:
     """Direct-dimension phase cache fingerprint: the parameters that affect the
-    reconstruction plane plus the dataset identity."""
+    reconstruction plane plus the dataset identity.
+    """
     import hashlib
     import json as _json
 
@@ -1088,7 +1092,8 @@ def _load_direct_phase_cache(
     work: Path, experiment: Experiment, params: dict, shape
 ) -> dict | None:
     """Reuse phase.json cache when parameter and spectrum remain unchanged (skipping repeated
-    searches)."""
+    searches).
+    """
     import json as _json
 
     path = _direct_phase_cache_path(work)
@@ -1108,8 +1113,14 @@ def _load_direct_phase_cache(
 
 
 def _save_direct_phase_cache(
-    work: Path, experiment: Experiment, params: dict, shape,
-    p0: float, p1: float, score: float, duration_s: float,
+    work: Path,
+    experiment: Experiment,
+    params: dict,
+    shape,
+    p0: float,
+    p1: float,
+    score: float,
+    duration_s: float,
 ) -> None:
     import json as _json
 
@@ -1154,6 +1165,7 @@ def _load_recon_planes(experiment: Experiment, work: Path) -> np.ndarray:
     if not recon.is_file():
         raise RuntimeError(tr("Missing 2D reconstruction plane: {p0}", p0=recon))
     return _read_complex_preview(recon)
+
 
 def _chosen_baseline_scores(
     baseline_cfg: dict[str, dict[str, Any]],
@@ -1287,9 +1299,7 @@ def _optimize_uniform_processing(
     #      candidates (**for tests/reproduction/audit only; real experiments keep
     #      the default automatic optimisation**)
     window_switch = opt_switches.get("window", "auto")
-    direct_candidates, indirect_candidates = window_candidates_from_switch(
-        window_switch
-    )
+    direct_candidates, indirect_candidates = window_candidates_from_switch(window_switch)
     if window_switch in (False, "off"):
         out_logs.append(
             tr(
@@ -1305,9 +1315,7 @@ def _optimize_uniform_processing(
 
             if progress is not None:
                 progress(tr("direct dimension window function optimisation(FID memory score)"))
-            win_kwargs: dict[str, Any] = {
-                "current": (window_cfg or {}).get(direct_axis)
-            }
+            win_kwargs: dict[str, Any] = {"current": (window_cfg or {}).get(direct_axis)}
             if direct_candidates:
                 win_kwargs["candidates"] = direct_candidates
             wres = optimize_direct_window_from_work(work, experiment, **win_kwargs)
@@ -1331,11 +1339,13 @@ def _optimize_uniform_processing(
             )
 
             if progress is not None:
-                progress(tr(
-                    "Indirect dimension window function optimisation (FID memory score, do not "
-                    "rerun the "
-                    "process)",
-                ))
+                progress(
+                    tr(
+                        "Indirect dimension window function optimisation (FID memory score, do not "
+                        "rerun the "
+                        "process)",
+                    )
+                )
             win_kwargs = {"current": window_cfg}
             if indirect_candidates:
                 win_kwargs["candidates"] = indirect_candidates
@@ -1363,7 +1373,6 @@ def _optimize_uniform_processing(
 
 
 def _optimize_nus_processing(
-
     experiment: Experiment,
     backend: Any,
     work: Path,
@@ -1463,9 +1472,7 @@ def _optimize_nus_processing(
     #      candidates (**for tests/reproduction/audit only; real experiments keep
     #      the default automatic optimisation**)
     window_switch = opt_switches.get("window", "auto")
-    direct_candidates, indirect_candidates = window_candidates_from_switch(
-        window_switch
-    )
+    direct_candidates, indirect_candidates = window_candidates_from_switch(window_switch)
     if window_switch in (False, "off"):
         out_logs.append(
             tr(
@@ -1482,13 +1489,13 @@ def _optimize_nus_processing(
             )
 
             if progress is not None:
-                progress(tr(
-                    "direct dimension window function optimisation (FID memory score, no rerun "
-                    "SMILE)",
-                ))
-            win_kwargs: dict[str, Any] = {
-                "current": (window_cfg or {}).get(direct_axis)
-            }
+                progress(
+                    tr(
+                        "direct dimension window function optimisation (FID memory score, no rerun "
+                        "SMILE)",
+                    )
+                )
+            win_kwargs: dict[str, Any] = {"current": (window_cfg or {}).get(direct_axis)}
             if direct_candidates:
                 win_kwargs["candidates"] = direct_candidates
             wres = optimize_direct_window_from_work(work, experiment, **win_kwargs)
@@ -1520,17 +1527,17 @@ def _optimize_nus_processing(
             )
 
             if progress is not None:
-                progress(tr(
-                    "indirect dimension window function optimisation (reconstruct plane memory "
-                    "score, do not rerun "
-                    "SMILE)",
-                ))
+                progress(
+                    tr(
+                        "indirect dimension window function optimisation (reconstruct plane memory "
+                        "score, do not rerun "
+                        "SMILE)",
+                    )
+                )
             win_kwargs = {"current": window_cfg}
             if indirect_candidates:
                 win_kwargs["candidates"] = indirect_candidates
-            ires = optimize_indirect_windows_from_recon(
-                work, experiment, **win_kwargs
-            )
+            ires = optimize_indirect_windows_from_recon(work, experiment, **win_kwargs)
             if ires.changed:
                 win = dict(window_cfg or {})
                 win.update(ires.choice)
@@ -1570,7 +1577,8 @@ def _unified_nus(
     dimension is filled into the initial script together with the optimised
     processing parameters to produce a new full script (the direct-dimension phase
     goes into the step1 PS after EXT and the indirect-dimension phases into the
-    step3 PS), and no rotated nus3d_rc_ph copy is written."""
+    step3 PS), and no rotated nus3d_rc_ph copy is written.
+    """
     from core.data.internal_data_model import AxisRole
     from workflow.memory_phase_search import search_axis_memory
 
@@ -1604,9 +1612,7 @@ def _unified_nus(
     # the first-pass reconstruction / phase search and the optimisation evaluation
     # (the reconstruction-plane window is the evaluation window, and a narrower
     # direct-dimension window lowers SMILE memory)
-    params_first, final_ext_lo, final_ext_hi, apply_ext_opt = _split_final_ext(
-        params_first
-    )
+    params_first, final_ext_lo, final_ext_hi, apply_ext_opt = _split_final_ext(params_first)
     if apply_ext_opt:
         params_first = _apply_final_ext(params_first, final_ext_lo, final_ext_hi)
     params_first.update(
@@ -1622,13 +1628,14 @@ def _unified_nus(
     )
     first = backend.reconstruct_nus(experiment, params_first, progress=progress)
     if not first.get("success") or not first.get("spectrum_path"):
-        raise RuntimeError(tr(
-            "The first pass SMILE reconstruction failed: "
-            "{p0}",
-            p0=first.get('message'),
-        ))
+        raise RuntimeError(
+            tr(
+                "The first pass SMILE reconstruction failed: {p0}",
+                p0=first.get("message"),
+            )
+        )
     logs: list[str] = list(diag_logs) + [
-        tr("The first pass SMILE reconstruction is completed: {p0}", p0=first.get('spectrum_path'))
+        tr("The first pass SMILE reconstruction is completed: {p0}", p0=first.get("spectrum_path"))
     ]
     if progress is not None:
         progress(tr("First pass SMILE completed"))
@@ -1651,9 +1658,7 @@ def _unified_nus(
     direct_axis = "F3" if experiment.ndim >= 3 else "F2"
     sign_mode = _sign_mode(experiment)
     indirect_axes = [
-        dim.logical_axis
-        for dim in experiment.dimensions
-        if dim.role is not AxisRole.DIRECT
+        dim.logical_axis for dim in experiment.dimensions if dim.role is not AxisRole.DIRECT
     ]
     # 0.2.167: magnitude spectra (HMBC and the like) skip the indirect-dimension
     # search too -- the finalize complex preview is skipped and the phase stays
@@ -1662,11 +1667,13 @@ def _unified_nus(
     auto_phase = _template_auto_phase(experiment)
     if not auto_phase:
         indirect_axes = []
-        logs.append(tr(
-            "indirect dimension: the amplitude spectrum does not automatically adjust the phase, "
-            "skip the finalize replica preview and "
-            "search",
-        ))
+        logs.append(
+            tr(
+                "indirect dimension: the amplitude spectrum does not automatically adjust the "
+                "phase, skip the finalize replica preview and "
+                "search",
+            )
+        )
     # Indirect dimensions: the finalize complex preview (this axis' PS omits -di,
     # the other axes add -di with their fixed phases, no zero fill) provides the
     # base, then a full in-memory per-dimension search -- the FT/-alt/ZTP
@@ -1683,8 +1690,7 @@ def _unified_nus(
     # auto
     zf_phase = {
         "zero_fill": {
-            a: {"mode": "auto"}
-            for a in (dim.logical_axis for dim in experiment.dimensions)
+            a: {"mode": "auto"} for a in (dim.logical_axis for dim in experiment.dimensions)
         }
     }
     for axis in indirect_axes:
@@ -1707,37 +1713,38 @@ def _unified_nus(
         )
         backend_runs += 1
         if not resp.get("success") or not resp.get("spectrum_path"):
-            raise RuntimeError(tr(
-                "NUS Replica preview ({p0}) failed: "
-                "{p1}",
-                p0=axis,
-                p1=resp.get('message'),
-            ))
+            raise RuntimeError(
+                tr(
+                    "NUS Replica preview ({p0}) failed: {p1}",
+                    p0=axis,
+                    p1=resp.get("message"),
+                )
+            )
         if progress is not None:
             progress(tr("In phase optimisation: {p0} Replica preview completed", p0=axis))
         ax = _axis_index(axis, experiment.ndim)
         arr = _load_preview_with_memory_guard(
-            str(resp["spectrum_path"]), axis=axis, unpack_axis=ax,
-            progress=progress, logs=logs,
+            str(resp["spectrum_path"]),
+            axis=axis,
+            unpack_axis=ax,
+            progress=progress,
+            logs=logs,
         )
         _unlink_quiet(resp["spectrum_path"])
-        est = search_axis_memory(
-            arr, ax, sign_mode=sign_mode, cancel=cancel_requested
-        )
+        est = search_axis_memory(arr, ax, sign_mode=sign_mode, cancel=cancel_requested)
         if est is None:
             raise RuntimeError(tr("memory phase search({p0}) No trace available", p0=axis))
         if sign_mode == "mixed":
-            resolved = _disambiguate_180_mixed(
-                arr, ax, est.phase, experiment, axis
-            )
+            resolved = _disambiguate_180_mixed(arr, ax, est.phase, experiment, axis)
             if resolved != est.phase:
                 logs.append(
                     tr(
-                        "{p0}: +/-180° chemical shift partitioning disambiguation {p1} → "
-                        "{p2}",
+                        "{p0}: +/-180° chemical shift partitioning disambiguation {p1} → {p2}",
                         p0=axis,
-                        p1=est.phase,
-                        p2=resolved,
+                        p1=f"({format_phase_degrees(est.phase[0])}°, "
+                        f"{format_phase_degrees(est.phase[1])}°)",
+                        p2=f"({format_phase_degrees(resolved[0])}°, "
+                        f"{format_phase_degrees(resolved[1])}°)",
                     )
                 )
             fixed[axis] = resolved
@@ -1746,20 +1753,20 @@ def _unified_nus(
         logs += est.logs
         logs.append(
             tr(
-                "{p0}: memory phase = ({p1:g}°, {p2:g}°) "
-                "score={p3:.2f}",
+                "{p0}: memory phase = ({p1:g}°, {p2:g}°) score={p3:.2f}",
                 p0=axis,
-                p1=est.phase[0],
-                p2=est.phase[1],
+                p1=phase_angle_value(est.phase[0]),
+                p2=phase_angle_value(est.phase[1]),
                 p3=est.score,
             )
         )
-        logs.append(tr(
-            "{p0} Phase search is completed, time-consuming {p1:.1f} "
-            "Second",
-            p0=axis,
-            p1=time.time() - t_axis,
-        ))
+        logs.append(
+            tr(
+                "{p0} Phase search is completed, time-consuming {p1:.1f} Second",
+                p0=axis,
+                p1=time.time() - t_axis,
+            )
+        )
     # 0.2.199-patch29fj (user): skip the joint review (same as uniform, the code is
     # kept).
     # Direct dimension: 0.2.199-patch29l moved the search onto the "purely real final
@@ -1813,26 +1820,18 @@ def _unified_nus(
             # 2048 vs 4096 in the final run)
             params={**params_first, **zf_phase},
             out_file=preview_out,
-            script_name=(
-                f"{experiment.dataset_id}_direct_final_finalize.com"
-            ),
+            script_name=(f"{experiment.dataset_id}_direct_final_finalize.com"),
             progress=progress,
         )
         backend_runs += 1
-        if (
-            not resp_direct.get("success")
-            or not resp_direct.get("spectrum_path")
-        ):
+        if not resp_direct.get("success") or not resp_direct.get("spectrum_path"):
             raise RuntimeError(
                 tr(
-                    "direct-dimension real-data final spectrum preview failed: "
-                    "{p0}",
-                    p0=resp_direct.get('message'),
+                    "direct-dimension real-data final spectrum preview failed: {p0}",
+                    p0=resp_direct.get("message"),
                 )
             )
-        search_arr = _read_real_ft3(
-            str(resp_direct["spectrum_path"])
-        )
+        search_arr = _read_real_ft3(str(resp_direct["spectrum_path"]))
         _unlink_quiet(resp_direct["spectrum_path"])
         logs.append(
             tr(
@@ -1844,23 +1843,20 @@ def _unified_nus(
             )
         )
         if progress is not None:
-            progress(tr(
-                "phase optimisation: direct dimension real data final spectrum preview "
-                "completed",
-            ))
-        cache = _load_direct_phase_cache(
-            work, experiment, params_first, search_arr.shape
-        )
+            progress(
+                tr(
+                    "phase optimisation: direct dimension real data final spectrum preview "
+                    "completed",
+                )
+            )
+        cache = _load_direct_phase_cache(work, experiment, params_first, search_arr.shape)
         if cache is not None:
             direct_phase = (float(cache["p0"]), float(cache["p1"]))
-            _cache_msg = (
-                tr(
-                    "direct dimension phase reuse cache phase.json: {p0}=({p1:g}°, "
-                    "{p2:g}°)",
-                    p0=direct_axis,
-                    p1=direct_phase[0],
-                    p2=direct_phase[1],
-                )
+            _cache_msg = tr(
+                "direct dimension phase reuse cache phase.json: {p0}=({p1:g}°, {p2:g}°)",
+                p0=direct_axis,
+                p1=phase_angle_value(direct_phase[0]),
+                p2=phase_angle_value(direct_phase[1]),
             )
             logs.append(_cache_msg)
             if progress is not None:
@@ -1878,11 +1874,13 @@ def _unified_nus(
                         )
                     )
                 else:
-                    progress(tr(
-                        "Searching for the direct-dimension phase (first run, usually tens of "
-                        "seconds), please "
-                        "wait",
-                    ))
+                    progress(
+                        tr(
+                            "Searching for the direct-dimension phase (first run, usually tens of "
+                            "seconds), please "
+                            "wait",
+                        )
+                    )
             t0 = _time.time()
             direct_est = search_direct_phase_real_ht(
                 search_arr,
@@ -1893,16 +1891,18 @@ def _unified_nus(
             )
             elapsed = _time.time() - t0
             if progress is not None:
-                progress(tr(
-                    "direct dimension phase search completed, time consuming {p0:.1f} "
-                    "Second",
+                progress(
+                    tr(
+                        "direct dimension phase search completed, time consuming {p0:.1f} Second",
+                        p0=elapsed,
+                    )
+                )
+            logs.append(
+                tr(
+                    "direct dimension phase search completed, time consuming {p0:.1f} Second",
                     p0=elapsed,
-                ))
-            logs.append(tr(
-                "direct dimension phase search completed, time consuming {p0:.1f} "
-                "Second",
-                p0=elapsed,
-            ))
+                )
+            )
             direct_phase = (0.0, 0.0)
             if direct_est is not None and direct_est[2] >= 30.0:
                 direct_phase = (float(direct_est[0]), float(direct_est[1]))
@@ -1916,7 +1916,7 @@ def _unified_nus(
                         tr(
                             "direct-dimension HT search p1={p0:g}° is out of range (>170°), reset "
                             "to zero",
-                            p0=direct_phase[1],
+                            p0=phase_angle_value(direct_phase[1]),
                         )
                     )
                     direct_phase = (direct_phase[0], 0.0)
@@ -1925,14 +1925,19 @@ def _unified_nus(
                         "direct dimension projection HT Search for: {p0}=({p1:g}°, {p2:g}°) "
                         "score={p3:.2f}",
                         p0=direct_axis,
-                        p1=direct_phase[0],
-                        p2=direct_phase[1],
+                        p1=phase_angle_value(direct_phase[0]),
+                        p2=phase_angle_value(direct_phase[1]),
                         p3=direct_est[2],
                     )
                 )
                 _save_direct_phase_cache(
-                    work, experiment, params_first, search_arr.shape,
-                    direct_phase[0], direct_phase[1], float(direct_est[2]),
+                    work,
+                    experiment,
+                    params_first,
+                    search_arr.shape,
+                    direct_phase[0],
+                    direct_phase[1],
+                    float(direct_est[2]),
                     elapsed,
                 )
             else:
@@ -1945,11 +1950,10 @@ def _unified_nus(
                 )
     logs.append(
         tr(
-            "direct dimension memory phase: {p0}=({p1:g}°, "
-            "{p2:g}°)",
+            "direct dimension memory phase: {p0}=({p1:g}°, {p2:g}°)",
             p0=direct_axis,
-            p1=direct_phase[0],
-            p2=direct_phase[1],
+            p1=phase_angle_value(direct_phase[0]),
+            p2=phase_angle_value(direct_phase[1]),
         )
     )
     # 0.2.199-patch29do (user): iterating -- the indirect dimensions are searched
@@ -1962,17 +1966,15 @@ def _unified_nus(
         for _round in range(1):
             changed = False
             for axis in indirect_axes:
-                out_file = (
-                    f"{experiment.dataset_id}_preview_{axis}"
-                    f"_r{_round + 2}.{ext}"
-                )
+                out_file = f"{experiment.dataset_id}_preview_{axis}_r{_round + 2}.{ext}"
                 t_axis = time.time()
                 if progress is not None:
-                    progress(tr(
-                        "In phase optimisation: {p0} Replicate preview (iteration) in "
-                        "progress",
-                        p0=axis,
-                    ))
+                    progress(
+                        tr(
+                            "In phase optimisation: {p0} Replicate preview (iteration) in progress",
+                            p0=axis,
+                        )
+                    )
                 # The preview axis itself must be excluded: the finalize preview
                 # writes the preview axis' phase from phases straight into PS
                 # (unlike the uniform preview, which filters), so generating with the
@@ -1980,9 +1982,7 @@ def _unified_nus(
                 # absolute phase
                 resp = backend.finalize_nus(
                     experiment,
-                    phases={
-                        k: v for k, v in fixed.items() if k != axis
-                    },
+                    phases={k: v for k, v in fixed.items() if k != axis},
                     work_dir=work,
                     params={
                         **_sign_sampling(base_params),
@@ -1991,8 +1991,7 @@ def _unified_nus(
                     },
                     out_file=out_file,
                     script_name=(
-                        f"{experiment.dataset_id}_preview_{axis}"
-                        f"_r{_round + 2}_finalize.com"
+                        f"{experiment.dataset_id}_preview_{axis}_r{_round + 2}_finalize.com"
                     ),
                     progress=progress,
                 )
@@ -2000,31 +1999,30 @@ def _unified_nus(
                 if not resp.get("success") or not resp.get("spectrum_path"):
                     raise RuntimeError(
                         tr(
-                            "NUS Replica preview search ({p0}) failed: "
-                            "{p1}",
+                            "NUS Replica preview search ({p0}) failed: {p1}",
                             p0=axis,
-                            p1=resp.get('message'),
+                            p1=resp.get("message"),
                         )
                     )
                 ax = _axis_index(axis, experiment.ndim)
                 arr = _load_preview_with_memory_guard(
-                    str(resp["spectrum_path"]), axis=axis, unpack_axis=ax,
-                    progress=progress, logs=logs,
+                    str(resp["spectrum_path"]),
+                    axis=axis,
+                    unpack_axis=ax,
+                    progress=progress,
+                    logs=logs,
                 )
                 _unlink_quiet(resp["spectrum_path"])
-                est = search_axis_memory(
-                    arr, ax, sign_mode=sign_mode, cancel=cancel_requested
-                )
+                est = search_axis_memory(arr, ax, sign_mode=sign_mode, cancel=cancel_requested)
                 if est is None:
-                    raise RuntimeError(tr(
-                        "Memory phase research({p0}) No trace "
-                        "available",
-                        p0=axis,
-                    ))
-                if sign_mode == "mixed":
-                    resolved = _disambiguate_180_mixed(
-                        arr, ax, est.phase, experiment, axis
+                    raise RuntimeError(
+                        tr(
+                            "Memory phase research({p0}) No trace available",
+                            p0=axis,
+                        )
                     )
+                if sign_mode == "mixed":
+                    resolved = _disambiguate_180_mixed(arr, ax, est.phase, experiment, axis)
                     phase = resolved
                 else:
                     phase = est.phase
@@ -2037,8 +2035,8 @@ def _unified_nus(
                         "score={p4:.2f}",
                         p0=axis,
                         p1=_round + 2,
-                        p2=phase[0],
-                        p3=phase[1],
+                        p2=phase_angle_value(phase[0]),
+                        p3=phase_angle_value(phase[1]),
                         p4=est.score,
                     )
                 )
@@ -2046,18 +2044,19 @@ def _unified_nus(
                     changed = True
                 logs.append(
                     tr(
-                        "{p0} Phase re-search is completed, time-consuming {p1:.1f} "
-                        "Second",
+                        "{p0} Phase re-search is completed, time-consuming {p1:.1f} Second",
                         p0=axis,
                         p1=time.time() - t_axis,
                     )
                 )
             if not changed:
-                logs.append(tr(
-                    "phase iteration: indirect dimension {p0} There is no change in the wheel, "
-                    "convergence",
-                    p0=_round + 2,
-                ))
+                logs.append(
+                    tr(
+                        "phase iteration: indirect dimension {p0} There is no change in the wheel, "
+                        "convergence",
+                        p0=_round + 2,
+                    )
+                )
                 break
     # Processing-parameter optimisation (baseline / zero fill / window functions):
     # after the per-axis phase search and before the final run; the final phase of
@@ -2067,11 +2066,14 @@ def _unified_nus(
     # as the in-memory recon-plane rotation) and the indirect-dimension phases enter
     # the step3 PS; no rotated nus3d_rc_ph copy is written.
     if progress is not None:
-        progress(tr(
-            "The phase search is completed and processing of parameter optimisation (baseline/zero "
-            "filling/window function) "
-            "begins",
-        ))
+        progress(
+            tr(
+                "The phase search is completed and processing of parameter optimisation "
+                "(baseline/zero "
+                "filling/window function) "
+                "begins",
+            )
+        )
     t_opt = time.time()
     proc = _optimize_nus_processing(
         experiment,
@@ -2082,12 +2084,15 @@ def _unified_nus(
         progress=progress,
     )
     logs += proc["logs"]
-    logs.append(tr(
-        "Processing parameter optimisation (baseline/zero filling/window function) is completed, "
-        "time-consuming {p0:.1f} "
-        "Second",
-        p0=time.time() - t_opt,
-    ))
+    logs.append(
+        tr(
+            "Processing parameter optimisation (baseline/zero filling/window function) is "
+            "completed, "
+            "time-consuming {p0:.1f} "
+            "Second",
+            p0=time.time() - t_opt,
+        )
+    )
     # 0.2.199-patch29fk-fix: the reconstruction planes have been consumed by the
     # parameter optimisation (indirect windows scored from recon).
     # 2026-09-25 (user): **nus3d_rc is no longer released early** -- it is kept (the
@@ -2105,17 +2110,15 @@ def _unified_nus(
     # renormalised by the window-width ratio (p1 is the total degrees across the
     # whole extraction window; with a narrower range the same p1 gives a steeper
     # physical slope)
-    direct_phase_final = _renormalize_direct_p1(
-        direct_phase, params_first, params_final
-    )
+    direct_phase_final = _renormalize_direct_p1(direct_phase, params_first, params_final)
     if direct_phase_final != direct_phase:
         logs.append(
             tr(
                 "direct dimension phase renormalized by final run window: {p0} p1={p1:g}° → "
                 "{p2:g}°",
                 p0=direct_axis,
-                p1=direct_phase[1],
-                p2=direct_phase_final[1],
+                p1=phase_angle_value(direct_phase[1]),
+                p2=phase_angle_value(direct_phase_final[1]),
             )
         )
     params_final.update(
@@ -2127,25 +2130,23 @@ def _unified_nus(
                 float(direct_phase_final[0]),
                 float(direct_phase_final[1]),
             ],
-            "phases": {
-                axis: [float(p0), float(p1)]
-                for axis, (p0, p1) in fixed.items()
-            },
+            "phases": {axis: [float(p0), float(p1)] for axis, (p0, p1) in fixed.items()},
             "baseline": proc["baseline"],
             "zero_fill": proc["zero_fill"],
             "window": proc["window"],
         }
     )
     if progress is not None:
-        progress(tr(
-            "In the final run (complete script, including the final phase of each "
-            "dimension)",
-        ))
+        progress(
+            tr(
+                "In the final run (complete script, including the final phase of each dimension)",
+            )
+        )
     t_final = time.time()
     final = backend.reconstruct_nus(experiment, params_final, progress=progress)
     backend_runs += 1
     if not final.get("success") or not final.get("spectrum_path"):
-        raise RuntimeError(tr("Final run (complete script) failed: {p0}", p0=final.get('message')))
+        raise RuntimeError(tr("Final run (complete script) failed: {p0}", p0=final.get("message")))
     if progress is not None:
         progress(tr("Final run completed"))
     logs.append(
@@ -2154,33 +2155,30 @@ def _unified_nus(
             "dimension {p0}=({p1:g}°, "
             "{p2:g}°)",
             p0=direct_axis,
-            p1=direct_phase_final[0],
-            p2=direct_phase_final[1],
+            p1=phase_angle_value(direct_phase_final[0]),
+            p2=phase_angle_value(direct_phase_final[1]),
         )
         + "".join(
-            f" {axis}=({p0:g}°, {p1:g}°)"
+            f" {axis}=({format_phase_degrees(p0)}°, {format_phase_degrees(p1)}°)"
             for axis, (p0, p1) in fixed.items()
         )
         + tr("), nus3d_rc_ph rotated copy not generated")
     )
     logs += list(final.get("logs", []))
-    logs.append(tr(
-        "The final run is completed and takes time {p0:.1f} "
-        "Second",
-        p0=time.time() - t_final,
-    ))
+    logs.append(
+        tr(
+            "The final run is completed and takes time {p0:.1f} Second",
+            p0=time.time() - t_final,
+        )
+    )
     # 0.2.199-patch29u: cross-check the final script's baseline -- when the report
     # says order3 was selected, the final script should carry the matching POLY
     # (to catch a "report/script inconsistency")
     try:
         final_script = work / f"{experiment.dataset_id}_nus.com"
         if final_script.is_file():
-            _text = final_script.read_text(
-                encoding="utf-8", errors="replace"
-            )
-            _polys = [
-                ln.strip() for ln in _text.splitlines() if "POLY" in ln
-            ]
+            _text = final_script.read_text(encoding="utf-8", errors="replace")
+            _polys = [ln.strip() for ln in _text.splitlines() if "POLY" in ln]
             logs.append(
                 tr("Final script baseline check: ")
                 + ("; ".join(_polys) if _polys else tr("None POLY"))

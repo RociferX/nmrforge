@@ -1,112 +1,89 @@
 # Getting started
 
-This page takes you from 1.0.1 to a first useful result: either the Linux AppImage
-(self-contained, interface language switched at run time) or a source installation. Both tracks are covered below.
+This guide covers a source installation, first data inspection, and the processing boundary. A
+Linux AppImage may also be available from the [releases page](https://github.com/RociferX/nmrforge/releases);
+each binary belongs to its stated release and source revision. Updating a checkout does not update
+an already downloaded AppImage.
 
-## Track A - source installation and GUI
+## Install from source
+
+Linux is the target runtime. Create an editable installation:
 
 ```bash
 git clone https://github.com/RociferX/nmrforge.git
 cd nmrforge
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 python -m pip install -e ".[test]"
 python main.py
 ```
 
-Install NMRPipe on the same machine for real processing; SMILE comes with it. nmrForge does not
-bundle or download either engine. If they are missing, data inspection still works and the program
-reports the unavailable processing capability explicitly.
+For the complete dependency and packaged-resource notes, see
+[Installation](installation.md). NMRPipe is required for spectral conversion and processing;
+SMILE is required for NUS reconstruction. nmrForge does not install or bundle these external tools.
 
-On first launch, open **`Help -> Usage tutorial`**: a full walkthrough from importing data to a peak table, and the text follows the interface language.
+## Inspect a Bruker dataset
 
-The future AppImage path and its additional PySide6/Qt distribution checks are reserved in
-the release checklist kept in the maintainer's private repository.
-
-## Track B - developers: inspect a dataset without NMRPipe
-
-Everything in this step is pure Python: Bruker parameter parsing, dimensionality detection,
-experiment classification, sampling classification and reading the time-domain data. It needs no
-NMRPipe installation.
+Parsing and data understanding can be used without NMRPipe. In a source checkout, run:
 
 ```bash
-git clone <this repository>
-cd nmrForge
-pip install -e ".[test]"
+python examples/quickstart.py /path/to/bruker/dataset
 ```
 
-Create a small synthetic dataset (headers plus a synthetic FID, clearly marked as not real data),
-or point the walkthrough at one of your own Bruker dataset directories:
+The inspection reports available acquisition files, dimensionality and axis metadata, experiment
+classification, sampling classification and its evidence, time-domain layout, and whether external
+processing engines can be located. To make a clearly synthetic example:
 
 ```bash
-python examples/make_synthetic_dataset.py --out example_data/hsqc_2d
-python examples/quickstart.py example_data/hsqc_2d
+python examples/make_synthetic_dataset.py --out ./example_data/hsqc_2d
+python examples/quickstart.py ./example_data/hsqc_2d
 ```
 
-The walkthrough prints, in order:
+Synthetic data are for software checks and walkthroughs only, not scientific conclusions.
 
-1. which parameter files were found (`acqus`/`acqu2s`/`acqu3s`);
-2. the dimensionality and, per dimension, nucleus, role, TD and sweep width;
-3. the detected experiment type with the evidence behind it;
-4. the sampling classification (uniform / NUS / uncertain) with evidence;
-5. the time-domain storage layout the backend will use;
-6. whether NMRPipe and SMILE were found, plus the exact next command to run.
+## Configure external engines
 
-If step 6 reports "NMRPipe NOT FOUND", processing is not available yet - data understanding and
-QC still are. That boundary is deliberate: nmrForge refuses to pretend it can process without the
-engine. A 3D example, if you want to see dimension handling and NUS classification:
+NMRPipe is resolved from the explicit `backend.nmrpipe.path` or
+`backend.nmrpipe.nmrpipe_bin` configuration first, then `PATH`, the environment available
+through `csh`, and supported common locations. SMILE is located with the NMRPipe installation.
+Missing engines are reported when an operation needs them; the application does not silently
+substitute a different processing engine.
 
-```bash
-python examples/make_synthetic_dataset.py --out example_data/hnca_3d --ndim 3 --nuclei 13C,15N,1H --nus
-python examples/quickstart.py example_data/hnca_3d
-```
-
-## Configure NMRPipe
-
-The backend searches for NMRPipe in this order (`backend/nmrpipe_finder.py`):
-
-1. `backend.nmrpipe.path` from the configuration (a directory or an executable);
-2. `backend.nmrpipe.nmrpipe_bin`;
-3. `PATH`;
-4. the `csh` environment, i.e. what a terminal has after sourcing the NMRPipe environment;
-5. common installation locations.
-
-`nmrforge_data/config/nmrforge.yaml` holds the defaults; copy it to
-`nmrforge_data/config/nmrforge.local.yaml` for
-machine-local overrides (that file is git-ignored so machine paths never reach the repository):
+Use the tracked defaults in `nmrforge_data/config/nmrforge.yaml`. For a machine-local path, copy
+the file to the ignored `nmrforge_data/config/nmrforge.local.yaml` and edit the local copy:
 
 ```yaml
 backend:
   nmrpipe:
-    path: /opt/NMRPipe/nmrbin.linux212_64
+    path: /path/to/nmrpipe/bin
 ```
 
-## Run the processing path
+Do not commit machine-specific paths. See [External dependencies](external-dependencies.md) for
+resource discovery, memory notes, and what remains available without NMRPipe.
 
-Developers can drive the same engine from the command line; the full reference is
-[external-api/04-cli-reference.md](external-api/04-cli-reference.md):
+## Run a processing study
+
+The Python API and command line use the same backend. A study consists of registered input
+conditions, a frozen reference, and user-supplied parameter combinations:
 
 ```bash
-python -m nmrforge_api init      --study ./study --dataset /path/to/bruker/dataset
+python -m nmrforge_api init --study ./study --dataset /path/to/bruker/dataset --condition A
 python -m nmrforge_api reference --study ./study
-python -m nmrforge_api peaks     --study ./study
-python -m nmrforge_api sweep     --study ./study --grid grid.yaml --reference study/reference.json
+python -m nmrforge_api peaks --study ./study
+python -m nmrforge_api sweep --study ./study --reference ./study --combos design.csv
+python -m nmrforge_api report --study ./study
 ```
 
-A "study" is a self-contained root directory. The reference spectrum, its script and its peak
-tables are frozen once; parameter combinations are then evaluated against that reference, and each
-combination keeps its own script, candidate spectrum, peak table, run record and warnings.
+For a complete option list, see [CLI reference](cli.md). The API runs peak selection independently
+on each candidate spectrum using the reference-locked threshold, then writes one
+`peak_table_parabolic.csv` per study/run level as documented in
+[Outputs and records](external-api/06-outputs-and-records.md). Localization is three-point
+parabolic only.
 
-## Where results live
+## Where to go next
 
-- [external-api/06-outputs-and-records.md](external-api/06-outputs-and-records.md) - study
-  directory layout: `manifest.json`, `runs.json`, `peak_positions.csv`, `uncertainty.csv`,
-  per-run scripts and spectra.
-- [qc-system.md](qc-system.md) - what the quality metrics mean and how to read the report.
-- [processing-model.md](processing-model.md) - how a processing plan is built.
-
-## Next steps
-
-- [installation.md](installation.md) - the Linux AppImage and the source installation
-- [external-dependencies.md](external-dependencies.md) - NMRPipe/SMILE
-- [troubleshooting.md](troubleshooting.md) | [FAQ](faq.md)
+- [Installation](installation.md) — source and versioned Linux AppImage boundary.
+- [External dependencies](external-dependencies.md) — NMRPipe/SMILE discovery and resource notes.
+- [Processing model](processing-model.md) and [QC system](qc-system.md) — processing behaviour.
+- [External API](external-api/README.md) — Python, CLI, records, and examples.
+- [Troubleshooting](troubleshooting.md) and [FAQ](faq.md) — common issues.

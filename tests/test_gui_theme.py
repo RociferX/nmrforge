@@ -32,9 +32,9 @@ COLOR_RE = re.compile(r"(?<!background-)color:\s*(#[0-9a-fA-F]{3,6})")
 # Text clearly drawn on a light background: white run details box, white inline
 # naming editor, light yellow hint bubble.
 ALLOWED_ON_LIGHT = {
-    ("gui/pipeline_panel.py", "#222"),      # detail_frame white background
-    ("gui/project_tree.py", "#222"),        # inline rename editor white background
-    ("gui/pipeline_panel.py", "#935116"),   # hint_bubble light yellow background
+    ("gui/pipeline_panel.py", "#222"),  # detail_frame white background
+    ("gui/project_tree.py", "#222"),  # inline rename editor white background
+    ("gui/pipeline_panel.py", "#935116"),  # hint_bubble light yellow background
 }
 
 
@@ -69,9 +69,7 @@ def _iter_text_colors():
             rel = path.relative_to(ROOT).as_posix()
             if rel in THEME_DEFINITION_FILES:
                 continue
-            for lineno, line in enumerate(
-                path.read_text(encoding="utf-8").splitlines(), 1
-            ):
+            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 for match in COLOR_RE.finditer(line):
                     yield rel, lineno, match.group(1).lower(), line.strip()
 
@@ -80,9 +78,7 @@ def test_theme_constants_are_readable() -> None:
     """Semantic colours must all reach 4.5:1 on the dark window background."""
     for color in (TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED):
         assert _contrast(color, WINDOW_BACKGROUND) >= 4.5, color
-    assert _contrast(TEXT_MUTED, WINDOW_BACKGROUND) > _contrast(
-        "#666666", WINDOW_BACKGROUND
-    )
+    assert _contrast(TEXT_MUTED, WINDOW_BACKGROUND) > _contrast("#666666", WINDOW_BACKGROUND)
 
 
 def test_no_dark_text_on_dark_theme() -> None:
@@ -112,5 +108,5 @@ def test_tree_icon_uses_theme_color() -> None:
     """The tree icon colour comes from the theme (was hardcoded #2c3e50, which is
     invisible on dark trees)."""
     source = (ROOT / "gui" / "project_tree.py").read_text(encoding="utf-8")
-    assert 'painter.setPen(QColor(TEXT_SECONDARY))' in source
+    assert "painter.setPen(QColor(TEXT_SECONDARY))" in source
     assert 'QColor("#2c3e50")' not in source

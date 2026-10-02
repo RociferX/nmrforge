@@ -4,7 +4,8 @@ executed once; phase / baseline, etc. Downstream parameters are optimised in num
 final spectrum, without triggering re-reconstruction. NUS is logically consistent with non-NUS:
 get the final spectrum first (reconstruct_nus or process), then optimisation. Usage: results =
 optimize_post_parameters(spectrum_array) print(format_results(results)) # Reuse smile_optimize
-form/Report save_report(results, Path("param_report.json"))."""
+form/Report save_report(results, Path("param_report.json")).
+"""
 
 from __future__ import annotations
 
@@ -33,7 +34,8 @@ __all__ = [
 
 def format_results(results: list[ParamResult]) -> str:
     """Render the candidate list as a parameter combination + scoring table
-    (p0/p1/baseline_order)."""
+    (p0/p1/baseline_order).
+    """
     header = (
         f"{'p0':>7} {'p1':>6} {'base':>5} "
         f"{'decision':>8} {'overall':>7} {'snr':>5} "
@@ -68,7 +70,8 @@ def default_post_grid(
 
 def apply_post_params(data: np.ndarray, params: dict[str, Any]) -> np.ndarray:
     """Apply phase correction + baseline correction in memory (along direct dimension = last
-    axis)."""
+    axis).
+    """
     axis = f"F{data.ndim}"
     out = phase.apply(
         data,

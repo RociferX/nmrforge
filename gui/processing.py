@@ -2,10 +2,12 @@
 G2B-002): ``import_data`` -> ``generate_fid`` -> ``generate_spectrum``, each step has
 independent buttons and states; - Manual: ``manual_fid_com`` / ``run_manual_fid_com`` /
 ``manual_scripts`` / ``run_manual_spectrum`` docking workflow/manual (fid.com and spectrum
-script)."""
+script).
+"""
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -15,9 +17,7 @@ from core.user_errors import describe_exception
 from gui.pipeline_state import record_step_success
 from ui_support.i18n import tr
 
-# The key file to determine "whether the subdirectory contains data file" (same origin as
-# pipeline_state input fingerprint).
-_DATA_KEY_FILES = ('acqus', 'acqu2s', 'acqu3s', 'ser', 'fid', 'nuslist')
+_DATA_KEY_FILES = ("acqus", "acqu2s", "acqu3s", "ser", "fid", "nuslist")
 
 
 def _segment_dirs(root: Path) -> list[Path]:
@@ -25,16 +25,16 @@ def _segment_dirs(root: Path) -> list[Path]:
     subdirectory containing acqus is recognized as the data segment; subdirectories that only
     have data files such as ser/fid but lack acqus, or have no files at all are ignored (0.2.198
     user rule) -- The selected total file folder does not have acqus at the top level, which is
-    a normal form of the container and should not be reported as missing."""
-    return sorted(
-        p for p in root.iterdir() if p.is_dir() and (p / "acqus").is_file()
-    )
+    a normal form of the container and should not be reported as missing.
+    """
+    return sorted(p for p in root.iterdir() if p.is_dir() and (p / "acqus").is_file())
 
 
 def is_segmented_container(path) -> bool:
     """Container directory determination: It is not a Bruker dataset (no acqus at the top level),
     but contains >= 2 segmented subdirectories with acqus directly (used for segmented
-    collection and import)."""
+    collection and import).
+    """
     try:
         root = Path(path)
         if not root.is_dir() or (root / "acqus").is_file():
@@ -45,22 +45,34 @@ def is_segmented_container(path) -> bool:
 
 
 def resolve_import_source(path) -> tuple[str, bool]:
-    """Parse the import source (2026-08-19 Task F: Ignore non-data sub-file folders). Return
-    (data_source, is_segmented): - It is a Bruker dataset (including acqus) -> (path, False); -
-    The container contains >= 2 data segments containing acqus directory -> (path, True), adopt
-    segmented collection and import; - Exactly 1 data segment containing acqus The data segment
-    (The rest of the non-data/lack acqus, ignored) -> (the subdirectory, False); - 0 -> throw
-    ImportWorkflowError."""
+    """Resolve a single-dataset import source.
+
+    An acqus-bearing directory is returned directly. Exactly one acqus-bearing child is accepted
+    while nondataset children are ignored. No valid child raises ImportWorkflowError.
+
+    Two or more dataset children are rejected with directions to explicit segmented or batch
+    import: do not silently combine independent datasets. The return signature remains
+    (data_source, is_segmented), but this function no longer returns True.
+    """
     from workflow.import_workflow import ImportWorkflowError
 
     root = Path(path)
-    if (root / 'acqus').is_file():
+    if (root / "acqus").is_file():
         return str(root), False
     if not root.is_dir():
         raise ImportWorkflowError(tr("directory does not exist: {p0}", p0=root))
     segments = _segment_dirs(root)
     if len(segments) >= 2:
-        return str(root), True
+        raise ImportWorkflowError(
+            tr(
+                "This directory holds {p0} data sets; single import only takes one data set. "
+                'Use "segmented data or repeated experiment overlay import" if these are parts '
+                "of one acquisition (complementary NUS / repeated experiment), or import the "
+                "subdirectories one by one if they are independent data sets: {p1}",
+                p0=len(segments),
+                p1=", ".join(sorted(p.name for p in segments)),
+            )
+        )
     if len(segments) == 1:
         return str(segments[0]), False
     data_subdirs = sorted(
@@ -69,9 +81,6 @@ def resolve_import_source(path) -> tuple[str, bool]:
         if p.is_dir() and any((p / name).is_file() for name in _DATA_KEY_FILES)
     )
     if data_subdirs:
-        # The subdirectory only has data files but lacks acqus: Ignore non-data file folders, but if
-        # they are all like this, they cannot be imported, and a clear prompt is given (do not
-        # regard the lack of acqus at the top level as a problem, 0.2.198).
         raise ImportWorkflowError(
             tr(
                 "The subdirectories of the selected directory contain data files but none of them "
@@ -93,37 +102,38 @@ def resolve_import_source(path) -> tuple[str, bool]:
 class ProcessingController:
     """GUI Layer processing control: three-step process (import_data -> generate_fid ->
     generate_spectrum) docking workflow/stepwise(contract v1.2 §8.3); artificial path docking
-    workflow/manual."""
+    workflow/manual.
+    """
 
     def __init__(self, manager: ProjectManager | None = None) -> None:
-        self._backend = None
+
+        self._backend_local = threading.local()
         self._manager = manager
 
     def set_manager(self, manager) -> None:
         """After the project object is replaced, the current ProjectManager is bound (for step-by-
-        step calling)."""
+        step calling).
+        """
         self._manager = manager
 
     def _backend_instance(self):
-        """Lazy creation of ProcessingBackend (configuration reading goes through
-        backend.config,0.2.164)."""
-        if self._backend is None:
+        """Create a backend lazily per thread to isolate mutable working-directory state."""
+        backend = getattr(self._backend_local, "instance", None)
+        if backend is None:
             from backend.config import load_config
             from backend.factory import create_backend
 
-            self._backend = create_backend(load_config())
-        return self._backend
-
+            backend = create_backend(load_config())
+            self._backend_local.instance = backend
+        return backend
 
     # ------------------------------------------------------------------
-    # Step-by-step processing (G2B-002 / Contract v1.2): Import sample data -> Generate FID ->
-    # Generate spectrum. The implementation is located in workflow/(import_workflow / stepwise +
-    # backend). This controller is responsible for wiring, status registration and parameter
-    # assembly.
+
     # ------------------------------------------------------------------
     def import_data(self, entry: ExperimentEntry, source: str, copy: bool = True) -> dict:
         """Step 1: Import sample data (read-only parameter + copy raw) and return ImportResult
-        dict."""
+        dict.
+        """
         from workflow.import_workflow import import_data
 
         if self._manager is None:
@@ -131,9 +141,7 @@ class ProcessingController:
         result = import_data(self._manager, entry.id, source, copy=copy)
         data_id = getattr(result, "data_id", "") or ""
         if data_id:
-            record_step_success(
-                self._manager, entry.id, data_id, "import", params={"copy": copy}
-            )
+            record_step_success(self._manager, entry.id, data_id, "import", params={"copy": copy})
         self._manager.save()
         return {
             "experiment_id": entry.id,
@@ -156,7 +164,8 @@ class ProcessingController:
         one sample data (backend segment by segment conversion + addNMR merge). exp_id is
         imported to the experiment type when it is not empty (consistent with ordinary single
         import), and when it is empty, the backend creates a new experiment (old behaviour);
-        clearly distinguished from batch import (multiple entries). Return ImportResult."""
+        clearly distinguished from batch import (multiple entries). Return ImportResult.
+        """
         from workflow.import_workflow import import_segmented_dataset
 
         self._require_manager()
@@ -170,7 +179,10 @@ class ProcessingController:
         )
 
     def batch_import(
-        self, exp_id: str, folders: list, group: bool = True,
+        self,
+        exp_id: str,
+        folders: list,
+        group: bool = True,
         on_progress: Callable[[str, str, bool, str], None] | None = None,
     ) -> dict:
         """Batch import multiple data directories to experiment type; group=True is classified into
@@ -178,16 +190,15 @@ class ProcessingController:
         multiple single imports, batch_id is empty); returns {"batch_id", "results": [{folder,
         data_id, ok, error}]}; failure of a single directory does not block the entire batch
         (error information is included in the result, 0.2.162-patch12). 0.2.164-patch1: The data
-        group is the only source, no more double-writing pipeline_state marks."""
+        group is the only source, no more double-writing pipeline_state marks.
+        """
         self._require_manager()
         if self._manager.project is None:
             raise RuntimeError(tr("The processing controller is not bound to a project yet"))
         entry = self._manager.project.experiment(exp_id)
         if entry is None:
             raise RuntimeError(tr("experiment type does not exist: {p0}", p0=exp_id))
-        # 0.2.163: Import the created data group in batches (schema 1.4, the group id is batch);
-        # 0.2.164-patch1: The data group is the only source, no more double-writing pipeline_state
-        # batch tag.
+
         batch = ""
         if group:
             batch = self._manager.create_data_group(exp_id).id
@@ -200,29 +211,20 @@ class ProcessingController:
                 "error": "",
             }
             _f = Path(str(folder))
-            # 0.2.199-patch29hd: Only 2D spectra are supported in batches -- Before importing 3D
-            # data, press raw directory to determine whether it contains acqu3s/acqu3 and skip it
-            # directly (not import) to avoid triggering SMILE (unstable host power outage) during
-            # batch processing; 2D data is imported according to the original process.
+
             if group and (
                 not (_f / "acqu2s").is_file()
                 or (_f / "acqu3s").is_file()
                 or (_f / "acqu3").is_file()
             ):
                 item["error"] = tr(
-                    "Non-2D spectrum, batch only supports 2D for now, has been "
-                    "skipped",
+                    "Non-2D spectrum, batch only supports 2D for now, has been skipped",
                 )
                 results.append(item)
                 if on_progress is not None:
                     on_progress(str(folder), "", False, item["error"])
                 continue
             try:
-                # 0.2.199-patch29gl: Batch import first verifies the existence of the original data
-                # file. If the file is missing, it will be directly marked as failure to avoid
-                # "failure only after watching the import"; Incomplete collection/More will not be
-                # intercepted here, and the generation steps of FID will be reversed based on the
-                # actual data.
                 _is_nd = (_f / "acqu2s").is_file() or (_f / "acqu3s").is_file()
                 _data_file = "ser" if _is_nd else "fid"
                 if not (_f / _data_file).is_file():
@@ -233,8 +235,7 @@ class ProcessingController:
                 if data_id and group:
                     self._manager.add_to_group(exp_id, batch, data_id)
                 item["ok"] = True
-            # A single failure does not block the entire batch.
-            except Exception as exc:  # noqa: BLE001 -
+            except Exception as exc:  # noqa: BLE001
                 item["error"] = describe_exception(exc)
             results.append(item)
             if on_progress is not None:
@@ -244,11 +245,11 @@ class ProcessingController:
                     bool(item.get("ok")),
                     item.get("error", ""),
                 )
-        # Remove empty groups when all failures occur to avoid remaining empty data group nodes.
+
         if group and not any(item.get("ok") for item in results):
             try:
                 self._manager.delete_data_group(exp_id, batch)
-            except Exception:  # noqa: BLE001 - Group deletion fails and is not blocked.
+            except Exception:  # noqa: BLE001
                 pass
         self._manager.save()
         return {"batch_id": batch if group else "", "results": results}
@@ -267,7 +268,8 @@ class ProcessingController:
         BATCH_STEPS subset (such as ["fid"] is only processed until FID is generated); when
         reference_data_id is not empty, take the valid parameters of the most recent successful
         spectrum run as the spectrum step parameter base; explicit params coverage refers to
-        parameter."""
+        parameter.
+        """
         from workflow.batch import run_batch
 
         self._require_manager()
@@ -289,10 +291,14 @@ class ProcessingController:
         exp_id: str | None = None,
         data_id: str | None = None,
         progress: Callable[[str], None] | None = None,
+        params: dict | None = None,
     ) -> str:
-        """Step 2: Generate FID(backend.convert_to_fid) and return the fid path. progress optional
-        callback: stage progress (G2B-006; forward the real stage log after the backend is
-        implemented)."""
+        """Generate FID through backend.convert_to_fid and return its path.
+
+        The optional progress callback forwards conversion-stage messages. params carries manual
+        segment_shift_hz values, with the first segment as reference; configured shifts are
+        applied when generating and running fid.com.
+        """
         import inspect
 
         from workflow.stepwise import generate_fid as stepwise_fid
@@ -306,10 +312,12 @@ class ProcessingController:
             if progress is not None:
                 progress(message)
 
-        emit(tr("bruker Converting(fid.com)"))
+        emit(tr("Preparing the Bruker conversion script"))
         kwargs: dict = {}
         if "progress" in inspect.signature(stepwise_fid).parameters:
             kwargs["progress"] = emit
+        if params and "params" in inspect.signature(stepwise_fid).parameters:
+            kwargs["params"] = dict(params)
         fid_path = stepwise_fid(
             self._manager,
             exp_id,
@@ -317,7 +325,7 @@ class ProcessingController:
             self._backend_instance(),
             **kwargs,
         )
-        emit(tr("Complete FID conversion"))
+        emit(tr("FID generation finished"))
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "fid")
             self._snapshot_step(
@@ -345,7 +353,8 @@ class ProcessingController:
         phase_route="unified"(default)/"none"(escape hatch). phase_optimize parameter Retained
         for compatibility callers only, no longer overlaying the old per-dimensional brute force
         optimisation (0.2.154 removed -- this branch used to make phase optimisation repeat
-        after the final SMILE). progress Optional callback: phase progress."""
+        after the final SMILE). progress Optional callback: phase progress.
+        """
         import inspect
 
         from workflow.stepwise import generate_spectrum as stepwise_spectrum
@@ -359,27 +368,25 @@ class ProcessingController:
             if progress is not None:
                 progress(message)
 
-        emit(tr("Read data and prepare for processing"))
+        emit(tr("Preparing spectrum generation"))
         linewidth_by_axis: dict[str, float] | None = None
         try:
             experiment = self._read_experiment(exp_id, data_id)
-            # 0.2.112: Software setting "line width" access (nuclide -> axis mapping, explicit
-            # params takes precedence).
+
             linewidth_by_axis = self._linewidth_by_axis(experiment)
             from core.data.internal_data_model import SamplingMode
 
             if experiment.sampling.mode is SamplingMode.NUS:
-                emit(tr("NUS Data: Start SMILE reconstruction (including direct dimension phase)"))
+                emit(tr("NUS data: starting SMILE reconstruction and phase optimisation"))
             else:
                 emit(
                     tr(
-                    "Uniform sampling: Start NMRPipe processing (including direct dimension "
-                    "phase)",
+                        "Uniformly sampled data: starting NMRPipe processing "
+                        "and phase optimisation",
+                    )
                 )
-                )
-        # Sampling information is not available for general prompts.
-        except Exception:  # noqa: BLE001 -
-            emit(tr("backend running (conversion / reconstruction / phase optimisation)"))
+        except Exception:  # noqa: BLE001
+            emit(tr("Starting reconstruction and phase optimisation"))
         params = dict(params or {})
         if linewidth_by_axis is not None and "linewidth_hz" not in params:
             params["linewidth_hz"] = linewidth_by_axis
@@ -395,27 +402,16 @@ class ProcessingController:
             self._backend_instance(),
             **kwargs,
         )
-        # 0.2.154: Generate spectrum, that is, unified automatic processing (0.2.146 removes the
-        # path drop-down, params has no phase_route, and the old branch once triggered the
-        # dimension-by-dimensional violent phase optimisation again, causing phase optimisation to
-        # run to the final SMILE and then be executed repeatedly) -- no post-phase optimisation will
-        # be superimposed.
+
         route = (params or {}).get("phase_route")
-        label = {"unified": tr(
-            "Unified automatic "
-            "processing",
-        ), "none": tr(
-            "None(escape "
-            "hatch)",
-        )}.get(
-            str(route), route or tr("Unified automatic processing")
-        )
-        emit(tr("Spectrum generation is completed, phase route: {p0}", p0=label))
+        label = {
+            "unified": tr("Automatic optimisation"),
+            "none": tr("Direct processing (automatic optimisation off)"),
+        }.get(str(route), route or tr("Automatic optimisation"))
+        emit(tr("Spectrum generation finished ({p0})", p0=label))
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "spectrum")
-            # Repair 24: Unify the use of STEP_RUN_REFS["spectrum"] (including
-            # phase_optimize_unified, originally only process/reconstruct_nus was recognized ->
-            # snapshots can never be matched under the unified route).
+
             self._snapshot_step(
                 exp_id,
                 data_id,
@@ -426,7 +422,7 @@ class ProcessingController:
         return spectrum_path
 
     # ------------------------------------------------------------------
-    # Peak Picking/Analysis (G2B-004).
+
     # ------------------------------------------------------------------
     def pick_peaks(
         self,
@@ -438,42 +434,41 @@ class ProcessingController:
         ref_nuclei: list[str] | None = None,
         tolerance_ppm: dict[str, float] | None = None,
         ref_name: str = "",
-        localization_method: str = "parabolic",
-        gaussian_roi_f1_ppm: float | None = None,
-        gaussian_roi_f2_ppm: float | None = None,
     ) -> dict:
-        """Peak picking: adjust workflow.pick_peaks, return {status, peak_path, peak_count, logs}.
-        ``localization_method``(2026-09-13): ``parabolic`` (default, existing behaviour) or
-        ``gaussian`` (2D Gaussian fit, 2D only); ROI is ppm physical width, read config
-        ``peaks.localization`` when ``None``."""
+        """Call workflow.pick_peaks and return status, peak path, count and logs.
+
+        Localization is fixed to three-point parabolic; Gaussian ROI and method selectors are
+        removed. PeakPickResult behaves like a dictionary, but str(result) produces the readable
+        step report rather than exposing internal detection/localization dictionaries in
+        completion logs.
+        """
         try:
             from workflow.pick_peaks import pick_peaks as backend_pick_peaks
-        except ImportError as exc:  # pragma: no cover - Backend Not yet landed.
+        except ImportError as exc:  # pragma: no cover
             raise NotImplementedError(
                 tr(
-                "Peak picking (workflow.pick_peaks) is to be implemented by "
-                "Backend",
-            )
+                    "Peak picking (workflow.pick_peaks) is to be implemented by Backend",
+                )
             ) from exc
         if self._manager is None:
             raise RuntimeError(tr("The processing controller is not bound to a project yet"))
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
         result = backend_pick_peaks(
-            self._manager, exp_id, data_id, sigma_multiplier=sigma_multiplier,
-            ref_peaks=ref_peaks, ref_nuclei=ref_nuclei,
+            self._manager,
+            exp_id,
+            data_id,
+            sigma_multiplier=sigma_multiplier,
+            ref_peaks=ref_peaks,
+            ref_nuclei=ref_nuclei,
             tolerance_ppm=tolerance_ppm,
             ref_name=ref_name,
-            localization_method=localization_method,
-            gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
-            gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
         )
         if data_id and result.get("status") == "success":
             record_step_success(self._manager, exp_id, data_id, "peaks")
         self._manager.save()
         return result
 
-    # Artificial path (workflow/manual wiring).
     # ------------------------------------------------------------------
     def manual_fid_com(self, data, exp_id: str | None = None, data_id: str | None = None) -> str:
         """Get/generate fid.com Content (for viewing and modification)."""
@@ -482,9 +477,7 @@ class ProcessingController:
         self._require_manager()
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
-        return backend_manual_fid_com(
-            self._manager, exp_id, data_id, self._backend_instance()
-        )
+        return backend_manual_fid_com(self._manager, exp_id, data_id, self._backend_instance())
 
     def run_manual_fid_com(
         self,
@@ -510,9 +503,7 @@ class ProcessingController:
         )
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "fid")
-            self._snapshot_step(
-                exp_id, data_id, ("manual_fid",), {"fid.com": content}
-            )
+            self._snapshot_step(exp_id, data_id, ("manual_fid",), {"fid.com": content})
         self._manager.save()
         return result
 
@@ -529,9 +520,7 @@ class ProcessingController:
         self._require_manager()
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
-        return backend_manual_scripts(
-            self._manager, exp_id, data_id, params=params
-        )
+        return backend_manual_scripts(self._manager, exp_id, data_id, params=params)
 
     def run_manual_spectrum(
         self,
@@ -540,6 +529,7 @@ class ProcessingController:
         exp_id: str | None = None,
         data_id: str | None = None,
         progress: Callable[[str], None] | None = None,
+        script_baselines: dict[str, str] | None = None,
     ) -> str:
         """Run spectrum script (consume converted fid)."""
         from workflow.manual import run_manual_spectrum as backend_run_spectrum
@@ -548,15 +538,55 @@ class ProcessingController:
         exp_id = exp_id or getattr(data, "exp_id", "")
         data_id = data_id or getattr(data, "id", "")
         result = backend_run_spectrum(
-            self._manager, exp_id, data_id, scripts, progress=progress
+            self._manager,
+            exp_id,
+            data_id,
+            scripts,
+            progress=progress,
+            script_baselines=script_baselines,
         )
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "spectrum")
-            self._snapshot_step(
-                exp_id, data_id, MANUAL_SPECTRUM_RUN_REFS, scripts
-            )
+            self._snapshot_step(exp_id, data_id, MANUAL_SPECTRUM_RUN_REFS, scripts)
         self._manager.save()
         return result
+
+    def regenerate_3d_projections(
+        self,
+        exp_id: str,
+        data_id: str,
+        *,
+        progress: Callable[[str], None] | None = None,
+    ) -> dict[str, str]:
+        """Regenerate three 2D projections from the current final 3D spectrum.
+
+        Final-script reruns do not pass through the original projection stage, so this refresh
+        prevents stale projections after axis flips or range edits. Return a projection path
+        mapping, {} for unsupported/non-3D/missing final spectra, or {'error': ...} on
+        projection failure without raising.
+        """
+        from workflow.stepwise import generate_3d_projections, read_experiment
+
+        self._require_manager()
+        record = self._manager.data(exp_id, data_id)
+        spectrum_path = str(getattr(record, "spectrum_path", "") or "")
+        if not spectrum_path or not Path(spectrum_path).is_file():
+            return {}
+        try:
+            experiment = read_experiment(self._manager, exp_id, data_id)
+        except Exception:  # noqa: BLE001
+            return {}
+        if int(getattr(experiment, "ndim", 0) or 0) < 3:
+            return {}
+        return generate_3d_projections(
+            self._manager,
+            exp_id,
+            data_id,
+            experiment,
+            Path(spectrum_path),
+            self._backend_instance(),
+            progress=progress,
+        )
 
     def save_peaks_manual(
         self,
@@ -568,7 +598,8 @@ class ProcessingController:
         nuclei: list[str] | None = None,
     ) -> str:
         """Save artificial peak table: write Poky.list (peak table file, i.e. list) and register to
-        run."""
+        run.
+        """
         from gui.peaks_io import export_peaks_poky
 
         self._require_manager()
@@ -578,16 +609,15 @@ class ProcessingController:
         peaks_dir = self._manager.data_dir(exp_id, data_id, "peaks")
         peaks_dir.mkdir(parents=True, exist_ok=True)
         target_path = peaks_dir / f"{exp_id}-{data_id}.list"
-        # Manual addition and deletion/move/Importing Summit makes the row order and coordinates of
-        # automatic positioning attachments invalid.. Delete the derived diagnosis first, and then
-        # overwrite the main peak table; if the attachment is occupied and cannot be deleted, it
-        # will be aborted to avoid leaving false matches.
+
         from core.peaks.localize import localization_records_path
 
         localization_records_path(target_path).unlink(missing_ok=True)
         list_path = export_peaks_poky(
-            target_path, peaks,
-            ndim=ndim, nuclei=nuclei,
+            target_path,
+            peaks,
+            ndim=ndim,
+            nuclei=nuclei,
         )
         if data_id:
             record_step_success(self._manager, exp_id, data_id, "peaks")
@@ -599,7 +629,9 @@ class ProcessingController:
         )
         try:
             self._manager.finish_run(
-                run.run_id, "success", outputs={"peaks": str(list_path)},
+                run.run_id,
+                "success",
+                outputs={"peaks": str(list_path)},
                 message=tr("Manual peak table editing ({p0} peak)", p0=len(peaks)),
             )
         except Exception:  # noqa: BLE001
@@ -612,10 +644,11 @@ class ProcessingController:
         gate (such as Pipeline's SMILE/Peak steps visible and hidden, direct dimension range
         gear) originally adjusted private _read_experiment and cached separately, and the
         caliber is easy to fork; it is taken from here. If the reading fails, an empty dict is
-        returned, and the caller downgrades by default."""
+        returned, and the caller downgrades by default.
+        """
         try:
             experiment = self._read_experiment(exp_id, data_id)
-        except Exception:  # noqa: BLE001 - Read failure is downgraded by the caller.
+        except Exception:  # noqa: BLE001
             return {}
         from core.data.internal_data_model import SamplingMode
 
@@ -631,7 +664,8 @@ class ProcessingController:
 
     def _read_experiment(self, exp_id: str, data_id: str):
         """Read data corresponding to Experiment (reuse workflow.stepwise unified implementation,
-        0.2.164)."""
+        0.2.164).
+        """
         from workflow.stepwise import _read_experiment as _read
 
         return _read(self._manager, exp_id, data_id)
@@ -640,7 +674,8 @@ class ProcessingController:
         """The software sets "linewidth" (nuclide -> Hz) -> axis mapping (generates spectrum
         params, 0.2.112). The backend params["linewidth_hz"] takes the value according to the
         axis (logical_axis); nuclides not configured in the settings are set to 0, and the
-        backend falls back to the nuclide default table."""
+        backend falls back to the nuclide default table.
+        """
         from gui.settings import load_settings
 
         settings = load_settings()
@@ -658,16 +693,12 @@ class ProcessingController:
         return mapping
 
     def _last_spectrum_params(self, exp_id: str, data_id: str) -> dict:
-        """The latest successfully generated spectrum running parameter (as SMILE optimisation base
-        parameter). 0.2.199-patch29hz-Xiu18(user): Originally only `process`/`reconstruct_nus`
-        was recognized, and the normal unified route was registered as `phase_optimize_unified`
-        (the artificial path is manual_process/manual_nus) -- So the base parameter of SMILE
-        optimisation is always empty**, and the template returns to the default window / phase /
-        baseline: neither equals The final script (violating "use the final script as the
-        template and only change the SMILE parameter") will estimate the memory according to the
-        default wide window and falsely report "insufficient memory". Change to reuse
-        `gui.pipeline_state.STEP_RUN_REFS["spectrum"]` (single source), data_id strict
-        attribution (same caliber as repair 1)."""
+        """Return parameters of the most recent successful spectrum run as SMILE's base parameters.
+
+        Use STEP_RUN_REFS['spectrum'] as the shared source, including unified and manual
+        processing routes, and enforce data_id ownership. Falling back to unrelated/default
+        parameters would alter the final-script template and memory estimates.
+        """
         from core.project.run_refs import STEP_RUN_REFS
 
         refs = STEP_RUN_REFS.get("spectrum", ())
@@ -698,7 +729,8 @@ class ProcessingController:
         indicator immediately -> delete the spectrum (the candidate spectrum only exists in the
         memory disk temporarily). Finally, write the parameter combination sorting table + the
         top three scripts, **do not replace the active spectrum** (Option B; to use the optimal
-        parameter to generate the spectrum, please click "Rerun according to Rank1")."""
+        parameter to generate the spectrum, please click "Rerun according to Rank1").
+        """
         from backend import memory_disk
         from core.data.internal_data_model import SamplingMode
         from workflow.smile_optimize import (
@@ -713,20 +745,18 @@ class ProcessingController:
         if experiment.sampling.mode is not SamplingMode.NUS:
             raise RuntimeError(
                 tr(
-                "SMILE optimisation only works on NUS data (currently uniformly "
-                "sampled)",
-            )
+                    "SMILE optimisation only works on NUS data (currently uniformly sampled)",
+                )
             )
         if int(getattr(experiment, "ndim", 2) or 2) != 2:
-            # 0.2.199-patch29hz-Xiu21(user): The SMILE optimisation of 3D NUS is not ideal for the
-            # time being, and the entrance is hidden.
             raise RuntimeError(
                 tr(
-                "SMILE optimisation currently only supports 2D NUS (3D NUS is not available "
-                "yet)",
-            )
+                    "SMILE optimisation currently only supports 2D NUS (3D NUS is not available "
+                    "yet)",
+                )
             )
         base_params = self._last_spectrum_params(exp_id, data_id)
+
         def _smile_progress(index: int, total: int, msg: str) -> None:
             if progress is not None:
                 progress(msg)
@@ -736,25 +766,26 @@ class ProcessingController:
                 from gui.per_data_records import load_ui_state
 
                 grid_size = int(
-                    (load_ui_state(self._manager, exp_id, data_id).get("smile") or {})
-                    .get("grid_size", 4)
+                    (load_ui_state(self._manager, exp_id, data_id).get("smile") or {}).get(
+                        "grid_size", 4
+                    )
                 )
-            except Exception:  # noqa: BLE001 - Can't read, use default.
+            except Exception:  # noqa: BLE001
                 grid_size = 4
         if rank_mode is None:
             try:
                 from gui.per_data_records import load_ui_state
 
                 rank_mode = str(
-                    (load_ui_state(self._manager, exp_id, data_id).get("smile") or {})
-                    .get("rank_mode", "true_peaks")
+                    (load_ui_state(self._manager, exp_id, data_id).get("smile") or {}).get(
+                        "rank_mode", "true_peaks"
+                    )
                 )
-            except Exception:  # noqa: BLE001 - Can't read, use default.
+            except Exception:  # noqa: BLE001
                 rank_mode = "true_peaks"
         work = self._manager.data_dir(exp_id, data_id, "process")
         work.mkdir(parents=True, exist_ok=True)
-        # Candidate spectrum will be deleted immediately after evaluation: the intermediate
-        # directory will be placed on the memory disk first.
+
         intermediate_root, memory_dir = memory_disk.prepare_intermediate(
             work, experiment, params=base_params
         )
@@ -773,11 +804,8 @@ class ProcessingController:
             memory_disk.teardown_intermediate(work, memory_dir)
         rows = list(result["rows"])
         top = rows[:3]
-        paths = write_smile_scan_output(
-            self._manager, exp_id, data_id, rows, result["scripts"]
-        )
-        # Plan B (user 2026-09-10): Do not replace the activity spectrum, only produce the sorting
-        # table + the top three scripts.
+        paths = write_smile_scan_output(self._manager, exp_id, data_id, rows, result["scripts"])
+
         run = self._manager.start_run(
             exp_id,
             workflow_ref="smile_optimize",
@@ -791,8 +819,7 @@ class ProcessingController:
             message=tr("SMILE parameter scan: ")
             + ", ".join(
                 tr(
-                    "Rank{p0} nSigma={p1:g}/thresh={p2:g}(stable peaks "
-                    "{p3})",
+                    "Rank{p0} nSigma={p1:g}/thresh={p2:g}(stable peaks {p3})",
                     p0=r["rank"],
                     p1=r["nsigma"],
                     p2=r["thresh"],
@@ -817,15 +844,11 @@ class ProcessingController:
             )
             for r in top
         )
-        return (
-            tr(
-                "{p0} Group scan completed (delete after candidate spectrum has been "
-                "evaluated);{p1}; ranking table "
-                "{p2}",
-                p0=result['n_combos'],
-                p1=summary,
-                p2=paths['csv'],
-            )
+        return tr(
+            "SMILE compared {p0} parameter combinations. Top candidates: {p1}. Ranking table: {p2}",
+            p0=result["n_combos"],
+            p1=summary,
+            p2=paths["csv"],
         )
 
     def rerun_smile_rank1(
@@ -860,11 +883,7 @@ class ProcessingController:
         try:
             payload = json.loads(ranking_path.read_text(encoding="utf-8"))
             rank_params = next(
-                (
-                    dict(row)
-                    for row in payload.get("rows", [])
-                    if int(row.get("rank", 0) or 0) == 1
-                ),
+                (dict(row) for row in payload.get("rows", []) if int(row.get("rank", 0) or 0) == 1),
                 {},
             )
         except (OSError, ValueError, TypeError):
@@ -891,19 +910,12 @@ class ProcessingController:
             )
             if progress is not None:
                 progress(tr("Press Rank1 to rerun the script: {p0}", p0=script.name))
-            run_result = CshRuntime().run(
-                ["csh", script.name], cwd=str(proc), timeout=7200.0
-            )
+            run_result = CshRuntime().run(["csh", script.name], cwd=str(proc), timeout=7200.0)
             produced = proc / f"{data_id}.{ext}"
-            if (
-                run_result.returncode != 0
-                or not produced.is_file()
-                or produced.stat().st_size == 0
-            ):
+            if run_result.returncode != 0 or not produced.is_file() or produced.stat().st_size == 0:
                 raise RuntimeError(
                     tr(
-                        "Rank1 rerun failed (rc={p0}), not generated "
-                        "{p1}",
+                        "Rank1 rerun failed (rc={p0}), not generated {p1}",
                         p0=run_result.returncode,
                         p1=produced.name,
                     )
@@ -929,17 +941,15 @@ class ProcessingController:
                     str(target), optimization_logs=logs, progress=progress
                 )
                 if quality_lines:
-                    write_quality_record(
-                        str(target), run_params, "\n".join(quality_lines)
-                    )
-            # Cache failure is not revoked and is valid final spectrum.
-            except Exception as exc:  # noqa: BLE001 - QC
+                    write_quality_record(str(target), run_params, "\n".join(quality_lines))
+            except Exception as exc:  # noqa: BLE001
                 if progress is not None:
-                    progress(tr(
-                        "Rank1 quality record generation failed and has been skipped: "
-                        "{p0}",
-                        p0=exc,
-                    ))
+                    progress(
+                        tr(
+                            "Rank1 quality record generation failed and has been skipped: {p0}",
+                            p0=exc,
+                        )
+                    )
 
             outputs = {"spectrum_path": str(target)}
             if ucsf_path:
@@ -950,12 +960,10 @@ class ProcessingController:
                 run.run_id,
                 "success",
                 outputs=outputs,
-                message=(
-                    tr(
+                message=tr(
                     "Press Rank1 (SMILE to scan the optimal parameters) and rerun the final "
                     "spectrum and refresh the companion "
                     "products",
-                )
                 ),
             )
             record_step_success(self._manager, exp_id, data_id, "spectrum")
@@ -969,10 +977,8 @@ class ProcessingController:
                 self._manager.save()
             raise
 
-
     # ------------------------------------------------------------------
-    # Script snapshot (GUI wiring): after the step is successful, write the executed script /
-    # parameter into WorkflowRun.
+
     # ------------------------------------------------------------------
     def _snapshot_step(
         self,
@@ -985,7 +991,8 @@ class ProcessingController:
         Return to the snapshot directory (an empty string indicates no matching run or has been
         snapshotted). The back-end step only registers the run and does not drop the script; GUI
         Here, write the actual executed fid.com/process.com/nus*.com and parameter into
-        run.snapshot_dir to ensure reproducibility (Contract §2)."""
+        run.snapshot_dir to ensure reproducibility (Contract §2).
+        """
         if self._manager is None or self._manager.project is None:
             return ""
         run = None
@@ -1006,7 +1013,7 @@ class ProcessingController:
                 run.run_id, dict(scripts or {}), params=dict(run.params or {})
             )
             return str(snapshot)
-        except Exception:  # noqa: BLE001 - Snapshot failure does not block processing.
+        except Exception:  # noqa: BLE001
             return ""
 
     def _fid_com_script(self, exp_id: str, data_id: str) -> dict[str, str]:
@@ -1017,30 +1024,22 @@ class ProcessingController:
             entry = self._manager.data(exp_id, data_id)
         except Exception:  # noqa: BLE001
             return {}
-        raw = (
-            Path(entry.raw_dir)
-            if getattr(entry, "raw_dir", "")
-            else Path(entry.source)
-        )
+        raw = Path(entry.raw_dir) if getattr(entry, "raw_dir", "") else Path(entry.source)
         if not raw.is_absolute():
             raw = self._manager.root / raw
         if not raw.is_dir():
-            # Schema 1.3 data level raw directory fallback (when registration is missing).
             raw = self._manager.data_dir(exp_id, data_id, "raw")
         fid_com = self._manager.data_dir(exp_id, data_id, "process") / "fid.com"
         if not fid_com.is_file():
             fid_com = raw / "fid.com"
         if fid_com.is_file():
-            return {
-                "fid.com": fid_com.read_text(
-                    encoding="utf-8", errors="replace"
-                )
-            }
+            return {"fid.com": fid_com.read_text(encoding="utf-8", errors="replace")}
         return {}
 
     def _spectrum_scripts(self, exp_id: str, data_id: str) -> dict[str, str]:
         """Read the spectrum script (process.com/nus*.com, excluding fid.com) under the process
-        directory."""
+        directory.
+        """
         scripts: dict[str, str] = {}
         if self._manager is None:
             return scripts
@@ -1051,11 +1050,8 @@ class ProcessingController:
             return scripts
         for path in paths:
             if path.name != "fid.com":
-                scripts[path.name] = path.read_text(
-                    encoding="utf-8", errors="replace"
-                )
+                scripts[path.name] = path.read_text(encoding="utf-8", errors="replace")
         return scripts
-
 
     def _require_manager(self) -> None:
         if self._manager is None:

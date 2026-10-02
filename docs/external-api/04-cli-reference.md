@@ -30,25 +30,22 @@ reference. The source is recorded in `reference.json.direct_range.source` (`expl
 Output: the frozen spectrum and the reference script path with SHA-256, the phase source, the sampling method, and
 whether this condition supports parameter combinations.
 
-`--rebuild-peak-tables` recomputes only the two reference peak tables from the existing frozen
+`--rebuild-peak-tables` recomputes only the parabolic reference peak table from the existing frozen
 spectrum and `reference.list` (the spectrum and the peak identities are untouched and their
 SHA-256 values are re-checked), and it **refreshes `software_version` / `software_commit` in the
 record plus the study-level aggregate `records/reference.json`** (fixed 2026-09-19: an upgraded
 study root used to keep claiming the old version with an empty commit, and the aggregate kept a
 stale peak-table SHA).
 
-## Peaks -- reference peak table (identity + two unified peak tables)
+## Peaks -- reference peak table (identity + parabolic localisation table)
 
 ```bash
 python -m nmrforge_api peaks --study ~/studies/s1
 python -m nmrforge_api peaks --study ~/studies/s1 --sigma 25 --max-peaks 60
 python -m nmrforge_api peaks --study ~/studies/s1 --peak-table external.list
-python -m nmrforge_api peaks --study ~/studies/s1 --localization gaussian \
-    --gaussian-roi-f1-ppm 1.5 --gaussian-roi-f2-ppm 0.25
 ```
 
-The main condition automatically selects peaks (or registers an external peak table) to create `reference.list`; other conditions share the same peak identity;
-Then write two reference peak tables. Output peak table path/Hash/source/Number of peaks + summary and positioning of the two tables QC.
+The main condition automatically selects peaks (or registers an external peak table) to create `reference.list`; other conditions share that identity table. The command writes one `reference_peak_table_parabolic.csv` and reports its path, hash, source, peak count and localisation QC.
 
 `--sigma N` is the **peak selection threshold** (noise σ multiple, default 35σ): when the reference peak table** has not been generated**.
 Specify = Select a threshold when generating a reference; specifying a different threshold after the reference has been frozen will be rejected (exit code 2.
@@ -65,13 +62,10 @@ python -m nmrforge_api sweep --study ~/studies/s1 \
     --reference ~/studies/s1#B --grid grid.yaml
 python -m nmrforge_api sweep --study ~/studies/s1 \
     --reference ~/studies/s1/study/reference/exp_001_d_001/reference.json \
-    --combos design.csv --localization both --no-resume
-python -m nmrforge_api sweep --study ~/studies/s1 \
-    --reference ~/studies/s1 --combos design.csv \
-    --localization gaussian --localize-peaks truth_peaks.csv
+    --combos design.csv --localization parabolic --no-resume
 ```
 
-Reference mode = `reference`(reference spectrum/script) + `peaks`(two reference peak tables) two commands; when the reference does not exist, `sweep` will report an error and prompt to run these two commands first.
+Reference mode uses `reference` to build the spectrum/script and `peaks` to create the reference peak table. If no reference exists, `sweep` reports an error and prompts you to run these commands first.
 
 | Option | Meaning |
 | --- | --- |
@@ -82,17 +76,14 @@ Reference mode = `reference`(reference spectrum/script) + `peaks`(two reference 
 | `--allow-ext-override` | Allow this batch's `--direct-range` to disagree with the frozen reference range (every run then carries the `direct_range_override` warning code); without it a disagreement raises instead of changing the window silently |
 | `--max-runs` | Maximum number of combinations (default 256) |
 | `--localize-peaks` | **Targeted localization**: refine only the peaks in a CSV (at least a `peak_id` column); detection, row count and `peak_id` numbering are unchanged and unlisted peaks stay (position from the detection-stage parabola); default = the whole spectrum. The CSV may carry a `condition` column (**multi-condition studies**: each condition reads only its own rows, a missing row is an error; one file can serve A and B) |
-| `--localize-peaks-gaussian` / `--localize-peaks-parabolic` | **Per-method** targeting (overrides `--localize-peaks`): typical use is parabolic for the whole spectrum plus Gaussian only on the truth peaks; the `condition` column works here too |
-| `--localization` | Peak position refinement method: `parabolic` (default)/ `gaussian` (only 2D)/ `both` (both tables appear) |
-| `--edge-margin-ppm` | Peak selection excludes the physical width of the edge axis peak (ppm; default 3 x nuclide line width of this axis) |
-| `--gaussian-roi-f1-ppm` / `--gaussian-roi-f2-ppm` | Gaussian ROI Physical Radius (ppm) |
+| `--localization` | Localisation method; currently only `parabolic` is supported |
+| `--edge-margin-ppm` | Optional manual edge-exclusion margin in ppm. By default, experiment/acquisition priors and spectrum evidence determine whether axial-edge screening applies; no unconditional band is excluded |
 | `--no-resume` | Do not skip completed workflow |
 
 `--combos` and `--grid` must and can only be given one. Each combination = one `workflow_id`.
 (`W0001`…); Run processing on all conditions, and then use the reference lock threshold to independently select peaks on the own spectrum of the combination.
-Press `--localization` to output the peak table (parabolic default; `both` to output two) + complete log + parameter three layers.
-+ Version.Threshold key(`sigma_multiplier`/`min_snr`/`threshold_sigma`/.
-`detection.sigma_multiplier`) will directly report an error when written into the combination table (the threshold is locked at the reference).
+`--localization` uses the three-point parabolic method and outputs one peak table plus the complete log, the three parameter layers and version information. Threshold keys (`sigma_multiplier`/`min_snr`/`threshold_sigma`/.
+`detection.sigma_multiplier`) will report an error if written into the combination table (the threshold is locked at the reference).
 A `--direct-range` that disagrees with the frozen reference range **raises** (exit code 2) by default: the
 reference spectrum is not rebuilt while peak positions and the peak set follow the window. Pass
 `--allow-ext-override` to confirm the override; every run then carries `direct_range_override` in `warnings`

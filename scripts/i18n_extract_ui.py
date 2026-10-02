@@ -160,9 +160,7 @@ def write_snapshot() -> int:
     data = collect()
     keys = data["keys"]
     converted = sorted(
-        rel
-        for rel, n in data["raw_by_file"].items()
-        if n == 0 and data["tr_by_file"].get(rel)
+        rel for rel, n in data["raw_by_file"].items() if n == 0 and data["tr_by_file"].get(rel)
     )
     zh = load_json(ZH_PATH, {})
     covered = sum(1 for key in keys if str(zh.get(key, "")).strip())

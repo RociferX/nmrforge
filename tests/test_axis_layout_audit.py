@@ -1,6 +1,6 @@
 """Phase-optimisation dimension mapping audit regressions (0.2.199-patch29).
 
-Measured baseline (sampleB + manually sliced sampleJ):
+Measured baseline (sampleB + manually sliced data/101):
 - NMRPipe single-file 3D output layout = (F2, F1, F3), 2D = (F1, F2);
 - baseline optimisation reads the output-layout spectrum file, so it must use file_axis_index
   (the old code used the internal-convention axis_index, which swaps F1/F2 in 3D and picked
@@ -127,7 +127,7 @@ def test_axis_sw_matches_header_label(tmp_path: Path) -> None:
 def _write_2d_recon(path: Path, data: np.ndarray) -> None:
     """Write a real 2D recon.ft1 layout file (F2 frequency, F1 time complex on the last axis).
 
-    Matches the VM measurement (recon.ft1 produced from sampleF): FDF2QUADFLAG=1,
+    Matches the VM measurement (recon.ft1 produced from data/3): FDF2QUADFLAG=1,
     FDTRANSPOSED=1, FDQUADFLAG=0, stored real as (F2, 2xF1) (real block + imaginary block),
     which nmrglue reads back as (F2, F1) complex.
     """
@@ -210,9 +210,7 @@ def test_load_recon_planes_3d_raw_and_count(tmp_path: Path) -> None:
                 "FDF3SW": 11312.22,
             }
         )
-        ng.pipe.write(
-            str(plane_dir / f"test{i:04d}.ft1"), dic, arr, overwrite=True
-        )
+        ng.pipe.write(str(plane_dir / f"test{i:04d}.ft1"), dic, arr, overwrite=True)
     loaded, dic = _load_recon_planes(work, _exp_3d())
     assert loaded is not None
     assert loaded.shape == (n0, n1, 4), loaded.shape  # only 4 read, no unpacking

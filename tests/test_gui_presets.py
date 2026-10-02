@@ -15,9 +15,7 @@ PRESETS_DIR = resource_path("presets")
 def _presets() -> list[tuple[str, dict]]:
     items: list[tuple[str, dict]] = []
     for path in sorted(PRESETS_DIR.glob("*.yaml")):
-        items.append(
-            (path.name, yaml.safe_load(path.read_text(encoding="utf-8")))
-        )
+        items.append((path.name, yaml.safe_load(path.read_text(encoding="utf-8"))))
     return items
 
 

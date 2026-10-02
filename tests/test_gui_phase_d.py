@@ -31,9 +31,7 @@ class _TempWorkspace:
 
     def list_projects(self):
         return sorted(
-            p
-            for p in self.root.iterdir()
-            if p.is_dir() and (p / "project.json").is_file()
+            p for p in self.root.iterdir() if p.is_dir() and (p / "project.json").is_file()
         )
 
     def create_project(self, name: str, **kwargs):
@@ -45,9 +43,7 @@ class _FakeController:
         pass
 
 
-def test_tree_incremental_refresh_preserves_nodes(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_tree_incremental_refresh_preserves_nodes(tmp_path: Path, qapp: QApplication) -> None:
     from gui.project_tree import ProjectTreePanel
 
     ws = tmp_path / "ws"
@@ -73,9 +69,7 @@ def test_tree_incremental_refresh_preserves_nodes(
     panel.close()
 
 
-def test_tree_folder_children_preserved_when_unchanged(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_tree_folder_children_preserved_when_unchanged(tmp_path: Path, qapp: QApplication) -> None:
     from gui.project_tree import ProjectTreePanel
 
     ws = tmp_path / "ws"
@@ -94,28 +88,19 @@ def test_tree_folder_children_preserved_when_unchanged(
     before = [folder_item.child(i) for i in range(folder_item.childCount())]
     assert any(c.text(0) == "acqus" for c in before)
     panel.refresh()
-    folder_item2 = (
-        panel.tree.topLevelItem(0).child(0).child(0).child(0).child(0)
-    )
+    folder_item2 = panel.tree.topLevelItem(0).child(0).child(0).child(0).child(0)
     after = [folder_item2.child(i) for i in range(folder_item2.childCount())]
     assert after == before  # Unchanged: file child nodes were not rebuilt.
     # Directory change -> refresh the file child nodes.
     (raw / "ser").write_text("y")
     panel.refresh()
-    folder_item3 = (
-        panel.tree.topLevelItem(0).child(0).child(0).child(0).child(0)
-    )
-    names = [
-        folder_item3.child(i).text(0)
-        for i in range(folder_item3.childCount())
-    ]
+    folder_item3 = panel.tree.topLevelItem(0).child(0).child(0).child(0).child(0)
+    names = [folder_item3.child(i).text(0) for i in range(folder_item3.childCount())]
     assert "ser" in names
     panel.close()
 
 
-def test_first_import_hint_highlights_next_step(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_first_import_hint_highlights_next_step(tmp_path: Path, qapp: QApplication) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("HSQC")
     manager.import_data(entry.id, "/fake/1")
@@ -151,9 +136,7 @@ def test_first_import_hint_only_once(
     manager = ProjectManager.create_project(ws / "proj", "demo")
     manager.create_experiment("HSQC")
     manager.save()
-    monkeypatch.setattr(
-        "gui.main_window.WorkspaceManager", lambda: _TempWorkspace(ws)
-    )
+    monkeypatch.setattr("gui.main_window.WorkspaceManager", lambda: _TempWorkspace(ws))
     monkeypatch.setattr(
         "core.workspace.WorkspaceManager",
         lambda *a, **k: _TempWorkspace(ws),

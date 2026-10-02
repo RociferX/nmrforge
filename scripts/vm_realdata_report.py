@@ -132,7 +132,6 @@ def _slice_along(data: np.ndarray, index: tuple[int, ...], axis: int) -> np.ndar
     return data[tuple(slicer)]
 
 
-
 def _spec_from_axes(spectrum) -> dict:
     """``SpectrumAxes`` -> this script's internal shape (modulus data, nucleus -> axis)."""
     data = np.abs(np.asarray(spectrum.data, dtype=float))
@@ -307,7 +306,6 @@ def _main_peak(spec: dict) -> dict:
     return out
 
 
-
 def compare_with_manual(software: Path, manual: Path) -> dict:
     """Automatic vs manual spectrum: pick at the default threshold, match the peak tables.
 
@@ -422,14 +420,11 @@ def _peak_metrics(spectrum: Path) -> dict:
         ],
     }
     positions: dict[str, list[float]] = {}
-    for method in ("parabolic", "gaussian"):
-        if method == "gaussian" and ndim != 2:
-            metrics["gaussian_skipped"] = f"the 2D Gaussian fit does not apply to {ndim}D spectra"
-            continue
-        kwargs = {"ppm_axes": axes_ppm} if method == "gaussian" else {}
+
+    for method in ("parabolic",):
         try:
-            result = localize_peak(data, index, method=method, **kwargs)
-        except Exception as exc:  # noqa: BLE001 - a failure must be recorded, not hidden
+            result = localize_peak(data, index)
+        except Exception as exc:  # noqa: BLE001 - 失败要如实记录,不掩盖
             metrics[f"{method}_error"] = f"{type(exc).__name__}: {exc}"
             continue
         positions[method] = [
@@ -440,13 +435,10 @@ def _peak_metrics(spectrum: Path) -> dict:
         metrics[f"{method}_actual"] = str(result.actual_method)
         if getattr(result, "reason", ""):
             metrics[f"{method}_reason"] = str(result.reason)
-    if len(positions) == 2:
-        metrics["parabolic_vs_gaussian_delta_ppm"] = max(
-            abs(positions["parabolic"][axis] - positions["gaussian"][axis])
-            for axis in range(ndim)
-        )
     metrics["_positions"] = positions
     return metrics
+
+
 def run_once(dataset: Path, root: Path, index: int) -> dict:
     from backend.nmrpipe_backend import NMRPipeBackend
     from core.project import ProjectManager
@@ -506,7 +498,7 @@ def aggregate(runs: list[dict]) -> dict:
         values = [run[key] for run in runs if key in run]
         summary[f"{key}_median"] = round(float(np.median(values)), 3) if values else None
 
-    for method in ("parabolic", "gaussian"):
+    for method in ("parabolic",):
         seen = [
             run["peak"]["_positions"][method]
             for run in runs
@@ -537,6 +529,7 @@ def aggregate(runs: list[dict]) -> dict:
         for run in runs
         if run.get("peak", {}).get("parabolic_vs_gaussian_delta_ppm") is not None
     ]
+
     summary["parabolic_vs_gaussian_delta_ppm_median"] = (
         round(float(np.median(method_deltas)), 9) if method_deltas else None
     )
@@ -545,9 +538,7 @@ def aggregate(runs: list[dict]) -> dict:
     )
 
     series = [
-        list(values)
-        for values in (run.get("peak", {}).get("fwhm_ppm") for run in runs)
-        if values
+        list(values) for values in (run.get("peak", {}).get("fwhm_ppm") for run in runs) if values
     ]
     width = max((len(values) for values in series), default=0)
     summary["fwhm_ppm_median"] = [
@@ -621,9 +612,7 @@ def main(argv: list[str] | None = None) -> int:
         runs = [run_once(dataset, root, index) for index in range(args.repeats)]
         payload["aggregate"] = aggregate(runs)
         if manual is not None and runs and Path(runs[0]["_spectrum"]).is_file():
-            payload["manual_comparison"] = compare_with_manual(
-                Path(runs[0]["_spectrum"]), manual
-            )
+            payload["manual_comparison"] = compare_with_manual(Path(runs[0]["_spectrum"]), manual)
             payload["manual_comparison"]["software_repeat"] = 0
         payload["runs"] = runs
 

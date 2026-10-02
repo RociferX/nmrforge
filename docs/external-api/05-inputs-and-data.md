@@ -129,9 +129,9 @@ window.F1.off,window.F2.off,zero_fill.F1,baseline.F2.enabled,points_per_line.F1
 0.45,0.45,4,true,2
 ```
 
-- Gaussian fitting budget (config `peaks.localization`,2026-09-14):`gaussian_roi_max_points`
-  (The upper limit of half-width points per axis, **default 0 = no limit**, the result is consistent with the old version; setting a positive value such as 48 can speed up.
-  However, the results will be changed on fine grids and saved peak by peak), `gaussian_max_nfev` (single peak evaluation upper limit, default 200);
+- Peak localization has one supported method, `parabolic`: a deterministic three-point vertex
+  calculation. Gaussian-fitting ROI and iteration-budget settings were removed and are not
+  accepted configuration keys.
 - The direct dimension range `ext_lo`/`ext_hi` only applies to ** direct dimension **; please use `window.F3.*` for 3D data, etc
   Axis-by-axis key (if the axis is a direct dimension);
 - The axis-by-axis parameter (reference spectrum definition) of the reference layer is specified with `params=`/`direct_range=` of the reference mode
@@ -192,8 +192,8 @@ python -m nmrforge_api sweep --study ~/studies/s1 --reference ~/studies/s1 \
 ```
 
 - **Reference mode**: the range is part of the reference definition; when it disagrees with the
-  established reference, the reference spectrum is rebuilt and **both reference peak tables are
-  re-measured** (stated in the log), and `force=True` rebuilds unconditionally;
+  established reference, the reference spectrum and its parabolic peak table are rebuilt (stated
+  in the log), and `force=True` rebuilds unconditionally;
 - **Combination mode**: `direct_range=` writes this batch's `base_overrides` (the reference spectrum is not
   rebuilt); every condition still starts from its own reference parameters and each combination may override with
   `ext_lo`/`ext_hi` (`plan.notes` states the wording). An override that **disagrees** with the frozen reference range
@@ -243,31 +243,28 @@ python -m nmrforge_api peaks --study ~/studies/s1 --sigma 20
 
 ## 5.11 Targeted localization (2026-09-19)
 
-By default `localization` covers **every detected peak** of the spectrum. In a batch ensemble
-the cost concentrates on threshold-limited noise peaks (measured: of 431 detected peaks in a
-synthetic spectrum only about 75 correspond to truth, the Gaussian fallback rate is about 69%,
-and the same five rows take 36 s with parabolic versus about 13 min with Gaussian), so there is
-a first-class entry point for refining only the named peaks:
+By default localization covers **every detected peak** of the spectrum. To localize only named
+peaks, provide a target list; detection and peak numbering remain unchanged:
 
 ```python
-run_combination_study(f"{root}#A", combos=..., localization="gaussian",
-                      localize_peaks="truth_peaks.csv")
-run_sweep(session, plan, localization="both", localize_peaks=[1, 5, 9])
-detect_and_localize(spectrum, method="gaussian", targets=(1, 5, 9))
+run_combination_study(f"{root}#A", combos=...,
+                      localize_peaks="targets.csv")
+run_sweep(session, plan, localize_peaks=[1, 5, 9])
+detect_and_localize(spectrum, targets=(1, 5, 9))
 ```
 
 ```bash
 python -m nmrforge_api sweep --study ~/studies/s1 --reference ~/studies/s1 \
-    --combos design.csv --localization gaussian --localize-peaks truth_peaks.csv
+    --combos design.csv --localize-peaks targets.csv
 ```
 
 A combination table can name it per row (**highest priority**; a relative path resolves against
 the **combination table's directory**):
 
 ```csv
-zero_fill,localization,localization.targets
-1,gaussian,truth_peaks.csv
-2,gaussian,
+zero_fill,localization.targets
+1,targets.csv
+2,
 ```
 
 The target list needs at least a `peak_id` column (optionally `reference_peak_id` for the
@@ -278,7 +275,7 @@ merged keeping first-seen order). Semantics:
   the method's refinement -- picking, row count and `peak_id` numbering never change;
 - unlisted peaks **stay in the table** with the detection-stage three-point parabola estimate
   (the method that row actually used); that method's QC columns
-  (`fit_success`/`FWHM_*`/`fit_rmse`/`boundary_hit`) are `NaN` (not fitted, **not** a failure)
+  (`fit_success`/`FWHM_*`/`boundary_hit`) are `NaN` (not fitted, **not** a failure)
   and `fallback` is false;
 - a per-peak failure is recorded as usual (`fit_success=false` + `fallback_reason`) and
   **never** re-fits another candidate; `n_fallback` counts only peaks that were really fitted;
@@ -298,10 +295,13 @@ merged keeping first-seen order). Semantics:
 - no targets = today's whole-spectrum behaviour (`scope=all`), with zero impact on existing
   study roots and records.
 
-## 5.12 Per-method target keys (2026-09-20)
+## 5.12 Legacy per-method target keys (removed)
 
-The most common `both`-mode combination is "parabolic for the whole spectrum plus Gaussian only
-on the selected target peaks":
+The following section documents removed syntax only. Do not use these examples: `localization`
+now accepts only `parabolic`, and method-specific target mappings/columns raise an error. Use
+the method-independent `localize_peaks=` argument or `localization.targets` column instead.
+
+The old method-specific syntax was removed when Gaussian fitting was deleted:
 
 ```python
 run_combination_study(f"{root}#A", combos=..., localization="both",
@@ -331,10 +331,8 @@ defaults unchanged**), plus three rules:
   overrides only that method and the others keep the call argument;
 - an explicit empty string means **unlimited** for that method (distinct from "not given",
   which inherits the method-independent list);
-- record: `parameters_resolved.detection.localization_targets` keeps the method-independent view
-  at the top level (`scope` is `mixed` when methods differ) and puts per-method detail in
-  `by_method.<method>` (including that method's own `n_skipped`); `peak_localization.<method>`
-  still counts per method.
+- record: `parameters_resolved.detection.localization_targets` stores the resolved target list;
+  `peak_localization.parabolic` summarizes the method's targeted and skipped counts.
 
 ## 5.13 Condition granularity (2026-09-20)
 
@@ -364,7 +362,7 @@ B,41
 `on_missing` is written inside the mapping form (a call argument or a combination-table row):
 
 ```python
-run_combination_study(f"{root}", combos=..., localization="gaussian",
+run_combination_study(f"{root}", combos=...,
                       localize_peaks={"path": "targets.csv", "on_missing": "none"})
 ```
 
@@ -372,9 +370,9 @@ run_combination_study(f"{root}", combos=..., localization="gaussian",
 column already serves A and B without re-running the sweep per condition):
 
 ```python
-run_combination_study(f"{root}", combos=..., localization="gaussian",
+run_combination_study(f"{root}", combos=...,
                       localize_peaks={"A": "a.csv", "B": "b.csv"})
-run_combination_study(f"{root}", combos=..., localization="gaussian",
+run_combination_study(f"{root}", combos=...,
                       localize_peaks={"default": "all_conditions.csv",
                                       "by_condition": {"A": "a.csv"}})
 ```
@@ -383,8 +381,8 @@ A combination table works too (CSV cells use the brace form; relative paths stil
 against the table directory):
 
 ```csv
-zero_fill,localization,localization.targets.gaussian
-1,gaussian,"{A: a.csv, B: b.csv}"
+zero_fill,localization.targets
+1,"{A: a.csv, B: b.csv}"
 ```
 
 Record: the top level of `run.json.parameters_resolved.detection.localization_targets` keeps

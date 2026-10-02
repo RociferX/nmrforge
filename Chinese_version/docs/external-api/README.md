@@ -1,12 +1,12 @@
-# nmrforge_api 对外文档(v0.2)
+# nmrforge_api 对外文档(API 契约 1.0)
 
-> **Track B:仍在演进。** 这是仍在改动的脚本化接口;稳定性承诺与行为指纹核对见
-> [Python API](../python-api.md)。
+> `nmrforge_api` 是公开、版本化且不依赖 Qt 的脚本接口(`API_VERSION = "1.0"`)。
+> 跨版本比较数值前，请查看 `compat_manifest()` 中的行为指纹、兼容级别与受影响步骤。
+> 已发布 AppImage 对应特定源码版本；更新源码不会自动更新它。
 
 
-`nmrforge_api` 是 NMRForge 的**参数组合处理执行器**:输入原始 NMR 数据与用户
-参数组合表,自动生成参考工作流,按组合批量运行处理,对同一张谱用 parabolic 与
-2D gaussian 两种算法各出一张峰表,并留下完整 provenance 与 QC。
+`nmrforge_api` 用于运行参数组合处理研究。它导入 Bruker 数据、建立并冻结参考工作流、
+执行用户提供的参数组合，并对每张候选谱写出一份三点抛物线峰表及处理溯源和 QC 记录。
 
 软件只负责执行处理与留档;**统计推断与科学结论不在本软件范围内**,由使用者自己的分析
 完成(σ/Δδ 汇总只作**测试/检测辅助**、不进入处理产物)。
@@ -15,15 +15,12 @@
 
 引用本软件产物时,请把两件事分开写:
 
-- **工程回归**(本机全量 `pytest`、VM 真机全量 `bash scripts/vm_test.sh`、CI 的
-  `static` / `tests` / `release-readiness` 作业、真机 API 冒烟
-  `scripts/vm_api_smoke.py`)证明的是「链路与留档自洽、同一输入给同一结果、
-  产物可复现」;
+- **工程回归**(常规 CI 与使用模拟引擎边界的测试)证明的是「已覆盖的软件路径与留档
+  自洽」;它不调用 NMRPipe/SMILE,也不等同于真实引擎或科学验证;
 - **科学验证**(处理结果在真实体系上是否科学正确)不在本软件范围内:工程回归与真机
   冒烟**不能**说明这一点,是否成立由使用者自己的分析决定。
 
-真机冒烟的脚本、产物路径与日志目录(以及 CI 真机作业为什么默认不跑)见
-[09-limitations-and-roadmap.md](09-limitations-and-roadmap.md) §9.5。
+支持的处理路径与验证边界见[限制与路线图](09-limitations-and-roadmap.md)。
 
 ## 阅读顺序
 
@@ -35,13 +32,13 @@
 | [04-cli-reference.md](04-cli-reference.md) | `python -m nmrforge_api` 六个命令 |
 | [05-inputs-and-data.md](05-inputs-and-data.md) | 数据、条件、参数键、组合表 |
 | [06-outputs-and-records.md](06-outputs-and-records.md) | 目录布局、统一峰表字段、状态与警告码 |
-| [07-methods-and-metrics.md](07-methods-and-metrics.md) | 参考工作流、两种定位、选峰阈值/边距口径、QC |
+| [07-methods-and-metrics.md](07-methods-and-metrics.md) | 参考工作流、抛物线定位、选峰阈值/边距口径、QC |
 | [08-integration-guide.md](08-integration-guide.md) | 读产物做自己的分析(读什么、怎么读) |
 | [09-limitations-and-roadmap.md](09-limitations-and-roadmap.md) | 支持矩阵、NUS 边界、分片、roadmap |
 | [10-troubleshooting.md](10-troubleshooting.md) | 常见错误、warning 处理、断点续跑 |
 | [examples/](examples/) | 可运行示例(一步式/分步/只测量) |
 
-契约:`API_CONTRACT.md`(v0.2)。
+契约版本:`API_VERSION = "1.0"`；公开入口和输出字段见本组文档。
 
 ## 安装与运行
 
@@ -57,7 +54,7 @@ python -m nmrforge_api --help
 ```python
 from nmrforge_api import run_reference_study, run_combination_study
 
-# 参考模式:参考谱 + 脚本 + 两张参考峰表(选峰阈值在这里定,之后锁定)
+# 参考模式:参考谱 + 脚本 + 一张抛物线参考峰表(选峰阈值在这里定,之后锁定)
 run_reference_study(
     "~/studies/hsqc_params",
     datasets={"A": "~/data/apo", "B": "~/data/holo"},

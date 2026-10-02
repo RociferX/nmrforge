@@ -35,14 +35,17 @@ def main(argv: list[str] | None = None) -> int:
         # row.
         row = np.abs(data[argmax15n, :])
         nearby = [i45, i49, i7]
-        print(f"[{path.name}] axes: {y.label} {y.ppm[0]:.1f}..{y.ppm[-1]:.1f} | "
-              f"{x.label} {x.ppm[0]:.2f}..{x.ppm[-1]:.2f}")
-        print(f"  water@4.7 col={i4} max15n={max15n:.3e} at row {argmax15n} "
-              f"(15N {y.ppm_at(argmax15n):.2f})")
+        print(
+            f"[{path.name}] axes: {y.label} {y.ppm[0]:.1f}..{y.ppm[-1]:.1f} | "
+            f"{x.label} {x.ppm[0]:.2f}..{x.ppm[-1]:.2f}"
+        )
+        print(
+            f"  water@4.7 col={i4} max15n={max15n:.3e} at row {argmax15n} "
+            f"(15N {y.ppm_at(argmax15n):.2f})"
+        )
         for i in [i4] + nearby:
             print(f"    1H {x.ppm_at(i):.2f} ppm (idx {i}): row abs={row[i]:.3e}")
-        print(f"  water col peak / 1H-7.5ppm row peak = "
-              f"{max15n / max(row[i7], 1e-30):.1f}")
+        print(f"  water col peak / 1H-7.5ppm row peak = {max15n / max(row[i7], 1e-30):.1f}")
         print()
     return 0
 

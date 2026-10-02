@@ -106,7 +106,6 @@ class StudyResult:
             return {}
         return {
             "parabolic": ref.peak_table_parabolic_path,
-            "gaussian": ref.peak_table_gaussian_path,
         }
 
     @property
@@ -147,9 +146,7 @@ def _resolve_conditions(
     return out
 
 
-def _register_conditions(
-    session: StudySession, conditions: Sequence[tuple[str, str]]
-) -> None:
+def _register_conditions(session: StudySession, conditions: Sequence[tuple[str, str]]) -> None:
     """Register the user condition datasets; an identical existing one is reused."""
     for label, path in conditions:
         source = str(Path(path).expanduser().resolve())
@@ -211,7 +208,6 @@ class ReferenceResult:
             return {}
         return {
             "parabolic": reference.peak_table_parabolic_path,
-            "gaussian": reference.peak_table_gaussian_path,
         }
 
 
@@ -229,9 +225,6 @@ def run_reference_study(
     ext_hi: Any = None,
     sigma_multiplier: float | None = None,
     max_peaks: int = 0,
-    localization_method: str = "parabolic",
-    gaussian_roi_f1_ppm: float | None = None,
-    gaussian_roi_f2_ppm: float | None = None,
     force: bool = False,
     backend: Any | None = None,
     write: bool = True,
@@ -246,7 +239,8 @@ def run_reference_study(
     The direct-dimension range (**ppm**, ``ext_lo`` = high end / ``ext_hi`` = low end) can be
     given as ``direct_range=(high, low)`` (reversed is accepted and swapped back),
     ``direct_range={"lo":..., "hi":...}`` or explicit ``ext_lo=/ext_hi=``.
-    A range that disagrees with the frozen reference **rebuilds it and re-measures both tables**;
+    A range that disagrees with the frozen reference **rebuilds it and re-measures both
+    tables**;
     ``force=True`` rebuilds unconditionally.
 
     Parameters
@@ -264,7 +258,8 @@ def run_reference_study(
     phase_route : str, optional
         phase route; ``"none"`` for tests and reproduction.
     peaks : Path | str, optional
-        an external reference table (``.list``): registered as the peak identity, no auto-picking.
+        an external reference table (``.list``): registered as the peak identity, no
+        auto-picking.
     direct_range, ext_lo, ext_hi : Any, optional
         the direct range (``(high, low)`` or a dict); precedence is documented
         :func:`nmrforge_api.direct_range.parse_direct_range`.
@@ -316,9 +311,7 @@ def run_reference_study(
                 "run",
             )
         )
-    direct = parse_direct_range(
-        direct_range, ext_lo=ext_lo, ext_hi=ext_hi, params=params
-    )
+    direct = parse_direct_range(direct_range, ext_lo=ext_lo, ext_hi=ext_hi, params=params)
     run_params = dict(params or {})
     if direct is not None:
         run_params.update(direct.params())
@@ -354,31 +347,23 @@ def run_reference_study(
                 force=True,
             )
         references[ref.key] = reference
-    # peak identity and both tables: the primary condition picks, others share the identity
     for ref in session.datasets:
         references[ref.key] = ensure_reference_peaks(
             session,
             references[ref.key],
             sigma_multiplier=sigma_multiplier,
             max_peaks=max_peaks,
-            localization_method=localization_method,
-            gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
-            gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
             force=bool(rebuilt),
         )
     if peaks is not None:
         # optional: the study's own table (public archive or assigned) becomes the primary identity
         primary = session.datasets[0]
         target = session.reference_dir_for(primary) / "reference.list"
-        target.write_text(
-            Path(peaks).read_text(encoding="utf-8-sig"), encoding="utf-8"
-        )
+        target.write_text(Path(peaks).read_text(encoding="utf-8-sig"), encoding="utf-8")
         primary_reference = set_reference_peaks(
             session, target, references[primary.key], source="external"
         )
-        references[primary.key] = build_reference_peak_tables(
-            session, primary_reference
-        )
+        references[primary.key] = build_reference_peak_tables(session, primary_reference)
         # non-primary conditions re-copy the primary identity table, keeping identity consistent
         for ref in session.datasets[1:]:
             references[ref.key] = ensure_reference_peaks(
@@ -387,9 +372,6 @@ def run_reference_study(
                 force=True,
                 sigma_multiplier=sigma_multiplier,
                 max_peaks=max_peaks,
-                localization_method=localization_method,
-                gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
-                gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
             )
     records: dict[str, str] = {}
     if write:
@@ -417,8 +399,6 @@ def run_combination_study(
     ext_lo: Any = None,
     ext_hi: Any = None,
     allow_ext_override: bool = False,
-    roi_f1_ppm: float | None = None,
-    roi_f2_ppm: float | None = None,
     resume: bool = True,
     backend: Any | None = None,
     write: bool = True,
@@ -520,11 +500,7 @@ def run_combination_study(
     """
     handle = parse_reference_spec(reference)
     session, target, ref = resolve_reference(reference, backend=backend)
-    targets = (
-        [target]
-        if (handle.condition or handle.reference_json)
-        else list(session.datasets)
-    )
+    targets = [target] if (handle.condition or handle.reference_json) else list(session.datasets)
     references: dict[str, ReferenceSpectrum] = {}
     for item in targets:
         if item.key == target.key:
@@ -604,7 +580,7 @@ def run_combination_study(
                     ),
                     "count": 1,
                     "peaks": [],
-                    "localization_method": "",
+                    "localization_method": "parabolic",
                 }
             )
         else:
@@ -633,8 +609,6 @@ def run_combination_study(
         localization=localization,
         localize_peaks=localize_peaks,
         edge_margin_ppm=edge_margin_ppm,
-        roi_f1_ppm=roi_f1_ppm,
-        roi_f2_ppm=roi_f2_ppm,
         resume=resume,
         extra_warnings=override_warnings,
         progress=progress,
@@ -684,17 +658,12 @@ def run_parameter_study(
     sigma_multiplier: float | None = None,
     max_peaks: int = 0,
     max_runs: int = DEFAULT_MAX_RUNS,
-    window_pts: int | None = None,          # legacy (unused in combination mode)
-    window_ppm: float | None = None,        # legacy (unused in combination mode)
+    window_pts: int | None = None,  # legacy (unused in combination mode)
+    window_ppm: float | None = None,  # legacy (unused in combination mode)
     sign: str = "abs",
-    roi_f1_ppm: float | None = None,
-    roi_f2_ppm: float | None = None,
-    localization: Any = "parabolic",        # combination-mode refinement (incl. both)
-    localize_peaks: Any = None,              # combination-mode target peaks (CSV/ids)
-    edge_margin_ppm: float | None = None,   # combination picking margin (physical)
-    localization_method: str = "parabolic",  # reference peak-position method
-    gaussian_roi_f1_ppm: float | None = None,
-    gaussian_roi_f2_ppm: float | None = None,
+    localization: Any = "parabolic",
+    localize_peaks: Any = None,
+    edge_margin_ppm: float | None = None,
     force: bool = False,
     resume: bool = True,
     backend: Any | None = None,
@@ -759,9 +728,6 @@ def run_parameter_study(
         ext_hi=ext_hi,
         sigma_multiplier=sigma_multiplier,
         max_peaks=max_peaks,
-        localization_method=localization_method,
-        gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
-        gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
         force=force,
         backend=backend,
         write=write,
@@ -777,8 +743,6 @@ def run_parameter_study(
         localization=localization,
         localize_peaks=localize_peaks,
         edge_margin_ppm=edge_margin_ppm,
-        roi_f1_ppm=roi_f1_ppm,
-        roi_f2_ppm=roi_f2_ppm,
         resume=resume,
         backend=backend,
         write=write,
@@ -789,6 +753,7 @@ def run_parameter_study(
     merged.update(result.records)
     result.records = merged
     return result
+
 
 def _summary(
     plan: SweepPlan,
@@ -814,7 +779,6 @@ def _summary(
             "status": run.status,
             "warnings": [w.get("code") for w in run.warnings],
             "peak_table_parabolic": run.peak_table_path("parabolic"),
-            "peak_table_gaussian": run.peak_table_path("gaussian"),
             "log_path": run.log_path,
         }
     return {
@@ -831,9 +795,7 @@ def _summary(
                 "condition": ref.condition,
                 "peak_count": ref.peak_count,
                 "peak_source": ref.peak_source,
-                "sigma_multiplier": (ref.peak_params or {}).get(
-                    "sigma_multiplier"
-                ),
+                "sigma_multiplier": (ref.peak_params or {}).get("sigma_multiplier"),
                 "peak_tables": ref.peak_tables,
                 "script_sha256": ref.script_sha256,
                 "spectrum_sha256": ref.spectrum_sha256,

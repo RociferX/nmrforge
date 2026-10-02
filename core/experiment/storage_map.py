@@ -3,12 +3,15 @@
 
 The stance the user fixed:
 
-* **``AQSEQ`` is the authoritative acquisition-order metadata** (Bruker Acquisition Reference: it
+* **``AQSEQ`` is the authoritative acquisition-order metadata** (Bruker Acquisition Reference:
+it
   describes the actual acquisition order of each dimension; in 3D ``td1`` is on the inside and
   ``td2`` on the outside => ``312``, and the other way round for ``321``) => **the written order
   of the unexpanded ``mc`` clauses must never override AQSEQ**;
-* the expanded execution order is only a **consistency check**: agreement with ``AQSEQ`` => ``ok``;
-  when only the written order of the unexpanded source differs => **trust AQSEQ, not a conflict**;
+* the expanded execution order is only a **consistency check**: agreement with ``AQSEQ`` =>
+``ok``;
+  when only the written order of the unexpanded source differs => **trust AQSEQ, not a
+  conflict**;
   when the **expanded execution** really contradicts AQSEQ => ``metadata_execution_conflict`` +
   **fail loudly** (neither quietly correcting AQSEQ nor auto-generating the final conversion) --
   otherwise it becomes impossible later to tell "the software fixed bad metadata" from "the
@@ -25,7 +28,8 @@ This module provides:
 * :func:`logical_coordinates` -- logical coordinates
   ``(t1_index, t1_state, t2_index, t2_state)`` <-> the linear 1D-FID index in ``ser`` (fixed by
   AQSEQ + each dimension's TD + the partner stride);
-* :func:`canonicalize_quadrature` -- canonicalise one logical dimension's quadrature pair (the R/I
+* :func:`canonicalize_quadrature` -- canonicalise one logical dimension's quadrature pair (the
+R/I
   of States or the Echo/AntiEcho of E/A) into a complex pair;
 * :func:`storage_status` -- AQSEQ authority plus the conflict grading.
 """
@@ -84,8 +88,10 @@ def _executed_order_from_expanded(text: str | None, ndim: int) -> str | None:
     """The innermost indirect dimension actually executed in an **expanded** pulse program ->
     the acquisition order (``321``/``312``).
 
-    Only ``lo to`` blocks are looked at (only the expanded form has them): which logical axis the
-    first ``times 2`` block belongs to => that axis is the innermost indirect dimension. ``321``:
+    Only ``lo to`` blocks are looked at (only the expanded form has them): which logical axis
+    the
+    first ``times 2`` block belongs to => that axis is the innermost indirect dimension.
+    ``321``:
     inner = logical F2; ``312``: inner = logical F1. The unexpanded form (only ``mc`` clauses)
     returns ``None`` -- the user was explicit: **the written order of the unexpanded source must
     not be used to override AQSEQ**.
@@ -124,9 +130,7 @@ def storage_status(experiment: Experiment, data_dir: Any = None) -> StorageStatu
         # only the written order of the **unexpanded source** differs => trust AQSEQ (the user's
         # decision 4)
         status = STORAGE_SOURCE_CLAUSE_ONLY
-        notes.append(
-            "the unexpanded mc clause order differs from AQSEQ; AQSEQ stays authoritative"
-        )
+        notes.append("the unexpanded mc clause order differs from AQSEQ; AQSEQ stays authoritative")
     return StorageStatus(
         aqseq=model.aqseq,
         source=model.aqseq_source,
@@ -221,7 +225,8 @@ def canonicalize_quadrature(
       structure is canonicalised here);
     * ``real``: there is no quadrature pair => the second term is 0.
 
-    Note: this is **not** ``if axis == "y" and EA`` -- the Bruker acquisition truth is kept apart
+    Note: this is **not** ``if axis == "y" and EA`` -- the Bruker acquisition truth is kept
+    apart
     from the NMRPipe expression.
     """
     if encoding in (ENCODING_STATES, ENCODING_STATES_TPPI):

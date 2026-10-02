@@ -67,6 +67,7 @@ def _aq2d_keyword(y_kind: str) -> str:
         return "TPPI"
     return "Complex"
 
+
 # FnMODE -> (FT -neg, FT -alt): the official Bruker TopSpin enum plus the bruk2pipe
 # ACQUISITION MODES table (nmrPipe/format documentation):
 #   0=undefined; 1/2=Magnitude(QF/QSEQ) and 3=TPPI are real/magnitude classes
@@ -101,9 +102,9 @@ def _fnmode(experiment: Experiment, logical_axis: str) -> int:
 
 def _mult_for(fnmode: int) -> int:
     """Hypercomplex component count (single source:
-    acquisition_mode_detector.hypercomplex_mult)."""
+    acquisition_mode_detector.hypercomplex_mult).
+    """
     return hypercomplex_mult(fnmode)
-
 
 
 def effective_td(experiment: Experiment) -> list[int]:
@@ -194,16 +195,19 @@ def _axis_sw(experiment: Experiment, axis: str) -> float:
 
 def _default_linewidth(experiment: Experiment, axis: str) -> float:
     """Default estimated linewidth per nucleus (Hz); params.linewidth_hz overrides
-    the actual value."""
+    the actual value.
+    """
     for dim in experiment.dimensions:
         if dim.logical_axis == axis:
             nucleus = str(dim.nucleus or "").strip()
             return _DEFAULT_LINEWIDTH_HZ.get(nucleus, _DEFAULT_LINEWIDTH_HZ[""])
     return _DEFAULT_LINEWIDTH_HZ[""]
 
+
 def _config_linewidth_by_axis(experiment: Experiment) -> dict[str, float]:
     """Read nucleus -> linewidth from config and map it to axis -> linewidth
-    (falling back to the per-nucleus default table)."""
+    (falling back to the per-nucleus default table).
+    """
     from backend.config import DEFAULT_LINEWIDTH_HZ, load_processing_defaults
 
     cfg = load_processing_defaults()["linewidth_hz"]
@@ -211,16 +215,12 @@ def _config_linewidth_by_axis(experiment: Experiment) -> dict[str, float]:
     for dim in experiment.dimensions:
         nucleus = str(dim.nucleus or "").strip()
         mapping[dim.logical_axis] = float(
-            cfg.get(
-                nucleus, DEFAULT_LINEWIDTH_HZ.get(nucleus, DEFAULT_LINEWIDTH_HZ[""])
-            )
+            cfg.get(nucleus, DEFAULT_LINEWIDTH_HZ.get(nucleus, DEFAULT_LINEWIDTH_HZ[""]))
         )
     return mapping
 
 
-def _linewidth_for(
-    axis: str, linewidth_hz: dict[str, float] | None
-) -> float:
+def _linewidth_for(axis: str, linewidth_hz: dict[str, float] | None) -> float:
     if not linewidth_hz:
         return 0.0
     try:
@@ -230,9 +230,7 @@ def _linewidth_for(
     return value if value > 0.0 else 0.0
 
 
-def _indirect_si(
-    n: int, sw: float, linewidth: float, points_per_line: float
-) -> tuple[int, str]:
+def _indirect_si(n: int, sw: float, linewidth: float, points_per_line: float) -> tuple[int, str]:
     """Target SI for an indirect dimension: spacing <= max(linewidth,
     1/AQ)/points_per_line.
 
@@ -273,7 +271,8 @@ def _indirect_si(
 
 def _points_per_line_for(points_per_line: Any, axis: str) -> float:
     """Target points per linewidth: a scalar or a per-axis mapping
-    ``{"F1": 2.0}``; an invalid value falls back to the default."""
+    ``{"F1": 2.0}``; an invalid value falls back to the default.
+    """
     if isinstance(points_per_line, Mapping):
         value = points_per_line.get(axis)
     else:
@@ -287,7 +286,8 @@ def _points_per_line_for(points_per_line: Any, axis: str) -> float:
 
 def _scalar_points_per_line(value: Any, default: float) -> float:
     """Take a scalar (from a per-axis mapping, the first valid value among
-    F1/F2/F3) for paths that leave per-axis semantics alone."""
+    F1/F2/F3) for paths that leave per-axis semantics alone.
+    """
     if isinstance(value, Mapping):
         for axis in ("F1", "F2", "F3"):
             if axis in value:
@@ -342,7 +342,7 @@ def zero_fill_plan(
             points_per_line = float(load_processing_defaults()["points_per_line"])
     axes = [dim.logical_axis for dim in experiment.dimensions]
     td = effective_td(experiment)
-    direct_axis = axes[0] if axes else ''
+    direct_axis = axes[0] if axes else ""
     # 0.2.199-patch29dq (user): the NUS direct-dimension zero fill defaults to 2xTD, the
     # same as uniform (resolution first); when memory is short the reconstruct_nus memory
     # guard (0.2.112) drops it to 1xTD with a notice, and only if that is still not enough
@@ -399,12 +399,8 @@ def zero_fill_plan(
                 size = _next_pow2(direct_factor * n)
                 note = tr("direct dimension {p0}×TD({p1}→{p2})", p0=direct_factor, p1=n, p2=size)
             else:
-                lw = _linewidth_for(axis, linewidth_hz) or _default_linewidth(
-                    experiment, axis
-                )
-                size, note = _indirect_si(
-                    n, sw, lw, _points_per_line_for(points_per_line, axis)
-                )
+                lw = _linewidth_for(axis, linewidth_hz) or _default_linewidth(experiment, axis)
+                size, note = _indirect_si(n, sw, lw, _points_per_line_for(points_per_line, axis))
             plan[axis] = {"mode": "auto", "size": size, "note": note}
         else:
             size = int(cfg.get("size", mode))
@@ -414,14 +410,15 @@ def zero_fill_plan(
 
 def zero_fill_report(plan: dict[str, dict[str, Any]]) -> list[str]:
     """Render the per-dimension zero-fill plan as log lines (so the SI choice is
-    visible to the user)."""
+    visible to the user).
+    """
     out: list[str] = []
     for axis in plan:
         cfg = plan[axis]
         if cfg.get("mode") == "none":
             out.append(tr("zero filling {p0}: closure", p0=axis))
         else:
-            out.append(tr("zero filling {p0}: {p1}", p0=axis, p1=cfg.get('note', '')))
+            out.append(tr("zero filling {p0}: {p1}", p0=axis, p1=cfg.get("note", "")))
     return out
 
 
@@ -455,10 +452,7 @@ def _is_constant_time(experiment: Experiment) -> bool:
     # constant-time experiment test: PULPROG values such as hsqcct/cthsqc/cthmqc/hmqcct/ctet.
     acqus = experiment.acquisition_parameters.get("acqus", {}) or {}
     pulprog = str(acqus.get("PULPROG", "")).lower()
-    return any(
-        k in pulprog
-        for k in ("cthsqc", "cthmqc", "hsqcct", "hmqcct", "ctet")
-    )
+    return any(k in pulprog for k in ("cthsqc", "cthmqc", "hsqcct", "hmqcct", "ctet"))
 
 
 def smile_cross_term_args(experiment: Experiment) -> str:
@@ -473,16 +467,12 @@ def smile_cross_term_args(experiment: Experiment) -> str:
     return "".join(f"-{axis}CT 1 " for axis in axes)
 
 
-def _smile_fraction(
-    experiment: Experiment, grid: int, nuslist_count: int
-) -> float:
+def _smile_fraction(experiment: Experiment, grid: int, nuslist_count: int) -> float:
     """SMILE sampling fraction: nuslist_count/grid, fallback metadata."""
     if nuslist_count and grid:
         return nuslist_count / grid
     try:
-        frac = float(
-            getattr(experiment.sampling, "sampling_fraction", 0.0) or 0.0
-        )
+        frac = float(getattr(experiment.sampling, "sampling_fraction", 0.0) or 0.0)
     except (TypeError, ValueError):
         frac = 0.0
     return frac
@@ -490,7 +480,8 @@ def _smile_fraction(
 
 def build_context(experiment: Experiment) -> dict[str, Any]:
     """Template placeholder context (authoritative metadata values + the effective
-    NUS TD)."""
+    NUS TD).
+    """
     td = effective_td(experiment)
     dims = {dim.logical_axis: dim for dim in experiment.dimensions}
     x = dims.get("F2" if experiment.ndim == 2 else "F3") or dims.get("F2")
@@ -798,9 +789,7 @@ def _stage_lines(
                 keep_direct_complex and axis == direct_axis
             )
             di = "" if keep_cplx else " -di"
-            lines.append(
-                f"| nmrPipe -fn PS -p0 {_fmt(p0)} -p1 {_fmt(p1)}{di} \\"
-            )
+            lines.append(f"| nmrPipe -fn PS -p0 {_fmt(p0)} -p1 {_fmt(p1)}{di} \\")
         elif op == "baseline":
             axis = str(params.get("axis", ""))
             if skip_baseline_axes and axis in skip_baseline_axes:
@@ -819,11 +808,12 @@ def _stage_lines(
             else:
                 lines.append("| nmrPipe -fn POLY -auto \\")
         else:
-            raise ValueError(tr(
-                "Operations mapped to the nmrPipe macro are not supported: "
-                "{p0}",
-                p0=op,
-            ))
+            raise ValueError(
+                tr(
+                    "Operations mapped to the nmrPipe macro are not supported: {p0}",
+                    p0=op,
+                )
+            )
     return lines
 
 
@@ -887,9 +877,7 @@ def generate_process_script(
             skip_baseline_axes=skip_baseline_axes,
         )
         if extract and index == 0:
-            lines.append(
-                f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\"
-            )
+            lines.append(f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\")
         if index < len(axes) - 1:
             if len(axes) >= 3 and index == len(axes) - 2:
                 # 3D single pass: before the last dimension (F1), ZTP moves the slow
@@ -955,14 +943,8 @@ def generate_preview_script(
     phase is fixed) is kept, as in the old candidates.
     """
     axes = [dim.logical_axis for dim in experiment.dimensions]
-    zf_none = zero_fill if zero_fill is not None else {
-        axis: {"mode": "none"} for axis in axes
-    }
-    phases = {
-        axis: value
-        for axis, value in (fixed_phases or {}).items()
-        if axis != preview_axis
-    }
+    zf_none = zero_fill if zero_fill is not None else {axis: {"mode": "none"} for axis in axes}
+    phases = {axis: value for axis, value in (fixed_phases or {}).items() if axis != preview_axis}
     for axis in axes:
         if axis != preview_axis:
             phases.setdefault(axis, (0.0, 0.0))
@@ -984,10 +966,10 @@ def generate_preview_script(
     )
 
 
-
 def _nus_zf_size(cfg: dict[str, Any], td_points: int) -> int:
     """NUS dimension zero-fill size: an explicit size wins, otherwise
-    next_pow2(2xTD)."""
+    next_pow2(2xTD).
+    """
     return int(cfg.get("size") or _next_pow2(2 * max(int(td_points), 1)))
 
 
@@ -1062,11 +1044,7 @@ def _smile_direction_args(flags: list[str], prefix: str) -> str:
     keeps the FT inside the reconstruction consistent with the post-processing
     direction.
     """
-    parts = [
-        f"-{prefix}{_SMILE_DIRECTION_FLAG[f]}"
-        for f in flags
-        if f in _SMILE_DIRECTION_FLAG
-    ]
+    parts = [f"-{prefix}{_SMILE_DIRECTION_FLAG[f]}" for f in flags if f in _SMILE_DIRECTION_FLAG]
     return " ".join(parts)
 
 
@@ -1080,40 +1058,36 @@ def _ft_flag_line(
     """FT line flags: sampling.ft_neg/ft_alt override the FnMODE derivation when
     not None; flip_f1=True forces -neg on the F1 axis (flip); force_neg=True adds
     -neg in the default state (the correction for States-type 3D first indirect
-    dimensions); by default the derived output is unchanged."""
+    dimensions); by default the derived output is unchanged.
+    """
     neg, alt = _FT_FLAGS.get(int(fnmode), (False, False))
-    flags = _ft_flags(
-        neg, alt, sampling=sampling, axis=axis, force_neg=force_neg
-    )
+    flags = _ft_flags(neg, alt, sampling=sampling, axis=axis, force_neg=force_neg)
     suffix = (" " + " ".join(flags)) if flags else ""
     return f"| nmrPipe -fn FT{suffix} \\"
 
 
 def _ps_line(phases: dict[str, tuple[float, float]] | None, axis: str) -> str:
     """Indirect-dimension PS line: fills in the optimised phase (0 by default) and
-    takes the real part (-di); the 2026-08-19 full-script final run."""
+    takes the real part (-di); the 2026-08-19 full-script final run.
+    """
     p0, p1 = (phases or {}).get(axis, (0.0, 0.0))
     return f"| nmrPipe -fn PS -p0 {p0:g} -p1 {p1:g} -di \\"
 
 
-def _nus_direct_window_line(
-    cfg: dict[str, Any] | None, default_pow: int = 2
-) -> str:
+def _nus_direct_window_line(cfg: dict[str, Any] | None, default_pow: int = 2) -> str:
     """NUS direct-dimension window: SMILE requires the direct dimension to be
     apodised with a tail decaying to zero, so SP is used throughout (as in the
     lab's smile.com). The sine_bell family is generated from the config and
     everything else (none/gaussian/exp) falls back to the default SP -- otherwise
     SMILE reports "direct dim not apodized" and the final spectrum is wrong
-    (0.2.199-patch11)."""
+    (0.2.199-patch11).
+    """
     wtype = str((cfg or {}).get("type", ""))
     if wtype in ("sine_bell", "sine_bell_squared", "sp"):
         line = _window_line(cfg)
         if line:
             return line
-    return (
-        f"| nmrPipe -fn SP -off 0.45 -end 0.98 "
-        f"-pow {default_pow} -c 0.5 \\"
-    )
+    return f"| nmrPipe -fn SP -off 0.45 -end 0.98 -pow {default_pow} -c 0.5 \\"
 
 
 def _window_line(cfg: dict[str, Any] | None) -> str | None:
@@ -1134,10 +1108,7 @@ def _window_line(cfg: dict[str, Any] | None) -> str | None:
     if wtype == "gaussian":
         # 0.2.170: GM -g1/-g2 are the native NMRPipe Gaussian window parameters; GMB
         # -lb/-gb blew up at the tail in testing and GM -lb/-gb is ignored, so neither works
-        return (
-            f"| nmrPipe -fn GM -g1 {_fmt(cfg.get('g1', 8.0))} "
-            f"-g2 {_fmt(cfg.get('g2', 15.0))} \\"
-        )
+        return f"| nmrPipe -fn GM -g1 {_fmt(cfg.get('g1', 8.0))} -g2 {_fmt(cfg.get('g2', 15.0))} \\"
     if wtype == "exp":
         return f"| nmrPipe -fn EM -lb {_fmt(cfg.get('lb', 5.0))} \\"
     powv = 2 if wtype == "sine_bell_squared" else cfg.get("pow", 1)
@@ -1227,14 +1198,10 @@ def generate_2d_nus_script(
         direct_stages.append(f"| nmrPipe -fn ZF -zf -size {direct_zf} \\")
     direct_stages.append("| nmrPipe -fn FT \\")
     if extract:
-        direct_stages.append(
-            f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\"
-        )
+        direct_stages.append(f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\")
     # The direct-dimension phase is applied after EXT: p1 is normalised to the extracted
     # size (consistent with the in-memory rotation of the recon planes).
-    direct_stages.append(
-        f"| nmrPipe -fn PS -p0 {direct_phase[0]:g} -p1 {direct_phase[1]:g} -di \\"
-    )
+    direct_stages.append(f"| nmrPipe -fn PS -p0 {direct_phase[0]:g} -p1 {direct_phase[1]:g} -di \\")
     direct_stages += direct_poly
     smile_tail = [
         # SMILE carries no window/phase (0.2.134): the window and phase are handled by the
@@ -1262,11 +1229,7 @@ def generate_2d_nus_script(
             f"           -sample {nuslist} -nThread {nthread} \\",
             f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} "
             f"-off 0 0 -report {smile_report} \\",
-            *(
-                []
-                if max_mem is None
-                else [f"           -maxMem {max_mem:g} \\"]
-            ),
+            *([] if max_mem is None else [f"           -maxMem {max_mem:g} \\"]),
             *(["           -scaling 1 \\"] if smile_scaling else []),
             *smile_tail,
         ]
@@ -1284,11 +1247,7 @@ def generate_2d_nus_script(
             f"           -sample {nuslist or 'None'} -nThread {nthread} \\",
             f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} "
             f"-off 0 0 -report {smile_report} \\",
-            *(
-                []
-                if max_mem is None
-                else [f"           -maxMem {max_mem:g} \\"]
-            ),
+            *([] if max_mem is None else [f"           -maxMem {max_mem:g} \\"]),
             *(["           -scaling 1 \\"] if smile_scaling else []),
             *smile_tail,
         ]
@@ -1316,7 +1275,6 @@ def generate_2d_nus_script(
         f"  -out {out_file} -ov",
     ]
     return "\n".join(lines) + "\n"
-
 
 
 # ---------------------------------------------------------------------------
@@ -1363,7 +1321,8 @@ def rename_nus_scan_output(script: str, out_name: str) -> str:
 
 def _statement_start(lines: list[str], index: int) -> int:
     """Return the start line of the pipeline statement containing line index
-    (continuation lines end with a backslash)."""
+    (continuation lines end with a backslash).
+    """
     start = index
     while start > 0:
         prev = lines[start - 1].rstrip()
@@ -1427,6 +1386,7 @@ def build_2d_direct_only_script(script: str) -> str:
     prefix[-1] = _NUS_2D_DIRECT_OUT
     return "\n".join(prefix) + "\n"
 
+
 def _check_real_modes(experiment: Experiment) -> None:
     """Raise explicitly for real/magnitude indirect dimensions (FnMODE 1/2/3),
     which prevents silently wrong scripts.
@@ -1472,7 +1432,8 @@ def generate_3d_nus_script(
     direct_poly_time: bool = False,
 ) -> str:
     """3D NUS SMILE reconstruction: direct dimension (F3) FT+EXT -> SMILE -nDim 3
-    -> indirect-dimension FT (ft3)."""
+    -> indirect-dimension FT (ft3).
+    """
     _check_real_modes(experiment)
     ctx = build_context(experiment)
     zf_plan = zero_fill_plan(
@@ -1527,11 +1488,7 @@ def generate_3d_nus_script(
         "# step 1: direct dim (F3) FT + EXT + PS",
         f"xyz2pipe -in {in_file} -x \\",
         *step1_direct,
-        *(
-            [f"| nmrPipe -fn ZF -zf -size {direct_zf} \\"]
-            if f3_zf.get("mode") != "none"
-            else []
-        ),
+        *([f"| nmrPipe -fn ZF -zf -size {direct_zf} \\"] if f3_zf.get("mode") != "none" else []),
         "| nmrPipe -fn FT \\",
         f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\",
         # The direct-dimension phase is applied after EXT: p1 is normalised to the extracted
@@ -1545,11 +1502,7 @@ def generate_3d_nus_script(
         f"           -sample {nuslist} -nThread {nthread} \\",
         f"           -sampleCount {nuslist_count} -nSigma {nsigma:g} -off 0 0 "
         f"-report {smile_report} \\",
-        *(
-            []
-            if max_mem is None
-            else [f"           -maxMem {max_mem:g} \\"]
-        ),
+        *([] if max_mem is None else [f"           -maxMem {max_mem:g} \\"]),
         *(["           -scaling 1 \\"] if smile_scaling else []),
         f"           -maxIter {max_iter} \\",
         # SMILE carries no window/phase (0.2.134): step3 post-processing handles the
@@ -1566,13 +1519,7 @@ def generate_3d_nus_script(
         "# step 3: indirect dims (F2/F1) window + ZF + FT + PS",
         "xyz2pipe -in nus3d_rc/test%04d.ft1 -x \\",
         *([f2_window] if f2_window else []),
-        *(
-            [
-                f"| nmrPipe -fn ZF -size {f2_zf_size} \\"
-            ]
-            if f2_zf.get("mode") != "none"
-            else []
-        ),
+        *([f"| nmrPipe -fn ZF -size {f2_zf_size} \\"] if f2_zf.get("mode") != "none" else []),
         _ft_flag_line(
             f2_fnmode,
             sampling=sampling,
@@ -1582,13 +1529,7 @@ def generate_3d_nus_script(
         _ps_line(phases, "F2"),
         "| nmrPipe -fn TP \\",
         *([f1_window] if f1_window else []),
-        *(
-            [
-                f"| nmrPipe -fn ZF -size {f1_zf_size} \\"
-            ]
-            if f1_zf.get("mode") != "none"
-            else []
-        ),
+        *([f"| nmrPipe -fn ZF -size {f1_zf_size} \\"] if f1_zf.get("mode") != "none" else []),
         _ft_flag_line(
             f1_fnmode,
             sampling=sampling,
@@ -1607,7 +1548,6 @@ def generate_3d_nus_script(
     return "\n".join(lines) + "\n"
 
 
-
 def param_schema() -> dict[str, Any]:
     """JSON schema for the processing-plan parameters (API_CONTRACT section 6 keys
     plus defaults/descriptions).
@@ -1621,8 +1561,7 @@ def param_schema() -> dict[str, Any]:
         "type": "object",
         "title": tr("NMRForge processing parameter"),
         "description": tr(
-            "Processing plan parameter (table editor/script rendering shared data "
-            "source)",
+            "Processing plan parameter (table editor/script rendering shared data source)",
         ),
         "properties": {
             "zero_fill": {
@@ -1645,7 +1584,7 @@ def param_schema() -> dict[str, Any]:
                     tr(
                         "Per-axis estimated linewidth (Hz); the target linewidth for automatic "
                         "indirect zero-fill. Defaults by nucleus (1H 8 / 15N 15 / 13C 20 Hz and so "
-                        "on) and is bounded below by 1/AQ.Example: {\"F1\": "
+                        'on) and is bounded below by 1/AQ.Example: {"F1": '
                         "15.0}",
                     )
                 ),
@@ -1770,23 +1709,31 @@ def param_schema() -> dict[str, Any]:
             "stages": {
                 "type": "array",
                 "description": tr(
-                    "List of processing stages (displayed line by line in the table "
-                    "editor)",
+                    "List of processing stages (displayed line by line in the table editor)",
                 ),
                 "items": {
                     "type": "object",
                     "properties": {
                         "id": {"type": "string", "description": tr("stage unique id")},
-                        "tool": {"type": "string", "description": tr(
-                            "Backend tools(nmrpipe/native)",
-                        )},
-                        "macro": {"type": "string", "description": tr(
-                            "NMRPipe macro(SP/ZF/FT/PS)",
-                        )},
+                        "tool": {
+                            "type": "string",
+                            "description": tr(
+                                "Backend tools(nmrpipe/native)",
+                            ),
+                        },
+                        "macro": {
+                            "type": "string",
+                            "description": tr(
+                                "NMRPipe macro(SP/ZF/FT/PS)",
+                            ),
+                        },
                         "params": {"type": "object", "description": tr("macro parameter")},
-                        "param_docs": {"type": "object", "description": tr(
-                            "parameter description",
-                        )},
+                        "param_docs": {
+                            "type": "object",
+                            "description": tr(
+                                "parameter description",
+                            ),
+                        },
                     },
                     "required": ["id", "tool", "macro"],
                 },
@@ -1872,9 +1819,7 @@ def render_scripts(
             "direct_poly_time": _as_bool(params.get("direct_poly_time", False)),
             "zero_fill": params.get("zero_fill"),
             "linewidth_hz": params.get("linewidth_hz"),
-            "points_per_line": _scalar_points_per_line(
-                params.get("points_per_line"), 4.0
-            ),
+            "points_per_line": _scalar_points_per_line(params.get("points_per_line"), 4.0),
         }
         if experiment.ndim >= 3:
             scripts["nus.com"] = generate_3d_nus_script(experiment, **kwargs)
@@ -1884,9 +1829,7 @@ def render_scripts(
         dp = None
         if direct_phase:
             direct_axis = "F2" if experiment.ndim == 2 else "F3"
-            dp = {
-                direct_axis: tuple(direct_phase.get(direct_axis, (0.0, 0.0)))
-            }
+            dp = {direct_axis: tuple(direct_phase.get(direct_axis, (0.0, 0.0)))}
         scripts["process.com"] = generate_process_script(
             experiment,
             plan,
@@ -1896,9 +1839,7 @@ def render_scripts(
             baseline=expand_baseline(experiment, params.get("baseline")),
             zero_fill=params.get("zero_fill"),
             linewidth_hz=params.get("linewidth_hz"),
-            points_per_line=_scalar_points_per_line(
-                params.get("points_per_line"), 4.0
-            ),
+            points_per_line=_scalar_points_per_line(params.get("points_per_line"), 4.0),
             ext_lo=str(params.get("ext_lo", "10.5")),
             ext_hi=str(params.get("ext_hi", "6.5")),
             extract=_as_bool(params.get("extract", True)),
@@ -1907,7 +1848,6 @@ def render_scripts(
             direct_poly_time=_as_bool(params.get("direct_poly_time", False)),
         )
     return scripts
-
 
 
 def generate_nus_finalize_script(
@@ -1971,9 +1911,7 @@ def generate_nus_finalize_script(
             f"xyz2pipe -in {planes} -x \\",
             *([f2_window] if f2_window else []),
             *(
-                [
-                    f"| nmrPipe -fn ZF -size {f2_size} \\"
-                ]
+                [f"| nmrPipe -fn ZF -size {f2_size} \\"]
                 if zf_plan.get("F2", {}).get("mode") != "none"
                 else []
             ),
@@ -1987,9 +1925,7 @@ def generate_nus_finalize_script(
             "| nmrPipe -fn TP \\",
             *([f1_window] if f1_window else []),
             *(
-                [
-                    f"| nmrPipe -fn ZF -size {f1_size} \\"
-                ]
+                [f"| nmrPipe -fn ZF -size {f1_size} \\"]
                 if zf_plan.get("F1", {}).get("mode") != "none"
                 else []
             ),
@@ -2017,9 +1953,7 @@ def generate_nus_finalize_script(
             f"nmrPipe -in {planes} \\",
             *([f1_window] if f1_window else []),
             *(
-                [
-                    f"| nmrPipe -fn ZF -size {f1_size} \\"
-                ]
+                [f"| nmrPipe -fn ZF -size {f1_size} \\"]
                 if zf_plan.get("F1", {}).get("mode") != "none"
                 else []
             ),
@@ -2056,10 +1990,7 @@ def expand_baseline(
         order = int(baseline.get("order", 0) or 0)
         sel = baseline.get("axes") or "all"
         target = axes if sel == "all" else [str(a) for a in sel]
-        return {
-            axis: {"enabled": enabled, "mode": mode, "order": order}
-            for axis in target
-        }
+        return {axis: {"enabled": enabled, "mode": mode, "order": order} for axis in target}
     out: dict[str, dict[str, Any]] = {}
     for axis in axes:
         cfg = dict(defaults)
@@ -2071,9 +2002,7 @@ def expand_baseline(
     return out
 
 
-def _baseline_line(
-    expanded: dict[str, dict[str, Any]], axis: str
-) -> list[str]:
+def _baseline_line(expanded: dict[str, dict[str, Any]], axis: str) -> list[str]:
     """Generate POLY lines from the per-axis configuration (an empty list = off)."""
     cfg = expanded.get(axis) or {}
     if not cfg.get("enabled", True):
@@ -2091,16 +2020,15 @@ def _insert_nus_baseline(
     ndim: int,
 ) -> list[str]:
     """Insert POLY at the designated places in the NUS script: after the
-    direct-dimension EXT and after each indirect-dimension PS."""
+    direct-dimension EXT and after each indirect-dimension PS.
+    """
     direct_anchor = (
         "| pipe2xyz -out nus3d_1/test%04d.ft1 -z"
         if ndim >= 3
         else "| pipe2xyz -out nus2d/test%03d.ft1 -z"
     )
     recon_mark = (
-        "xyz2pipe -in nus3d_rc/test%04d.ft1"
-        if ndim >= 3
-        else "xyz2pipe -in nus2d/recon.ft1"
+        "xyz2pipe -in nus3d_rc/test%04d.ft1" if ndim >= 3 else "xyz2pipe -in nus2d/recon.ft1"
     )
     direct_axis = "F3" if ndim >= 3 else "F2"
     indirect_axes = ["F2", "F1"] if ndim >= 3 else ["F1"]

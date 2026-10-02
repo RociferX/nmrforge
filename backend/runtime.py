@@ -60,13 +60,15 @@ _CANCEL = threading.Event()
 
 def request_cancel() -> None:
     """Request cancellation of the current task (in-memory computation responds
-    too)."""
+    too).
+    """
     _CANCEL.set()
 
 
 def clear_cancel() -> None:
     """Clear the cancellation flag (called before a new task so a previous
-    cancellation cannot leak into it)."""
+    cancellation cannot leak into it).
+    """
     _CANCEL.clear()
 
 
@@ -98,7 +100,8 @@ _descendants_cache: tuple[float, dict[int, list[int]]] = (0.0, {})
 
 def _children_map(timeout: float = 5.0) -> dict[int, list[int]]:
     """Full ps table -> {ppid: [pid]} (with a short TTL cache, so killing a whole
-    tree does not rescan the table repeatedly)."""
+    tree does not rescan the table repeatedly).
+    """
     global _descendants_cache
     now = _time.monotonic()
     if now - _descendants_cache[0] < _DESCENDANTS_CACHE_TTL:
@@ -108,6 +111,8 @@ def _children_map(timeout: float = 5.0) -> dict[int, list[int]]:
             ["ps", "-eo", "pid=,ppid="],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         ).stdout
     except (OSError, subprocess.TimeoutExpired):
@@ -126,7 +131,8 @@ def _children_map(timeout: float = 5.0) -> dict[int, list[int]]:
 
 def _collect_descendants(root_pid: int) -> list[int]:
     """Recursively collect every descendant PID of the root process (covers
-    descendants that escaped into a process group the application created)."""
+    descendants that escaped into a process group the application created).
+    """
     children = _children_map()
     found: list[int] = []
     stack = [root_pid]
@@ -140,7 +146,8 @@ def _collect_descendants(root_pid: int) -> list[int]:
 
 def _kill_process_tree(proc: subprocess.Popen) -> None:
     """Terminate the whole process tree, leaving no child behind (including
-    descendants that escaped into another process group)."""
+    descendants that escaped into another process group).
+    """
     if proc.poll() is not None:
         return
     try:
@@ -149,6 +156,7 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
                 ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=10,
             )
             if result.returncode != 0:
@@ -210,6 +218,7 @@ def _scan_processes() -> list[dict[str, Any]]:
                 ["powershell", "-NoProfile", "-Command", script],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=30,
             ).stdout
         except (OSError, subprocess.TimeoutExpired):
@@ -234,6 +243,8 @@ def _scan_processes() -> list[dict[str, Any]]:
             ["ps", "-eo", "pid=,ppid=,comm=,args="],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=15,
         ).stdout
     except (OSError, subprocess.TimeoutExpired):
@@ -255,9 +266,7 @@ def _scan_processes() -> list[dict[str, Any]]:
     return procs
 
 
-def _orphan_match(
-    proc: dict[str, Any], bin_dir: str | None, workspace: str | None
-) -> bool:
+def _orphan_match(proc: dict[str, Any], bin_dir: str | None, workspace: str | None) -> bool:
     """Decide whether a process belongs to a leftover NMRPipe toolchain of this
     workspace.
 
@@ -280,7 +289,8 @@ def _orphan_match(
 
 def _command_mentions_path(command: str, path: str | None) -> bool:
     """Whether the command line contains the target directory with a path boundary
-    (compatible across platform separators)."""
+    (compatible across platform separators).
+    """
     if not command or not path:
         return False
     normalized_command = command.replace("\\", "/")
@@ -301,7 +311,8 @@ def _orphan_targets(
     procs: list[dict[str, Any]], bin_dir: str | None, workspace: str | None
 ) -> list[dict[str, Any]]:
     """Return toolchain processes whose parent is gone and that provably belong to
-    the current workspace."""
+    the current workspace.
+    """
     live_pids = {int(proc["pid"]) for proc in procs}
     targets: list[dict[str, Any]] = []
     for proc in procs:
@@ -315,9 +326,7 @@ def _orphan_targets(
     return targets
 
 
-def cleanup_orphan_tasks(
-    bin_dir: str | None = None, workspace: str | None = None
-) -> int:
+def cleanup_orphan_tasks(bin_dir: str | None = None, workspace: str | None = None) -> int:
     """Clean up leftover NMRPipe processes that are not in the registry (orphans
     left by an abnormal exit or a closed application).
 
@@ -367,10 +376,11 @@ class CshRuntime:
         """
         shell = shutil_which_csh()
         if shell is None:
-            raise ToolError(tr(
-                "tcsh/csh not found on this machine (NMRPipe script requires "
-                "C-shell)",
-            ))
+            raise ToolError(
+                tr(
+                    "tcsh/csh not found on this machine (NMRPipe script requires C-shell)",
+                )
+            )
         parts = ["if (-e ~/.cshrc) source ~/.cshrc"]
         if cwd:
             parts.append(f"cd '{cwd}'")

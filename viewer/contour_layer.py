@@ -46,11 +46,7 @@ class ContourLayer(pg.GraphicsObject):
         super().__init__(parent)
         self._zoom = float(zoom)
         self._pen = pg.mkPen(pen)
-        self._pen_neg = (
-            pg.mkPen(neg_pen)
-            if neg_pen is not None
-            else pg.mkPen("#e74c3c", width=1)
-        )
+        self._pen_neg = pg.mkPen(neg_pen) if neg_pen is not None else pg.mkPen("#e74c3c", width=1)
         self._data: np.ndarray | None = None
         self._levels: np.ndarray | None = None
         self._gen = None
@@ -67,10 +63,9 @@ class ContourLayer(pg.GraphicsObject):
         if self._data.ndim != 2:
             raise ValueError(
                 tr(
-                "Contours only support 2D data (currently {p0} "
-                "dimension)",
-                p0=self._data.ndim,
-            )
+                    "Contours only support 2D data (currently {p0} dimension)",
+                    p0=self._data.ndim,
+                )
             )
         self._levels = np.asarray(levels, dtype=float)
         self._smooth = None
@@ -80,11 +75,7 @@ class ContourLayer(pg.GraphicsObject):
             # layout.
             import contourpy
 
-            self._gen = (
-                contourpy.contour_generator(z=self._data)
-                if self._data.size
-                else None
-            )
+            self._gen = contourpy.contour_generator(z=self._data) if self._data.size else None
             self._build_paths()
         else:
             self._gen = None

@@ -4,9 +4,11 @@ Scope, as settled by the user on 2026-09-13 (kept for testing purposes):
 
 - `run_parameter_study` / `run_sweep` / the CLI / `records/` **never call this module**,
   and no sigma/delta-delta file is produced: the software processes and records, nothing more;
-- it exists for **tests and review**: regression tests use it to check that parameters really took
+- it exists for **tests and review**: regression tests use it to check that parameters really
+took
 effect (all-zero sigma means a silently ignored parameter - a defect seen on real data before),
-  to compare the peak positions of the two localisation methods, or as a reference implementation;
+  to compare the peak positions of the two localisation methods, or as a reference
+  implementation;
 - significance statements in a paper remain the downstream code's own job.
 
 ---
@@ -43,13 +45,11 @@ from ui_support.i18n import tr
 DEFAULT_CSP_N_WEIGHT = 0.2
 DEFAULT_NUCLEI: tuple[str, ...] = ("1H", "15N")
 
-DEFINITION = (
-    tr(
-        "sigma is the peak-position standard deviation across parameter combinations; delta_std = "
-        "sqrt(sum_n (w_n*sigma_n)^2), w(1H)=1, w(15N)=csp_n_weight, others 1; delta_max is the "
-        "largest such value relative to the mean "
-        "position.",
-    )
+DEFINITION = tr(
+    "sigma is the peak-position standard deviation across parameter combinations; delta_std = "
+    "sqrt(sum_n (w_n*sigma_n)^2), w(1H)=1, w(15N)=csp_n_weight, others 1; delta_max is the "
+    "largest such value relative to the mean "
+    "position.",
 )
 
 
@@ -138,7 +138,7 @@ def position_uncertainty(
     for peak_id in sorted(per_peak):
         entry = per_peak[peak_id]
         # only combinations where every measured nucleus was found count,
-# so half-data cannot skew sigma
+        # so half-data cannot skew sigma
         key_sets = [set(entry["values"].get(n, {}).keys()) for n in wanted]
         common = set.intersection(*key_sets) if key_sets and all(key_sets) else set()
         item = PeakUncertainty(
@@ -154,29 +154,17 @@ def position_uncertainty(
         for nucleus in wanted:
             values = [entry["values"][nucleus][run_id] for run_id in ordered]
             item.mean[nucleus] = statistics.fmean(values)
-            item.sigma[nucleus] = (
-                statistics.stdev(values) if len(values) > 1 else 0.0
-            )
+            item.sigma[nucleus] = statistics.stdev(values) if len(values) > 1 else 0.0
             item.value_range[nucleus] = max(values) - min(values)
         item.delta_std = math.sqrt(
-            sum(
-                (_weight(n, csp_n_weight) * item.sigma.get(n, 0.0)) ** 2
-                for n in wanted
-            )
+            sum((_weight(n, csp_n_weight) * item.sigma.get(n, 0.0)) ** 2 for n in wanted)
         )
         worst_run = ""
         worst_delta = 0.0
         for run_id in ordered:
             delta = math.sqrt(
                 sum(
-                    (
-                        _weight(n, csp_n_weight)
-                        * (
-                            entry["values"][n][run_id]
-                            - item.mean[n]
-                        )
-                    )
-                    ** 2
+                    (_weight(n, csp_n_weight) * (entry["values"][n][run_id] - item.mean[n])) ** 2
                     for n in wanted
                 )
             )
@@ -235,9 +223,7 @@ def _percentile(sorted_values: Sequence[float], percent: float) -> float:
     lower = int(math.floor(rank))
     upper = min(lower + 1, len(sorted_values) - 1)
     weight = rank - lower
-    return float(
-        sorted_values[lower] * (1.0 - weight) + sorted_values[upper] * weight
-    )
+    return float(sorted_values[lower] * (1.0 - weight) + sorted_values[upper] * weight)
 
 
 __all__ = [

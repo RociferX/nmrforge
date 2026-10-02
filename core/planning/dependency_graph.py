@@ -57,12 +57,13 @@ class ProcessingDag:
         for nid, node in self.nodes.items():
             for dep in node.depends_on:
                 if dep not in self.nodes:
-                    raise ValueError(tr(
-                        "node {p0} Depends on non-existent node "
-                        "{p1}",
-                        p0=nid,
-                        p1=dep,
-                    ))
+                    raise ValueError(
+                        tr(
+                            "node {p0} Depends on non-existent node {p1}",
+                            p0=nid,
+                            p1=dep,
+                        )
+                    )
                 dependents[dep].append(nid)
                 indegree[nid] += 1
         queue = sorted(nid for nid, deg in indegree.items() if deg == 0)
@@ -81,7 +82,8 @@ class ProcessingDag:
 
     def downstream(self, node_id: str) -> list[str]:
         """Return the ids of all downstream nodes (those affected through invalidates) in BFS
-        order."""
+        order.
+        """
         node = self.nodes.get(node_id)
         if node is None:
             return []

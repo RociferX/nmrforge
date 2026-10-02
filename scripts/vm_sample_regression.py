@@ -63,9 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[fid] {fid_path} exists={Path(fid_path).is_file()}")
 
     params = {"extract": False} if opts.no_extract else {}
-    spectrum = generate_spectrum(
-        manager, entry.id, result.data_id, backend, params=params
-    )
+    spectrum = generate_spectrum(manager, entry.id, result.data_id, backend, params=params)
     print(f"[spectrum] {spectrum} exists={Path(spectrum).is_file()}")
 
     process_dir = project_dir / entry.id / result.data_id / "process"

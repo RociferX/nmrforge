@@ -34,9 +34,7 @@ def _manager_with_spectrum_run(tmp_path: Path, *, ref: str, data_id: str = "d_00
             "baseline": {"mode": "auto"},
         },
     )
-    manager.finish_run(
-        run.run_id, "success", outputs={"spectrum_path": "/fake/1.ft2"}
-    )
+    manager.finish_run(run.run_id, "success", outputs={"spectrum_path": "/fake/1.ft2"})
     return manager, entry.id, data.id
 
 
@@ -44,9 +42,7 @@ def test_unified_run_is_used_as_base_params(tmp_path: Path) -> None:
     """The run parameters of the unified route (phase_optimize_unified) must serve as the
     SMILE base parameters.
     """
-    manager, exp_id, data_id = _manager_with_spectrum_run(
-        tmp_path, ref="phase_optimize_unified"
-    )
+    manager, exp_id, data_id = _manager_with_spectrum_run(tmp_path, ref="phase_optimize_unified")
     ctrl = ProcessingController(manager)
 
     params = ctrl._last_spectrum_params(exp_id, data_id)

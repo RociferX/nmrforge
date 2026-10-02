@@ -98,13 +98,9 @@ def main(argv: list[str] | None = None) -> int:
         actual_size = path.stat().st_size
         actual_sha = _sha256(path)
         if str(actual_size) != row["size"]:
-            problems.append(
-                f"{row['name']}: size {actual_size} != recorded {row['size']}"
-            )
+            problems.append(f"{row['name']}: size {actual_size} != recorded {row['size']}")
         if actual_sha != row["sha"]:
-            problems.append(
-                f"{row['name']}: sha256 {actual_sha} != recorded {row['sha']}"
-            )
+            problems.append(f"{row['name']}: sha256 {actual_sha} != recorded {row['sha']}")
         if not args.quiet and str(actual_size) == row["size"] and actual_sha == row["sha"]:
             print(f"ok    {row['name']}  {actual_size} bytes  sha256 {actual_sha[:16]}...")
 

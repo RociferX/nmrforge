@@ -53,13 +53,7 @@ def main() -> None:
         joint="curve",
     )
 
-    out = (
-        Path(__file__).resolve().parent.parent
-        / "packaging"
-        / "linux"
-        / "icons"
-        / "nmrforge.png"
-    )
+    out = Path(__file__).resolve().parent.parent / "packaging" / "linux" / "icons" / "nmrforge.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     img.resize((SIZE, SIZE), Image.LANCZOS).save(out)
     print(f"written {out}")

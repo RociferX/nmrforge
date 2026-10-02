@@ -34,9 +34,7 @@ def test_dimensions_acqus_td_zero_falls_back_to_acqu(tmp_path: object) -> None:
         encoding="utf-8",
     )
     (dst / "acqu").write_text(
-        "##$TD= 8\n"
-        "##$NUC1= 1H\n"
-        "##END=\n",
+        "##$TD= 8\n##$NUC1= 1H\n##END=\n",
         encoding="utf-8",
     )
     params = parse_dataset_params(dst)

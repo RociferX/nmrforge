@@ -8,6 +8,7 @@ import pytest
 
 from backend.config import (
     load_processing_defaults,
+    resolve_ext_window,
     resolve_nthread,
     resolve_points_per_line,
     smile_thread_limit,
@@ -68,6 +69,30 @@ def test_resolve_helpers() -> None:
     assert resolve_nthread(0) == min(2, limit)
 
 
+def test_non_proton_direct_dimension_defaults_to_acquired_sweep() -> None:
+    "Regression coverage: test non proton direct dimension defaults to acquired sweep."
+    from core.data.internal_data_model import AxisRole, Dimension, Experiment
+
+    experiment = Experiment(
+        dataset_id="hcc",
+        source_path=Path("."),
+        dimensions=[
+            Dimension(
+                "F2",
+                "13C",
+                sf=150.0,
+                sw=27000.0,
+                o1p=100.0,
+                td=1024,
+                role=AxisRole.DIRECT,
+            )
+        ],
+    )
+
+    assert resolve_ext_window(experiment) == ("190", "10")
+    assert resolve_ext_window(experiment, "120", "80") == ("120", "80")
+
+
 def test_smile_thread_limit_follows_core_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -100,9 +125,7 @@ def test_zero_fill_plan_uses_config_defaults(
         "nthread": 2,
         "nmrpipe_path": "",
     }
-    monkeypatch.setattr(
-        config_mod, "load_processing_defaults", lambda *a, **k: dict(cfg_defaults)
-    )
+    monkeypatch.setattr(config_mod, "load_processing_defaults", lambda *a, **k: dict(cfg_defaults))
     plan = zero_fill_plan(exp)
     td = effective_td(exp)
     # 0.2.199-patch29dq (user): NUS direct-dimension zero fill defaults to 2xTD (same as
@@ -195,9 +218,7 @@ def test_gui_settings_migrate_legacy_top_level_keys(
         "local_config_path",
         lambda filename="nmrforge.local.yaml": local,
     )
-    backend_defaults = backend_config.load_processing_defaults(
-        backend_config.load_config()
-    )
+    backend_defaults = backend_config.load_processing_defaults(backend_config.load_config())
     assert backend_defaults["nmrpipe_path"] == "/legacy/bin"
     assert backend_defaults["linewidth_hz"]["1H"] == 11
 
@@ -290,11 +311,13 @@ def test_settings_and_ui_state_writes_go_through_the_atomic_helper(
 
     calls: list[Path] = []
     real_text, real_json = manager.atomic_write_text, manager.atomic_write_json
+
     def _spy_text(path, body):
         calls.append(Path(path))
         return real_text(path, body)
 
     monkeypatch.setattr(manager, "atomic_write_text", _spy_text)
+
     def _spy_json(path, data):
         calls.append(Path(path))
         return real_json(path, data)

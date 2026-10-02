@@ -36,6 +36,7 @@ def _action(**overrides) -> QcAction:
 
 # ------------------------------------------------------------------ the record module itself
 
+
 def test_record_has_every_field_phase10_requires(tmp_path: Path) -> None:
     log = QcAuditLog(tmp_path)
     written = log.record(_action())
@@ -116,6 +117,7 @@ def test_action_round_trips_through_dict() -> None:
 
 
 # ------------------------------------------------------------------ the real wiring points
+
 
 def test_bad_point_repair_is_recorded(tmp_path: Path) -> None:
     """Bad-point repair: records the detection rule, the action and the before/after values."""
@@ -202,7 +204,9 @@ def test_source_clean_removal_is_recorded(tmp_path: Path, bruker_dir: Path) -> N
     _record_source_clean(log, experiment, [bruker_dir / "nus_2d"], 144, [(300,)], True)
 
     action = read_audit(tmp_path)[0]
-    assert action.action_taken.startswith("removed_from_source_ser_and_nuslist")
+    from core.audit.qc_audit import SOURCE_CLEAN_ACTION
+
+    assert action.action_taken == SOURCE_CLEAN_ACTION
     assert "ser" in action.location and "nuslist" in action.location
     assert action.before_state == {"sampling_points": 145, "bad_points": 1}
     assert action.after_state == {"sampling_points": 144}
@@ -223,9 +227,7 @@ def test_source_clean_without_removal_says_so(tmp_path: Path, bruker_dir: Path) 
     assert action.extra["source_removed"] is False
 
 
-def test_source_clean_without_bad_points_records_nothing(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_source_clean_without_bad_points_records_nothing(tmp_path: Path, bruker_dir: Path) -> None:
     """No bad points means no change, so no noise record should be produced."""
     from backend.nmrpipe_backend import _record_source_clean
     from core.data.bruker_reader import read_dataset

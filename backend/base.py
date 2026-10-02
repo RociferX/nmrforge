@@ -45,7 +45,8 @@ class ProcessingBackend(Protocol):
     ) -> dict[str, Any]:
         """Run the processing according to the plan and return the outputs and metrics.
 
-        params keys: extract (bool, True by default) / ext_lo (str, "10.5") / ext_hi (str, "6.5")
+        params keys: extract (bool, True by default) / ext_lo (str, "10.5") / ext_hi (str,
+        "6.5")
         (G2B-006, effective on the uniform path).
         """
         ...
@@ -61,7 +62,8 @@ class ProcessingBackend(Protocol):
 
         fid_com_overrides: manual parameter overrides (0.2.163-patch13), applied segment by
         segment to
-        fid.com, while conversion/slicing/merging/bad-point repair still follow the automatic path.
+        fid.com, while conversion/slicing/merging/bad-point repair still follow the automatic
+        path.
         Returns stable keys: {success, fid_path, message, logs} (API_CONTRACT §8.3).
         """
         ...

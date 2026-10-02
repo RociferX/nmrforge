@@ -34,7 +34,7 @@ def test_infer_nucleus_from_sf() -> None:
     assert infer_nucleus(600.13) == "1H"
     assert infer_nucleus(60.82) == "15N"
     assert infer_nucleus(150.9) == "13C"
-    # 0.2.110: 1200 MHz (1.2 GHz) system regression -- the sampleI indirect-dimension sf≈121.7
+    # 0.2.110: 1200 MHz (1.2 GHz) system regression -- the data/8 indirect-dimension sf≈121.7
     # is no longer misjudged as 31P
     assert infer_nucleus(121.67) == "15N"
     assert infer_nucleus(301.9) == "13C"
@@ -146,9 +146,7 @@ def _metadata_dims() -> dict:
     }
 
 
-def test_spectrum_panel_uses_nucleus_labels(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_spectrum_panel_uses_nucleus_labels(tmp_path: Path, qapp: QApplication) -> None:
     """Opening a spectrum: the axis labels are the header nucleus names (N-H), not F1/F2;
     metadata takes no part in axis order/labels (0.2.199-patch29dh, user: the software has an
     axis-rearrangement step)."""
@@ -163,9 +161,7 @@ def test_spectrum_panel_uses_nucleus_labels(
     _write_ft2_nh(spectra / f"{exp_id}-{data_id}.ft2")
     meta_path = manager.data_metadata_path(exp_id, data_id)
     meta_path.parent.mkdir(parents=True, exist_ok=True)
-    meta_path.write_text(
-        json.dumps(_metadata_dims()), encoding="utf-8"
-    )
+    meta_path.write_text(json.dumps(_metadata_dims()), encoding="utf-8")
     manager.save()
     panel = SpectrumPanel(manager)
     panel.set_context(exp_id, data_id)
@@ -176,9 +172,7 @@ def test_spectrum_panel_uses_nucleus_labels(
     panel.close()
 
 
-def test_spectrum_panel_fallback_labels(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_spectrum_panel_fallback_labels(tmp_path: Path, qapp: QApplication) -> None:
     """Without metadata the labels are derived from the header nuclei (0.2.152, no F1/F2
     fallback any more)."""
     from gui.spectrum_panel import SpectrumPanel
@@ -247,9 +241,7 @@ def test_projection_same_nucleus_uses_header_and_subscript(
     panel.close()
 
 
-def test_viewer_app_axis_labels_from_path(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_viewer_app_axis_labels_from_path(tmp_path: Path, qapp: QApplication) -> None:
     """Standalone viewer: the axis labels come from the spectrum header nuclei; metadata takes
     no part (0.2.199-patch29dh, user: the software has an axis-rearrangement step)."""
     from viewer.app import SpectrumWindow
@@ -259,15 +251,14 @@ def test_viewer_app_axis_labels_from_path(
     spectra.mkdir(parents=True, exist_ok=True)
     ft2 = spectra / "exp_001-d_001.ft2"
     _write_ft2_nh(ft2)
-    (base / "metadata.json").write_text(
-        json.dumps(_metadata_dims()), encoding="utf-8"
-    )
+    (base / "metadata.json").write_text(json.dumps(_metadata_dims()), encoding="utf-8")
     window = SpectrumWindow()
     assert window.load_spectrum(ft2) is True
     assert window.viewer._primary is not None
     assert window.viewer._primary.x_axis.label == "H"
     assert window.viewer._primary.y_axis.label == "N"
     window.close()
+
 
 def test_parse_nmrpipe_label_suffix() -> None:
     """0.2.199-patch29ai: homonuclear subscript labels (15Nx/1Hy/1Hz) parse directly to the
@@ -288,9 +279,8 @@ def test_parse_nmrpipe_label_suffix() -> None:
     assert _parse_nmrpipe_label("") == ""
     assert _parse_nmrpipe_label("未知") == ""
 
-def test_projection_nn_uses_subscript_labels(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+
+def test_projection_nn_uses_subscript_labels(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.199-patch29aj: the HNN NN projection plane (15Ny-15Nx.ft2) has x=Ny, y=Nx;
     fixed_axis pins 1H (F3) correctly and the dimensions map to the remaining two axes."""
     from gui.spectrum_panel import SpectrumPanel
@@ -330,9 +320,7 @@ def test_projection_nn_uses_subscript_labels(
     panel.close()
 
 
-def test_projection_nn_axis_params_from_3d(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_projection_nn_axis_params_from_3d(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.199-patch29aj: the NN projection axis parameters are localized from the 3D spectrum
     by logical index (x=15Ny->F1, y=15Nx->F2) instead of relying on the unreliable projection
     file header."""
@@ -373,9 +361,7 @@ def test_projection_nn_axis_params_from_3d(
         SpectrumAxis("Nx", 8, 2000.0, 90.0, 118.0, 118.0 * 90.0),
         SpectrumAxis("H", 16, 6000.0, 600.0, 4.7, 4.7 * 600.0),
     ]
-    panel._spectrum3d_panel._spectrum3d = Spectrum3D(
-        np.zeros((8, 8, 16), dtype=np.float32), axes3
-    )
+    panel._spectrum3d_panel._spectrum3d = Spectrum3D(np.zeros((8, 8, 16), dtype=np.float32), axes3)
     spec = panel._load_projection_ft2(proj)
     assert spec is not None
     assert spec.x_axis.obs_mhz == pytest.approx(60.0)  # F1(15Ny)

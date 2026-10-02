@@ -67,7 +67,8 @@ def now_iso() -> str:
 def condition_token(label: str, fallback: str = "condition") -> str:
     """Condition label -> a unique, directory-safe token.
 
-    Already-safe ASCII labels are left alone; a sanitised label gets a short hash of the original,
+    Already-safe ASCII labels are left alone; a sanitised label gets a short hash of the
+    original,
     so ``A/B`` and ``A_B``, or two non-ASCII labels, cannot land in one directory.
     """
     raw = str(label or "")
@@ -103,9 +104,7 @@ class DatasetRef:
     @property
     def token(self) -> str:
         """Subdirectory name for this condition (falls back to the data key when untagged)."""
-        return condition_token(
-            self.condition, fallback=f"{self.exp_id}_{self.data_id}"
-        )
+        return condition_token(self.condition, fallback=f"{self.exp_id}_{self.data_id}")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -304,8 +303,7 @@ def _validate_dataset_tokens(refs: list[DatasetRef]) -> None:
         if previous is not None and previous.key != ref.key:
             raise DatasetError(
                 tr(
-                    "condition directory token collision: {p0!r} and {p1!r} both map to "
-                    "{p2!r}",
+                    "condition directory token collision: {p0!r} and {p1!r} both map to {p2!r}",
                     p0=previous.condition or previous.key,
                     p1=ref.condition or ref.key,
                     p2=ref.token,
@@ -371,11 +369,12 @@ def open_study(
     elif create:
         manager = ProjectManager.create_project(root_path, name or root_path.name)
     else:
-        raise DatasetError(tr(
-            "study root does not exist or is not an NMRForge project: "
-            "{p0}",
-            p0=root_path,
-        ))
+        raise DatasetError(
+            tr(
+                "study root does not exist or is not an NMRForge project: {p0}",
+                p0=root_path,
+            )
+        )
     if backend is None:
         from backend.config import load_config
         from backend.factory import create_backend
@@ -427,11 +426,13 @@ def add_dataset(
     Raises
     ------
     DatasetError
-        missing ``acqus``, an unrecognisable experiment, or data already present for that condition.
+        missing ``acqus``, an unrecognisable experiment, or data already present for that
+        condition.
 
     Side effects
     ------------
-    Registers the experiment and data entry and writes ``project.json``; raw data stays read-only.
+    Registers the experiment and data entry and writes ``project.json``; raw data stays
+    read-only.
 
     Examples
     --------
@@ -507,9 +508,7 @@ def add_dataset(
     return session.add_dataset_ref(ref)
 
 
-def dataset_info(
-    session: StudySession, dataset: DatasetRef | None = None
-) -> dict[str, Any]:
+def dataset_info(session: StudySession, dataset: DatasetRef | None = None) -> dict[str, Any]:
     """Dataset summary (dimensions, nuclei, sampling, origin) for downstream write-ups."""
     ref = dataset or session.dataset
     if ref is None:

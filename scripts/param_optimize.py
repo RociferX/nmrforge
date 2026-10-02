@@ -31,30 +31,34 @@ def _load_spectrum(path: str):
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=(
-        "Post-processing parameter optimisation (phase/baseline, only reconstruct once)"
-    ))
-    parser.add_argument("datasets", nargs="+", help=(
-        "Bruker dataset directory (multiple=multiple experiments)"
-    ))
-    parser.add_argument("--spectrum", default="", help=(
-        "Already have final spectrum (ft2/ft3), skip reconstruction and directly optimise"
-    ))
-    parser.add_argument("--ext-lo", default="9.0", help=(
-        "1H extraction window low ppm (default 9.0)"
-    ))
-    parser.add_argument("--ext-hi", default="7.5", help=(
-        "1H extraction window height ppm (default 7.5)"
-    ))
-    parser.add_argument("--nthread", type=int, default=2, help=(
-        "SMILE Number of threads (default 2)"
-    ))
-    parser.add_argument("--work-dir", default="", help=(
-        "Working directory (default dataset sibling <id>.nmrpipe)"
-    ))
-    parser.add_argument("--out", default="", help=(
-        "JSON Report output path (default dataset sibling)"
-    ))
+    parser = argparse.ArgumentParser(
+        description=(
+            "Post-processing parameter optimisation (phase/baseline, only reconstruct once)"
+        )
+    )
+    parser.add_argument(
+        "datasets", nargs="+", help=("Bruker dataset directory (multiple=multiple experiments)")
+    )
+    parser.add_argument(
+        "--spectrum",
+        default="",
+        help=("Already have final spectrum (ft2/ft3), skip reconstruction and directly optimise"),
+    )
+    parser.add_argument(
+        "--ext-lo", default="9.0", help=("1H extraction window low ppm (default 9.0)")
+    )
+    parser.add_argument(
+        "--ext-hi", default="7.5", help=("1H extraction window height ppm (default 7.5)")
+    )
+    parser.add_argument(
+        "--nthread", type=int, default=2, help=("SMILE Number of threads (default 2)")
+    )
+    parser.add_argument(
+        "--work-dir", default="", help=("Working directory (default dataset sibling <id>.nmrpipe)")
+    )
+    parser.add_argument(
+        "--out", default="", help=("JSON Report output path (default dataset sibling)")
+    )
     args = parser.parse_args(argv)
 
     paths = [Path(p) for p in args.datasets]

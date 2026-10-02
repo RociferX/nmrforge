@@ -38,14 +38,10 @@ class NMRViewBox(pg.ViewBox):
             ev.accept()
             pos = ev.pos()
             last_pos = ev.lastPos()
-            diff = np.array(
-                [pos.x() - last_pos.x(), pos.y() - last_pos.y()]
-            ) * -1.0
+            diff = np.array([pos.x() - last_pos.x(), pos.y() - last_pos.y()]) * -1.0
             mouse_enabled = np.array(self.state["mouseEnabled"], dtype=float)
             transform = self.childGroup.transform().inverted()[0]
-            p1 = transform.map(
-                QtCore.QPointF(float(diff[0]), float(diff[1]))
-            )
+            p1 = transform.map(QtCore.QPointF(float(diff[0]), float(diff[1])))
             p0 = transform.map(QtCore.QPointF(0.0, 0.0))
             moved = p1 - p0
             x = moved.x() if mouse_enabled[0] == 1 else None
@@ -143,7 +139,4 @@ class NMRViewBox(pg.ViewBox):
                 changed = True
             new_ranges[axis_idx] = (lo, hi)
         if changed:
-            super().setRange(
-                xRange=new_ranges[0], yRange=new_ranges[1], padding=0
-            )
-
+            super().setRange(xRange=new_ranges[0], yRange=new_ranges[1], padding=0)

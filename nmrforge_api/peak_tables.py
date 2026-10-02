@@ -32,7 +32,6 @@ from nmrforge_api.peaks import PeakMeasurement
 
 NAN_TEXT = "NaN"
 
-#: Columns shared by both tables (order = header order); parabolic writes NaN where N/A
 PEAK_TABLE_COLUMNS: tuple[str, ...] = (
     "workflow_id",
     "condition",
@@ -46,13 +45,11 @@ PEAK_TABLE_COLUMNS: tuple[str, ...] = (
     "SNR",
     "detected",
     "localization_method",
-    "localization_requested",
     "fallback",
     "fallback_reason",
     "fit_success",
     "FWHM_H",
     "FWHM_N",
-    "fit_rmse",
     "boundary_hit",
     "duplicate_localization",
     "cell_low_H",
@@ -65,13 +62,6 @@ PEAK_TABLE_COLUMNS: tuple[str, ...] = (
     "shift_vs_picked_N",
 )
 
-#: The only remaining Gaussian-only column: the parabolic table writes NaN (since
-#: 2026-09-19 / P3-7 its fit_success / FWHM_* / boundary_hit carry real values -
-#: a three-point parabola gives an equivalent linewidth and an edge flag; only
-#: fit_rmse needs a fitting residual, and a three-point parabola is exact)
-GAUSSIAN_ONLY_COLUMNS: tuple[str, ...] = ("fit_rmse",)
-
-#: cell/identity QC columns (P1-3): real values in reference tables, NaN in workflow ones
 _CELL_COLUMNS: tuple[str, ...] = (
     "cell_low_H",
     "cell_high_H",
@@ -104,16 +94,13 @@ _FLOAT_COLUMNS: frozenset[str] = frozenset(
         "SNR",
         "FWHM_H",
         "FWHM_N",
-        "fit_rmse",
         "intensity_ratio_vs_picked",
         "shift_vs_picked_H",
         "shift_vs_picked_N",
     }
 )
 #: integer columns (grid-point indices; missing written as NaN, read back as int)
-_INT_COLUMNS: frozenset[str] = frozenset(
-    {"cell_low_H", "cell_high_H", "cell_low_N", "cell_high_N"}
-)
+_INT_COLUMNS: frozenset[str] = frozenset({"cell_low_H", "cell_high_H", "cell_low_N", "cell_high_N"})
 _TEXT_COLUMNS: frozenset[str] = frozenset(
     {
         "workflow_id",
@@ -122,7 +109,6 @@ _TEXT_COLUMNS: frozenset[str] = frozenset(
         "reference_peak_id",
         "assignment",
         "localization_method",
-        "localization_requested",
         "fallback_reason",
     }
 )
@@ -199,9 +185,7 @@ def write_peak_table(path: Path | str, rows: Sequence[Mapping[str, Any]]) -> Pat
         writer = csv.writer(handle)
         writer.writerow(list(PEAK_TABLE_COLUMNS))
         for row in rows:
-            writer.writerow(
-                [format_cell(column, row.get(column)) for column in PEAK_TABLE_COLUMNS]
-            )
+            writer.writerow([format_cell(column, row.get(column)) for column in PEAK_TABLE_COLUMNS])
     return target
 
 
@@ -219,11 +203,7 @@ def read_peak_table(path: Path | str) -> list[dict[str, Any]]:
                 continue
             if key in _BOOL_COLUMNS:
                 token = str(value).strip().lower()
-                row[key] = (
-                    float('nan')
-                    if token in ("", "nan")
-                    else _as_bool(value)
-                )
+                row[key] = float("nan") if token in ("", "nan") else _as_bool(value)
             elif key in _FLOAT_COLUMNS:
                 number = _as_float(value)
                 row[key] = float("nan") if number is None else number
@@ -313,12 +293,6 @@ def peak_table_row(
     fwhm = _fwhm_by_nucleus(record)
     cell_low = dict(getattr(measurement, "cell_low", None) or {})
     cell_high = dict(getattr(measurement, "cell_high", None) or {})
-    requested = str(
-        record.get("requested_method")
-        or record.get("localization_method")
-        or method
-    )
-    is_gaussian = str(method) == "gaussian"
     row: dict[str, Any] = {
         "workflow_id": str(workflow_id),
         "condition": str(condition),
@@ -334,23 +308,15 @@ def peak_table_row(
         "SNR": _as_float(getattr(measurement, "snr", None)),
         "detected": bool(getattr(measurement, "found", False)),
         "localization_method": str(method),
-        "localization_requested": requested,
         "fallback": bool(record.get("fallback") or fallback_reason),
-        "fallback_reason": str(
-            record.get("fallback_reason") or fallback_reason or ""
-        ),
+        "fallback_reason": str(record.get("fallback_reason") or fallback_reason or ""),
         "duplicate_localization": False,
     }
-    # P3-7: the QC columns follow the method this row actually used (Gaussian fit or
-    # three-point parabola); keys the record does not carry become None -> NaN.
     success = record.get("fit_success")
-    if success is None and is_gaussian:
-        success = record.get("actual_method") == "gaussian"
     edge = record.get("boundary_hit")
     row["fit_success"] = None if success is None else bool(success)
     row["FWHM_H"] = fwhm.get("1H")
     row["FWHM_N"] = fwhm.get("15N")
-    row["fit_rmse"] = _as_float(record.get("fit_rmse"))
     row["boundary_hit"] = None if edge is None else bool(edge)
     # P1-3 per-peak cell/identity QC. Only the reference measurement (which relocates
     # records from the peak identity table) writes real values; combination (workflow)
@@ -361,15 +327,9 @@ def peak_table_row(
         row["cell_low_N"] = cell_low.get("15N")
         row["cell_high_N"] = cell_high.get("15N")
         row["cell_edge"] = bool(getattr(measurement, "cell_edge", False))
-        row["intensity_ratio_vs_picked"] = _as_float(
-            getattr(measurement, "intensity_ratio", None)
-        )
-        row["shift_vs_picked_H"] = _as_float(
-            (measurement.deltas or {}).get("1H")
-        )
-        row["shift_vs_picked_N"] = _as_float(
-            (measurement.deltas or {}).get("15N")
-        )
+        row["intensity_ratio_vs_picked"] = _as_float(getattr(measurement, "intensity_ratio", None))
+        row["shift_vs_picked_H"] = _as_float((measurement.deltas or {}).get("1H"))
+        row["shift_vs_picked_N"] = _as_float((measurement.deltas or {}).get("15N"))
     else:
         for column in _CELL_COLUMNS:
             row[column] = None
@@ -403,32 +363,6 @@ def peak_table_rows(
     return rows
 
 
-def gaussian_fallback_rows(
-    measurements: Sequence[PeakMeasurement],
-    *,
-    workflow_id: str,
-    condition: str = "",
-    dataset: str = "",
-    reason: str,
-) -> list[dict[str, Any]]:
-    """The Gaussian table for non-2D data: positions follow parabolic, the fallback is recorded.
-
-    Nothing is skipped and no row is dropped: ``fit_success=false``, ``fallback=true``,
-    ``fallback_reason=<reason>`` keep the two tables isomorphic.
-    """
-    return [
-        peak_table_row(
-            measurement,
-            workflow_id=workflow_id,
-            condition=condition,
-            dataset=dataset,
-            method="gaussian",
-            fallback_reason=reason,
-        )
-        for measurement in measurements
-    ]
-
-
 def peak_table_digest(path: Path | str) -> dict[str, Any]:
     """Peak-table record summary: path, SHA-256, row count, detected count."""
     from core.project.manager import sha256_file
@@ -444,12 +378,10 @@ def peak_table_digest(path: Path | str) -> dict[str, Any]:
 
 
 __all__ = [
-    "GAUSSIAN_ONLY_COLUMNS",
     "NAN_TEXT",
     "PEAK_TABLE_COLUMNS",
     "REFERENCE_WORKFLOW_ID",
     "format_cell",
-    "gaussian_fallback_rows",
     "mark_duplicate_localization",
     "peak_table_digest",
     "peak_table_row",

@@ -2,7 +2,8 @@
 nmrforge_data/config/nmrforge.yaml.
 
 - ``load_processing_defaults()`` feeds the editable defaults of the GUI settings dialog;
-- the backend falls back to the configuration when no argument is passed explicitly (explicit params
+- the backend falls back to the configuration when no argument is passed explicitly (explicit
+params
   win, invalid values fall back to the built-in defaults).
 """
 
@@ -44,9 +45,7 @@ def load_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
     try:
         import yaml
 
-        raw = yaml.safe_load(
-            resource_path("config/nmrforge.yaml").read_text(encoding="utf-8")
-        )
+        raw = yaml.safe_load(resource_path("config/nmrforge.yaml").read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001 - missing/corrupt config counts as empty (built-in defaults apply)
         raw = {}
     if not isinstance(raw, dict):
@@ -64,7 +63,8 @@ def load_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
 
 def _normalize_legacy_local(local: dict[str, Any]) -> dict[str, Any]:
     """Convert the old GUI top-level shared keys into the canonical structure, effective from the
-    first backend read."""
+    first backend read.
+    """
     normalized = dict(local)
     legacy_path = normalized.pop("nmrpipe_path", None)
     if legacy_path:
@@ -112,7 +112,8 @@ def load_processing_defaults(config: dict[str, Any] | None = None) -> dict[str, 
         "linewidth_hz": {nucleus: Hz},   # an invalid value falls back to the nucleus default
         "points_per_line": float,        # invalid/non-positive falls back to 2.0
         "nthread": int,                  # SMILE threads; missing/0 = the safe default of 2
-        "nmrpipe_path": str,             # explicit NMRPipe bin directory/executable, may be empty
+        "nmrpipe_path": str,             # explicit NMRPipe bin directory/executable, may be
+        empty
     }
     """
     cfg = load_config(config)
@@ -129,9 +130,7 @@ def load_processing_defaults(config: dict[str, Any] | None = None) -> dict[str, 
             linewidth_hz[key] = _as_float(value, fallback)
     return {
         "linewidth_hz": linewidth_hz,
-        "points_per_line": _as_float(
-            processing.get("points_per_line"), DEFAULT_POINTS_PER_LINE
-        ),
+        "points_per_line": _as_float(processing.get("points_per_line"), DEFAULT_POINTS_PER_LINE),
         "nthread": resolve_nthread(smile.get("nthread"), cfg),
         "nmrpipe_path": _as_str(nmrpipe.get("path") or nmrpipe.get("nmrpipe_bin")),
         "ext_lo": _as_str(processing.get("ext_lo"), DEFAULT_EXT_LO),
@@ -139,14 +138,13 @@ def load_processing_defaults(config: dict[str, Any] | None = None) -> dict[str, 
     }
 
 
-def resolve_points_per_line(
-    value: Any, config: dict[str, Any] | None = None
-) -> Any:
+def resolve_points_per_line(value: Any, config: dict[str, Any] | None = None) -> Any:
     """An explicit value wins, otherwise the configured default; invalid or non-positive falls
     back to
     2.0.
 
-    Supports the **per-axis** form ``{"F1": 2.0, "F2": 4.0}`` (user 2026-09-14: "let the parameter
+    Supports the **per-axis** form ``{"F1": 2.0, "F2": 4.0}`` (user 2026-09-14: "let the
+    parameter
     combination table specify the two dimensions separately"): the mapping is passed through as
     is and
     ``zero_fill_plan`` decides the per-axis value and the fallback.
@@ -174,7 +172,8 @@ def resolve_points_per_line(
 
 def resolve_nthread(value: Any, config: dict[str, Any] | None = None) -> int:
     """SMILE threads: an explicit value (>0) wins, otherwise 2; always clamped to the machine cap
-    (cores-2, and 1 when there are 3 or fewer)."""
+    (cores-2, and 1 when there are 3 or fewer).
+    """
     limit = smile_thread_limit(config)
     if value is not None:
         try:
@@ -188,7 +187,8 @@ def resolve_nthread(value: Any, config: dict[str, Any] | None = None) -> int:
 
 def smile_thread_limit(_config: dict[str, Any] | None = None) -> int:
     """SMILE thread cap = machine cores - 2; with 3 cores or fewer only 1 is allowed (user,
-    2026-09-09)."""
+    2026-09-09).
+    """
     cores = os.cpu_count() or 4
     if cores <= 3:
         return 1
@@ -197,7 +197,8 @@ def smile_thread_limit(_config: dict[str, Any] | None = None) -> int:
 
 def resolve_ext_lo(value: Any, config: dict[str, Any] | None = None) -> str:
     """High end of the direct-dimension extraction window (EXT -x1): explicit, configured,
-    built-in."""
+    built-in.
+    """
     if value is not None:
         s = str(value).strip()
         if s:
@@ -207,7 +208,8 @@ def resolve_ext_lo(value: Any, config: dict[str, Any] | None = None) -> str:
 
 def resolve_ext_hi(value: Any, config: dict[str, Any] | None = None) -> str:
     """Low end of the direct-dimension extraction window (EXT -xn): explicit, configured,
-    built-in."""
+    built-in.
+    """
     if value is not None:
         s = str(value).strip()
         if s:
@@ -215,9 +217,46 @@ def resolve_ext_hi(value: Any, config: dict[str, Any] | None = None) -> str:
     return str(load_processing_defaults(config)["ext_hi"])
 
 
+def resolve_ext_window(
+    experiment: Any,
+    ext_lo: Any = None,
+    ext_hi: Any = None,
+    config: dict[str, Any] | None = None,
+) -> tuple[str, str]:
+    """Resolve the direct-dimension extraction range.
+
+    If neither endpoint is configured and the direct nucleus is not ``1H``, use the full
+    acquired spectral width. The global 10.5–6.5 ppm window is a proton default and must not
+    be applied to directly detected nuclei such as ``13C``, ``15N`` or ``31P``. If either
+    endpoint is explicit, retain the existing per-endpoint resolution rules. Otherwise,
+    compute the full range as ``O1P ± SW/(2·SF)``.
+    """
+    explicit_lo = ext_lo is not None and bool(str(ext_lo).strip())
+    explicit_hi = ext_hi is not None and bool(str(ext_hi).strip())
+    if explicit_lo or explicit_hi:
+        return resolve_ext_lo(ext_lo, config), resolve_ext_hi(ext_hi, config)
+
+    direct = getattr(experiment, "direct_dimension", None)
+    nucleus = str(getattr(direct, "nucleus", "") or "").upper().replace(" ", "")
+    if nucleus and nucleus not in {"1H", "H1", "H"}:
+        try:
+            sf = abs(float(getattr(direct, "sf", 0.0) or 0.0))
+            sw = abs(float(getattr(direct, "sw", 0.0) or 0.0))
+            center = float(getattr(direct, "o1p", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            sf = sw = 0.0
+            center = 0.0
+        if sf > 0.0 and sw > 0.0:
+            half_width = sw / sf / 2.0
+            return f"{center + half_width:.9g}", f"{center - half_width:.9g}"
+
+    return resolve_ext_lo(None, config), resolve_ext_hi(None, config)
+
+
 def nmrpipe_path(config: dict[str, Any] | None = None) -> str:
     """Explicit NMRPipe bin directory/executable (config backend.nmrpipe.path before
-    nmrpipe_bin)."""
+    nmrpipe_bin).
+    """
     return load_processing_defaults(config)["nmrpipe_path"]
 
 
@@ -232,6 +271,7 @@ __all__ = [
     "nmrpipe_path",
     "resolve_ext_hi",
     "resolve_ext_lo",
+    "resolve_ext_window",
     "resolve_nthread",
     "smile_thread_limit",
     "resolve_points_per_line",

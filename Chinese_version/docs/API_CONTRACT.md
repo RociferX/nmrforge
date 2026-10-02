@@ -77,7 +77,7 @@ class ProcessingBackend(Protocol):
 ```python
 @dataclass(frozen=True) SpectrumAxis:
     label, size, sw_hz, obs_mhz, carrier_ppm, orig_hz
-    ppm: np.ndarray(索引→ppm, ORIG 优先回退 CAR)
+    ppm: np.ndarray(索引→ppm, ORIG 优先；只有 orig_hz=None 才回退 CAR，0 是有效原点)
     index_at(ppm) -> int / ppm_at(index) / ppm_at_f(value)
 
 class Spectrum:
@@ -100,7 +100,7 @@ class ProcessingController:
                           params=None) -> str
         # 经 stepwise.generate_spectrum → phase_routes.unified_route(统一相位优化)
     def manual_fid_com(...) / run_manual_fid_com(...) / manual_scripts(...) /
-        run_manual_spectrum(...)   # 人工路径(workflow/manual,已实现)
+        run_manual_spectrum(..., script_baselines=None)  # 可选编辑前文本，仅用于改参审计
     def optimize_smile(self, data, exp_id=None, data_id=None,
                        progress=None, grid_size=None, rank_mode=None) -> str
         # 可选 SMILE 优化(仅 2D NUS):扫描参数网格,候选谱评估后即删,
@@ -355,15 +355,15 @@ class Spectrum3D:
 
 ```text
 Raw data(A/B…)
-    ↓  参考工作流(自动优化):1 个 reference 处理脚本 + 2 张 reference 峰表
+    ↓  参考工作流(自动优化):1 个 reference 处理脚本 + 1 张 reference 峰表
 Reference workflow
     ↓  用户参数组合表:每行 = 一个 workflow_id(W0001、W0002…)
 User-defined workflow ensemble
     ↓  以参考脚本为模板,只替换该组合指定的参数,自动运行处理
 Processed spectra(每 workflow × 每条件)
-    ↓  每个组合用参考锁定阈值在自己的谱上独立选峰,再按 localization 精修
+    ↓  每个组合用参考锁定阈值在自己的谱上独立选峰,再做抛物线精修
        (可选:localization.targets 限定只精修目标峰)
-Parabolic / Gaussian peak tables
+Parabolic peak table
     ↓
 Complete provenance + QC(参数三层、脚本/谱哈希、完整日志、版本、状态)
 ```
@@ -377,24 +377,25 @@ Complete provenance + QC(参数三层、脚本/谱哈希、完整日志、版本
 - **组合独立选峰**(2026-09-14):每个组合在**自己的候选谱**上用参考锁定阈值
   独立选峰 → 该组合自己的完整峰表;`reference_peak_id`/`assignment` 留空,
   与参考峰表的匹配由外部(使用者分析)完成;阈值只在参考模式确定并全程锁定
-  (组合表写阈值键 → `SweepError`);精修方式由 `localization` 选择
-  (parabolic 默认 / gaussian 仅 2D / both);组合模式没有 `max_peaks`;
+  (组合表写阈值键 → `SweepError`);峰定位只有三点抛物线一种方法
+  (2026-09-26 用户需求⑦:二维高斯拟合算法已删除),`localization` 只接受
+  `parabolic`,`gaussian`/`both` → `SweepError`;组合模式没有 `max_peaks`;
 - **限定峰的定位(targeted localization,2026-09-19/20)**:组合表
   `localization.targets`(=CSV 路径,相对路径按组合表所在目录解析)/ CLI
-  `--localize-peaks` / API `localize_peaks=` 只让列表里的峰参与该方法的精修。
+  `--localize-peaks` / API `localize_peaks=` 只让列表里的峰参与抛物线精修。
   **检出、行数、`peak_id` 编号不变**;未列入目标的峰保留、位置取检出阶段的
-  三点抛物线估计、该方法 QC 列写 `NaN`(没做拟合,不是失败);逐峰失败照常记
+  整数格极大值、定位 QC 列写 `NaN`(没做精修,不是失败);失败照常记
   `fit_success=false` + `fallback_reason`,**不**换候选重拟合;目标列表空 /
   文件不存在 / 缺 `peak_id` 列 / 未知 `peak_id` 一律报错(不静默退化成全谱);
   留档:`parameters_resolved.detection.localization_targets`(scope/source/path/
-  sha256/n_targets/peak_ids)与 `peak_localization.<method>.n_targeted`/
+  sha256/n_targets/peak_ids)与 `peak_localization.parabolic.n_targeted`/
   `n_skipped`/`localization_scope`;不给目标 = 全谱(默认行为不变)。
-  **逐方法**(2026-09-20):`localize_peaks` / 组合表 `localization.targets` 接受
-  映射 —— `localize_peaks={"gaussian": csv}` 或组合表键
-  `localization.targets.gaussian`(方法键优先于方法无关键;`all`/`*` 给公共默认;
-  相对路径仍按组合表目录解析),CLI 对应 `--localize-peaks-gaussian` /
-  `--localize-peaks-parabolic`;留档顶层保持方法无关口径,`by_method` 给逐方法明细
-  (`scope` 在逐方法不同时写 `mixed`);
+  **逐方法写法已删除**(2026-09-26):`localize_peaks={"gaussian": csv}` 或组合表键
+  `localization.targets.gaussian` 直接报 `SweepError`(单方法下没有「逐方法」这回事);
+  写法回归方法无关的那一种 —— `localize_peaks=<CSV>` / `localization.targets = <CSV>`
+  (或条件列 / 条件映射 / `on_missing`);映射里只剩 `all`/`*` 作公共默认值。
+  `--localize-peaks-gaussian` / `--localize-peaks-parabolic` 两个 CLI 选项一并删除,
+  只留 `--localize-peaks`(普通 CSV);
 - **条件粒度**(2026-09-20):目标列表可按 (workflow, 条件) 给。CSV 可选
   `condition` 列,每个条件只取自己的行、`peak_id` 按**该条件的谱**校验;没有该列 =
   整批共用(与既有逐位一致,留档 `by_condition: "all"`);某条件缺行默认**处理前**
@@ -403,7 +404,7 @@ Complete provenance + QC(参数三层、脚本/谱哈希、完整日志、版本
   `{"default": …, "by_condition": {…}}` 与组合表单元格 `"{A: a.csv, B: b.csv}"`
   等价。留档 `parameters_resolved.detection.localization_targets` 增 `by_condition`
   (逐条件 `peak_ids`/`n_targets`/`line_ranges`/来源文件与 SHA-256),检出与峰表
-  `peak_id` 编号不变,`peak_localization.<method>` 的 `n_targeted`/`n_skipped`
+  `peak_id` 编号不变,`peak_localization.parabolic` 的 `n_targeted`/`n_skipped`
   仍是逐 run 口径;
 - **行为兼容指纹与变更分级(2026-09-20)**:`compat_manifest()` / CLI
   `python -m nmrforge_api compat [--out FILE] [--golden]` 给出
@@ -414,13 +415,16 @@ Complete provenance + QC(参数三层、脚本/谱哈希、完整日志、版本
   (`same`/`additive`/`behavior_changed`/`contract_changed`,另加工作树与声明不一致
   时的 `unverified`)、`affected`(行为变化影响的使用者步骤:`reference`/`processing`/
   `sweep_detection`/`localization`/`records`/`api_surface`/`cli`/`qc`)、`contracts`(峰表列序 +
-  记录 schema + 错误码 + 警告码)、`defaults`(内置默认值;含与 `localization.*` 同源
-  的 `gaussian_roi` 镜像键 `f1_ppm`/`f2_ppm`/`max_points`)与 `golden`(黄金向量);
+  记录 schema + 错误码 + 警告码)、`defaults`(内置默认值;`localization` 只有
+  `default_method: "parabolic"` 与 `targets_on_missing: "error"`)与 `golden`(黄金向量);
   `run.json` / `records/reference.json` / `records/manifest.json` 与 `versions` 并列
   写 `behavior_digest`/`token_digest`/`compat_level`/`compat_affected`/
   `compat_verified`。声明在 `nmrforge_api/compat_declaration.py`(纯数据,排除在指纹
   之外),`tests/test_compat.py` 守卫「指纹未更新 / 分级与 affected 不自洽 / `same`
-  但 token 变了 / 黄金向量不复现」;本轮声明的分级是 **additive**(使用者无需重跑);
+  但 token 变了 / 黄金向量不复现」。**本轮(2026-09-26 高斯拟合删除)峰表列序从
+  29 列变 27 列、记录 schema 与错误/警告码都动了**,因此契约镜像(本节 §11.4、
+  `docs/external-api/06`)与 `compat_declaration.py` 的声明必须同步更新;分级以
+  声明文件为准(`contracts` 里的列序与警告码以代码为唯一来源);
 - 软件最终边界:**不加入**统计推断、显著性判断与科学结论(这些由使用者自己的分析
   基于统一峰表完成)。σ/Δδ 汇总**不进入处理契约与 records 产物**,但代码
   (`nmrforge_api/uncertainty.py`)保留为**测试/检测辅助**:处理链
@@ -430,32 +434,33 @@ Complete provenance + QC(参数三层、脚本/谱哈希、完整日志、版本
 
 ```python
 # 两种模式(2026-09-14):参考模式生成参考;组合模式必须显式给参考
-run_reference_study(root, dataset=None, *, datasets=None, params=None,
+run_reference_study(root, dataset=None, *, datasets=None, name="", params=None,
                     # params 可含 reference_optimize(**仅测试/复现用**,
                     # 真实实验禁用;见 external-api/05 §5.10)
-                    phase_route=None, peaks=None, sigma_multiplier=None,
-                    max_peaks=0, localization_method="parabolic",
-                    gaussian_roi_f1_ppm=None, gaussian_roi_f2_ppm=None,
+                    phase_route=None, peaks=None, direct_range=None,
+                    ext_lo=None, ext_hi=None, sigma_multiplier=None,
+                    max_peaks=0, force=False,
                     backend=None, write=True, progress=None) -> ReferenceResult
 run_combination_study(reference, *, combos=None, axes=None, max_runs=256,
                       localization="parabolic", localize_peaks=None,
-                      edge_margin_ppm=None,
-                      roi_f1_ppm=None, roi_f2_ppm=None, resume=True,
+                      edge_margin_ppm=None, window_pts=None, window_ppm=None,
+                      sign="abs", direct_range=None, ext_lo=None, ext_hi=None,
+                      allow_ext_override=False, resume=True,
                       backend=None, write=True, progress=None) -> StudyResult
                       # window_pts/window_ppm/sign 保留但不再使用(兼容)
+                      # localization 只接受 "parabolic"(2026-09-26 起)
 parse_reference_spec(spec) -> ReferenceHandle
 resolve_reference(spec, *, backend=None) -> (StudySession, DatasetRef, ReferenceSpectrum)
 write_reference_records(session, references) -> dict[str, str]
 # 一步式便利入口(内部 = 参考模式 + 组合模式,参考显式传研究根)
 run_parameter_study(root, dataset=None, *, datasets=None, axes=None, combos=None,
                     name="", params=None, phase_route=None, peaks=None,
+                    direct_range=None, ext_lo=None, ext_hi=None,
                     sigma_multiplier=None, max_peaks=0, max_runs=256,
                     window_pts=None, window_ppm=None, sign="abs",
-                    roi_f1_ppm=None, roi_f2_ppm=None,
-                    localization="parabolic",        # 组合模式精修方式
+                    localization="parabolic",        # 峰定位方式(只有 parabolic)
                     localize_peaks=None,              # 组合模式目标峰列表
-                    localization_method="parabolic",
-                    gaussian_roi_f1_ppm=None, gaussian_roi_f2_ppm=None,
+                    edge_margin_ppm=None, force=False,
                     resume=True, backend=None, write=True, progress=None)
 open_study / add_dataset(session, source, condition="A") / dataset_info
 build_reference / load_reference / load_references / set_reference_peaks
@@ -463,9 +468,10 @@ ensure_reference_peaks / build_reference_peak_tables /
 rebuild_reference_peak_tables / pick_reference_peaks
 measure_peak_positions / read_reference_peaks / window_points_by_axis
 detect_and_localize        # 组合模式独立选峰(rows: peak_id 本谱序号, reference_peak_id="")
-                           # targets=(1,2,…) = 只精修这些峰(targeted localization)
+                           # 精修只有三点抛物线;targets=(1,2,…) = 只精修这些峰
 read_localization_targets / resolve_localization_targets / LocalizationTargets
-resolve_localization_targets_by_method / split_target_specs / combine_target_specs
+conditional_targets_from_file / resolve_conditional_targets /
+localization_targets_from_ids
 compat_manifest / compat_status / record_stamp / write_compat_manifest
 check_conformance / golden_hashes   # 黄金向量(行为自证)
 plan_sweep / run_sweep / load_plan / load_runs / load_workflows
@@ -487,8 +493,8 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep(=workflows),report,statu
   组合沿用同一份,
   不得当扫描轴)+ 参考峰身份表
   (`reference.list` + SHA-256 + 峰数 + 来源 auto|external|shared:<条件>)+
-  **两张参考峰表** `reference_peak_table_parabolic.csv` /
-  `reference_peak_table_gaussian.csv`(路径 + SHA-256 + 行数/detected 计数)+
+  **一张参考峰表** `reference_peak_table_parabolic.csv`
+  (路径 + SHA-256 + 行数/detected 计数)+
   定位 QC + 版本表);参考构建记录 ``software_version`` 与 ``software_commit``
   两个独立字段(后者来自 ``NMRFORGE_GIT_COMMIT`` 或 ``git rev-parse HEAD``);
   ``direct_range`` = ``{ext_lo, ext_hi, unit, source}``(``source`` ∈ ``explicit`` /
@@ -502,23 +508,30 @@ CLI:`python -m nmrforge_api {init,reference,peaks,sweep(=workflows),report,statu
   `parameters_requested`、`parameters_used`、`parameters_resolved`
   (phase 的 `phase_mode`/`actual_p0`/`actual_p1`、SMILE 实际 `nsigma`/`thresh`、
   谱噪声 σ)、`base_script`(参考脚本路径 + SHA-256)、脚本/谱路径 + SHA-256、
-  `peak_tables`(被选中精修方式的路径 + SHA-256 + 行数)、`peak_localization`、
+  `peak_tables`(峰表路径 + SHA-256 + 行数;只有 `parabolic` 一个键)、
+  `peak_localization`(只有 `parabolic` 键),
   `script_diff`(参考脚本 vs 本 workflow 脚本的差异留档),
   (detected/回退/撞边界计数)、`window`(逐轴物理宽度↔点数换算)、`log_path`
   (完整日志)、`versions`(nmrforge/python/依赖/NMRPipe/SMILE)、`status`∈
   {`success`, `success_with_warning`, `failed`}、`warnings`(码 + 计数 + 峰);
 - `StudyResult`(session/plan/references/runs/workflows/summary/records)。
 
-### 11.4 峰表字段(两算法结构一致,当前 29 列)
+### 11.4 峰表字段(当前 27 列)
+
+峰定位只有三点抛物线一种方法(2026-09-26 用户需求⑦:二维高斯拟合算法整体删除),
+所以参考表与组合表**结构完全一致**,`localization_method` 只有 `parabolic`。
+2026-09-26 相比旧版 29 列删掉两列:`localization_requested`(单方法下恒为
+parabolic,不再有「请求的方法 vs 实际方法」)与 `fit_rmse`(只有高斯最小二乘有残差,
+三点抛物线是精确解)。
 
 ```text
 workflow_id, condition, dataset,
 peak_id, reference_peak_id, assignment,
 H_ppm, N_ppm, intensity,
 SNR, detected, localization_method,
-localization_requested, fallback, fallback_reason,
+fallback, fallback_reason,
 fit_success, FWHM_H, FWHM_N,
-fit_rmse, boundary_hit, duplicate_localization,
+boundary_hit, duplicate_localization,
 cell_low_H, cell_high_H, cell_low_N,
 cell_high_N, cell_edge, intensity_ratio_vs_picked,
 shift_vs_picked_H, shift_vs_picked_N
@@ -531,34 +544,37 @@ shift_vs_picked_H, shift_vs_picked_N
 - `cell_edge`(bool):极值停在**独占邻域**那条边界上(= 邻居的格把它截断),与 `window_edge`
   (物理窗边界)正交;历史口径恒 `false`;
 - `intensity_ratio_vs_picked`(float):**|测得强度| ÷ |峰身份表的 Height|**(分子分母都取绝对值——负峰数据集的 `.list` Height 是负数,2026-09-19 修);缺 Height 或 0 → `NaN`;
+  2026-10-02 起检出/参考测量的 intensity 与 SNR 均相对全局中位基线；新生成 Height 同口径，
+  定位 QC 留 baseline_offset/height_reference，不改变源谱。旧峰表需重选，不能混用不同峰高基准。
   ≈1 表示停在自己的峰顶上,明显 >1 说明更可能是强峰的肩峰/伴随峰;
 - `shift_vs_picked_H` / `shift_vs_picked_N`(float,ppm,符号 = measured − picked,与
   `H_ppm`/`N_ppm` 同轴同向):逐轴位移;¹⁵N 的 ppm 方向与数据索引方向相反,不要读反;
 - **组合(workflow)表这 8 列一律写 `NaN`**:sweep 是「选峰即定位」,没有「先给身份坐标、
-  再重定位」这一步,写 1.0/0 是伪造信息(沿用 parabolic 表里 gaussian 专属列写 NaN 的先例);
+  再重定位」这一步,写 1.0/0 是伪造信息;
 - `duplicate_localization`(bool,P2-5,2026-09-19):该行与**同表另一行**落在同一坐标
   (ppm 精确到 1e-6)时为 `true`,重复组的每一行都标(不删行、不改峰集)。参考表与组合表
   都会标:参考表在独占邻域修复后同坐标只剩「取整后落同一格」的分辨率极限,组合表则还有
   选峰器亚格点精修把相邻两个检出峰收进同一格的情形;
-- 参考冻结记录 `reference.json.peak_localization.<method>` 另有汇总:`n_cell_edge`、
+- 参考冻结记录 `reference.json.peak_localization.parabolic` 另有汇总:`n_cell_edge`、
   `n_duplicate`(= 总行数 − 唯一坐标数)与 `intensity_ratio_vs_picked` 的 `n`/`median`/`max`;
-  每条 `run.json.peak_localization.<method>` 也有 `n_duplicate`,出现同坐标行时
+  每条 `run.json.peak_localization.parabolic` 也有 `n_duplicate`,出现同坐标行时
   `run.json.warnings` 另留一条 `duplicate_localization`(码 + 行数)。
 
 - 列序 = 下面代码块 = `nmrforge_api.peak_tables.PEAK_TABLE_COLUMNS`(唯一来源,
   `tests/test_api_docstrings.py` 逐列比对);
 - `peak_id` 是本谱(该 workflow × 该条件)的峰序号;
-- `localization_method` 是**实际**方法、`localization_requested` 是**请求**方法;
-  两者不同即发生回退,原因见 `fallback`/`fallback_reason`;
+- `localization_method` 只有 `parabolic`(三点抛物线顶点,唯一方法);
+  `fallback`/`fallback_reason` 仍留在 schema 里:抛物线是确定性闭式解,正常不失败,
+  字段留档是为了运行记录结构稳定;
 - `reference_peak_id`(R0001…)由参考峰表建立(参考峰表里未检测到的峰保留
   `detected=false` 行);组合模式 2026-09-14 起独立选峰,组合峰表该列与
   `assignment` 留空,匹配由使用者完成;
-- **P3-7(2026-09-19)起 parabolic 表也写 QC 实数**:`fit_success`/`FWHM_H`/`FWHM_N`/
+- **P3-7(2026-09-19)起抛物线也写 QC 实数**:`fit_success`/`FWHM_H`/`FWHM_N`/
   `boundary_hit` 由三点抛物线给出(等效线宽 `FWHM = 2.3548σ`,`σ² = H/(2|a|)`,
-  顶点偏移贴 ±0.5 点即 `boundary_hit`),与高斯表**同口径、可直接比较**;只有
-  `fit_rmse` 仍是高斯专属(三点抛物线是精确解,没有残差),parabolic 表写 `NaN`;
-- 拟合失败/回退(`fallback`/`fallback_reason`/`fit_success`)必须逐峰落表,
-  禁止静默;高斯失败/回退写 `fit_success=false`,缺键才写 `NaN`。
+  顶点偏移贴 ±0.5 点即 `boundary_hit`);`fit_rmse` 已随高斯拟合一起删除
+  (抛物线是精确解,没有残差);
+- 失败/回退(`fallback`/`fallback_reason`/`fit_success`)必须逐峰落表,
+  禁止静默;缺键才写 `NaN`。
 - 参考峰表坐标逐行唯一:缺省 `measure_peak_positions(exclusive_windows=True)`
   把每个参考峰的搜索区间按相邻参考峰位置的中点逐轴切分,两条参考记录不会
   被重定位到同一格点(2026-09-19 修;`False` 复现旧口径);取整后落同一格点
@@ -569,15 +585,15 @@ shift_vs_picked_H, shift_vs_picked_N
 ```text
 study/
   reference/<exp>_<data>/   reference.json、process.com、reference.list、
-                            reference_peak_table_{parabolic,gaussian}.csv
+                            reference_peak_table_parabolic.csv
   workflows/W0001/
       workflow.json         组合级记录(参数三层/状态/警告/两条件产物/版本)
       log.txt               组合级完整日志
-      <条件 A|B>/           process.com、spectrum.ft2、所选方法的 peak_table_*.csv、
+      <条件 A|B>/           process.com、spectrum.ft2、peak_table_parabolic.csv、
                             log.txt、run.json
   records/                  manifest.json、sweep_plan.json、runs.json、
                             workflows.json、measurement.json、
-                            所选方法的 peak_table_*.csv(长表)
+                            peak_table_parabolic.csv(唯一的组合汇总长表)
 ```
 
 ### 11.6 强约束(破坏即视为契约破坏)
@@ -588,15 +604,16 @@ study/
    (相位默认锁定在参考值,偏差用 `phase_delta.<轴>.p0|p1`);
 4. 以参考脚本为模板:每个条件按“自己的参考有效参数 → 批次
    `base_overrides` → 组合显式键”生成 `parameters_used`;不得复制其它条件的基底;
-5. 每 workflow × 每条件必须留:完整脚本、所选定位方法的统一峰表、完整日志、参数三层,
+5. 每 workflow × 每条件必须留:完整脚本、统一峰表(`peak_table_parabolic.csv`)、
+   完整日志、参数三层,
    版本、状态(三值)与警告;
 6. 自动参数必须记录**实际结果**(`actual_p0/actual_p1`、SMILE 实际
-   `nsigma`/`thresh` 与谱噪声 σ),Gaussian 失败/回退必须显式记录;
+   `nsigma`/`thresh` 与谱噪声 σ),定位回退/边界命中必须显式记录;
 7. 单条件失败不中断整轮:状态 `failed` + 原因落盘;
 8. **不做** 统计推断、显著性判断或科学结论;不自动生成参数空间
    (`combos=` 原样执行,`axes` 只是便捷入口);
 9. 参数非法给 error/warning:锁定键报错,确定性/未知键写 `notes`;
-10. 峰位窗口/高斯 ROI 按**物理宽度**(ppm)定义,运行时按当前谱点距换算点数,
+10. 峰位窗口按**物理宽度**(ppm)定义,运行时按当前谱点距换算点数,
     换算结果必须留档(`run.json.window`、`records/measurement.json`)。
 
 变更该契约需按 §7 流程走 Proposal;新增参数轴不需改契约(点号键通用)。

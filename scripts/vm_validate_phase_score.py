@@ -143,9 +143,7 @@ def run_2d(dataset: Path, root: Path, base_phases: dict, threshold: float) -> No
     entry = manager.create_experiment(title="+/-5° calibrated 2D")
     result = import_data(manager, entry.id, dataset)
     backend = NMRPipeBackend(work_dir=str(work / "nmrpipe"))
-    exp = read_dataset(
-        manager.data_dir(entry.id, result.data_id, "raw")
-    )
+    exp = read_dataset(manager.data_dir(entry.id, result.data_id, "raw"))
     plan = select_method(exp)
 
     def _run(label: str, phases: dict) -> dict:
@@ -183,9 +181,7 @@ def run_3d(dataset: Path, root: Path, base_phases: dict, threshold: float) -> No
     entry = manager.create_experiment(title="+/-5° Calibration 3D NUS")
     result = import_data(manager, entry.id, dataset)
     backend = NMRPipeBackend(work_dir=str(work / "nmrpipe"))
-    exp = read_dataset(
-        manager.data_dir(entry.id, result.data_id, "raw")
-    )
+    exp = read_dataset(manager.data_dir(entry.id, result.data_id, "raw"))
 
     resp = backend.reconstruct_nus(exp, {})
     if not resp.get("success"):
@@ -194,9 +190,7 @@ def run_3d(dataset: Path, root: Path, base_phases: dict, threshold: float) -> No
         "[3D NUS] one SMILE reconstruction finished (default nthread=2 guard rail), finalize_nus "
         "per indirect-dimension candidate"
     )
-    base_resp = backend.finalize_nus(
-        exp, phases=base_phases, work_dir=str(work / "nmrpipe")
-    )
+    base_resp = backend.finalize_nus(exp, phases=base_phases, work_dir=str(work / "nmrpipe"))
     if not base_resp.get("success"):
         raise RuntimeError(f"[3D] base finalize failed: {base_resp.get('message')}")
     base_out = work / "cand_base.ft3"
@@ -246,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
         "--threshold",
         type=float,
         default=1.0,
-        help="Confidence threshold (current log \"flat scoring surface\" is <1 point)",
+        help='Confidence threshold (current log "flat scoring surface" is <1 point)',
     )
     opts = parser.parse_args(argv if argv is not None else sys.argv[1:])
     opts.root.mkdir(parents=True, exist_ok=True)

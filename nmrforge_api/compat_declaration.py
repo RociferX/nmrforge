@@ -23,16 +23,21 @@ from typing import Any
 
 #: declared behaviour level (see the module doc; meaning matches nmrforge_api.compat)
 DECLARATION: dict[str, Any] = {'schema': 'nmrforge_api.compat.declaration.v1',
- 'digest': 'ad8675d53dc14da932aa7dac8accaa6fb203e0677d66df32799f59b958852a34',
- 'token_digest': '82145bb6bf08b031faebecef20a853a68dcc6eb9a343cbb7b64425a8bb12a74a',
+ 'digest': '74335b10397d030dc188812e1790559468ba97e9bd6b21bbcb4c0dc53a13ced6',
+ 'token_digest': 'cba89335b1c3769d602af0c50e3fa67e3b411457cc913a43d04928b5579361e3',
  'compat_level': 'behavior_changed',
- 'affected': ['processing'],
- 'updated': '2026-09-24',
- 'note': 'public tree sync: axis -neg keys, family/FnMODE conflict policy and the '
-         'sanitised traceability text; regenerated in-tree',
+ 'affected': ['reference',
+              'processing',
+              'sweep_detection',
+              'localization',
+              'records',
+              'api_surface',
+              'qc'],
+ 'updated': '2026-10-02',
+ 'note': 'Fix peak axes, signs, detection and safe reference filtering',
  'golden': {'name': 'conformance_v1',
             'spectrum_sha256': '382b330926da93d856feef40ca33c2df1eec21b61e50db471bdf7aa4bb2fb311',
-            'peak_table_sha256': '7f8180662220c83db225fa6b2bf0f5b4c71196fcdaebebe7e8c172a4861657ab',
+            'peak_table_sha256': 'ba2b7271ed56a8bd30c751066d55af258117f35adae18ed6b6973042b93b68bf',
             'n_peaks': 3}}
 
 __all__ = ["DECLARATION"]

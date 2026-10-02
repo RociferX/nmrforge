@@ -44,7 +44,6 @@ def test_batch_group_is_data_group(tmp_path: Path) -> None:
     assert manager.group_of_data(exp_id, data_ids[1]) is None
 
 
-
 def test_batch_import_marks_group(tmp_path: Path, bruker_dir: Path) -> None:
     """Batch import: several folders imported into one experiment type share the same data group;
     the group number increments on each further import.
@@ -71,9 +70,7 @@ def test_batch_import_marks_group(tmp_path: Path, bruker_dir: Path) -> None:
     group = manager.group(entry.id, "G1")
     assert group is not None and group.data_ids == data_ids
     # batch import once more -> G2
-    result2 = controller.batch_import(
-        entry.id, [str(bruker_dir / "hsqc_small")]
-    )
+    result2 = controller.batch_import(entry.id, [str(bruker_dir / "hsqc_small")])
     assert result2["batch_id"] == "G2"
     assert [g.id for g in manager.data_groups(entry.id)] == ["G1", "G2"]
 
@@ -95,9 +92,7 @@ class _FakeController:
 class _ProgressController(_FakeController):
     """Fake controller with a progress callback (checks stage logs reach the panel)."""
 
-    def generate_spectrum(
-        self, data, exp_id=None, data_id=None, progress=None
-    ) -> str:
+    def generate_spectrum(self, data, exp_id=None, data_id=None, progress=None) -> str:
         self.calls.append(data_id or "")
         if progress:
             progress("NUS 数据: 开始 SMILE 重构(含直接维相位)")
@@ -129,8 +124,7 @@ class _GroupFakeController(_FakeController):
             "data_ids": ids,
             "steps": list(steps),
             "results": {
-                d: {"data_id": d, "status": "success", "steps": {}, "error": ""}
-                for d in ids
+                d: {"data_id": d, "status": "success", "steps": {}, "error": ""} for d in ids
             },
             "failed": [],
             "summary": {"total": len(ids), "success": len(ids), "failed": 0},
@@ -188,9 +182,7 @@ class _TempWorkspace:
 
     def list_projects(self):
         return sorted(
-            p
-            for p in self.root.iterdir()
-            if p.is_dir() and (p / "project.json").is_file()
+            p for p in self.root.iterdir() if p.is_dir() and (p / "project.json").is_file()
         )
 
     def ensure(self) -> Path:
@@ -198,9 +190,7 @@ class _TempWorkspace:
         return self.root
 
 
-def test_tree_data_label_shows_no_batch_suffix(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_tree_data_label_shows_no_batch_suffix(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.164-patch1: a batch group is a data group; ungrouped data carries no [batch] suffix."""
     from gui.project_tree import ProjectTreePanel
 
@@ -216,9 +206,7 @@ def test_tree_data_label_shows_no_batch_suffix(
     panel.close()
 
 
-def test_pipeline_status_shows_selected_data(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_pipeline_status_shows_selected_data(tmp_path: Path, qapp: QApplication) -> None:
     """After importing new data, the pipeline status follows the selected data, not the first."""
     from gui.pipeline_panel import compute_data_step_statuses
 
@@ -307,9 +295,7 @@ def test_experiment_dashboard_segmented_between_single_and_batch(
     assert layout.indexOf(page.single_group) < layout.indexOf(page.segmented_group)
     assert layout.indexOf(page.segmented_group) < layout.indexOf(page.batch_group)
     emitted: list[tuple[str, str]] = []
-    page.segmented_import_requested.connect(
-        lambda exp_id, source: emitted.append((exp_id, source))
-    )
+    page.segmented_import_requested.connect(lambda exp_id, source: emitted.append((exp_id, source)))
     page.segmented_source_edit.setText("/data/container")
     page.import_panel._exp_id = "exp_003"
     page.import_panel._on_segmented_import()
@@ -317,9 +303,7 @@ def test_experiment_dashboard_segmented_between_single_and_batch(
     page.close()
 
 
-def test_project_single_click_opens(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_project_single_click_opens(tmp_path: Path, qapp: QApplication) -> None:
     """One click opens a project node (no double click); the open project is not reopened."""
     from gui.project_tree import ProjectTreePanel
 
@@ -435,21 +419,23 @@ def test_experiment_dashboard_clear_import_form(qapp: QApplication) -> None:
     page.close()
 
 
-def test_import_data_dropdown_panel(qapp: QApplication) -> None:
-    """0.2.162-patch11: the "Import data" drop-down embeds the whole import panel and signals."""
-    from gui.dashboards import ImportDataDropdown
+def test_experiment_dashboard_inline_import_panel_forwards_signal(
+    qapp: QApplication,
+) -> None:
+    "Regression coverage: test experiment dashboard inline import panel forwards signal."
+    from gui.dashboards import ExperimentDashboard
 
-    dd = ImportDataDropdown()
-    assert dd.panel.single_group.title() == "单个导入"
-    assert dd.panel.segmented_group.title() == "分段数据或重复实验叠加导入"
-    assert dd.panel.batch_group.title() == "批量处理"
+    page = ExperimentDashboard()
+    assert page.import_panel.single_group.title() == "单个导入"
+    assert page.import_panel.segmented_group.title() == "分段数据或重复实验叠加导入"
+    assert page.import_panel.batch_group.title() == "批量处理"
     emitted: list[tuple] = []
-    dd.import_options_requested.connect(lambda *a: emitted.append(a))
-    dd.panel.set_context("exp_1")
-    dd.panel.source_edit.setText("/data/a")
-    dd.panel._on_import()
+    page.import_options_requested.connect(lambda *a: emitted.append(a))
+    page.import_panel.set_context("exp_1")
+    page.import_panel.source_edit.setText("/data/a")
+    page.import_panel._on_import()
     assert emitted and emitted[0][0] == "exp_1"
-    dd.close()
+    page.close()
 
 
 def test_batch_import_no_group(tmp_path: Path, bruker_dir: Path) -> None:
@@ -525,9 +511,7 @@ def test_import_button_no_source_gives_hint(qapp: QApplication) -> None:
         panel.close()
 
 
-def test_experiment_dashboard_rename_data_name(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_experiment_dashboard_rename_data_name(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.162-patch13: editing the data table's "Name" column renames the data and saves it."""
     from gui.main_window import MainWindow
 

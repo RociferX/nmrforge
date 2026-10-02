@@ -2,7 +2,8 @@
 criterion.
 
 Background (finalised by the user on 2026-09-24): once fid.com writes **concrete keywords** for
-``-yMODE/-zMODE``, the "negation of imaginaries" carried by ``-N`` must not be lost; and "whether
+``-yMODE/-zMODE``, the "negation of imaginaries" carried by ``-N`` must not be lost; and
+"whether
 ``FT -neg`` should be added" must not be guessed from the shape of the pulse sequence (how
 ``ph31``/``dp``/``ip`` look) nor found by trial-processing and looking at the spectrum. The
 criterion is the **coherence-pathway phase**:
@@ -11,7 +12,8 @@ criterion is the **coherence-pathway phase**:
 
 ``+90`` => ``normal`` (do not add ``-neg``); ``-90`` => ``conjugated`` (add ``FT -neg``);
 anything else (including ``0``/``180``, a phase that does not participate, an unlisted sequence,
-``F1EA``) => ``unknown`` -- **not added by default**, with the same wording reminding the user to
+``F1EA``) => ``unknown`` -- **not added by default**, with the same wording reminding the user
+to
 review by hand in three places: the log, the report and the import warning.
 
 Where the values come from (documentation first; never guessed from looking at the data)
@@ -20,7 +22,8 @@ Where the values come from (documentation first; never guessed from looking at t
   ``prog/docu/English/topspin/pdf/pulse-programming.pdf``) §11 "The mc Macro Statement"**: the
   correspondence between the ``F1QF/F1PH/F1EA`` clauses of ``mc #0 to 2`` and ``FnMODE`` (table
   11.1: ``F1QF``<->QF, ``F1PH``<->QSEQ/States/TPPI/States-TPPI, ``F1EA``<->Echo-Antiecho), and
-  the expansion form of ``mc`` under each ``FnMODE`` -- **one and the same pulse program switches
+  the expansion form of ``mc`` under each ``FnMODE`` -- **one and the same pulse program
+  switches
   between QSEQ/TPPI/States/States-TPPI via ``FnMODE``**, so ``F1PH`` alone does not fix the
   family and must be judged together with ``FnMODE`` from ``acquNs``.
 * **Same manual, §11.2**: in nD the first argument of ``F1PH(<first>, <second>)`` enters the
@@ -29,8 +32,10 @@ Where the values come from (documentation first; never guessed from looking at t
   quadrature block by the ``times 2`` block in the expanded pulse program** and cross-checks it
   against the family implied by that dimension's ``FnMODE``.
 * **Same manual, §3.3.7/§3.3.2 (the increment of ``ip/dp``)**: ``ipN`` adds ``360/d`` degrees to
-  **all phases** of phN (it is not a pointer step); ``d`` is the divisor of the phase program and
-  **defaults to 4** when the phase table has no ``(d)`` prefix => an ordinary ``ip`` = +90, ``dp``
+  **all phases** of phN (it is not a pointer step); ``d`` is the divisor of the phase program
+  and
+  **defaults to 4** when the phase table has no ``(d)`` prefix => an ordinary ``ip`` = +90,
+  ``dp``
   = -90, ``ipN*2`` = +-180 (matching the single-pulse cheat sheet the user supplied). A phase
   table that does write ``(d)`` is converted as 360/d; a floating-point phase table (whose
   increment is the second argument of ``ip``) is never guessed => ``unknown``. **Same manual,
@@ -49,7 +54,8 @@ Where the values come from (documentation first; never guessed from looking at t
   discriminate the +-1 of 15N). What the original papers of each sequence record as "which pulse
   carries the indirect-dimension phase increment and what the target pathway's
   ``p_before->p_after`` is on it" is exactly this quantity.
-* **Implementation convention of the same manual**: the action of a phase program on a given pulse
+* **Implementation convention of the same manual**: the action of a phase program on a given
+pulse
   is ``dp = p_after - p_before`` (the target pathway); the accumulated phase is
   ``-sum dp*dphi``.
 * **The pathway header comment inside each sequence's own pulse program plus the original
@@ -59,14 +65,16 @@ Where the values come from (documentation first; never guessed from looking at t
   ``ALT_NONE_NEG=16/ALT_SEQUENTIAL_NEG=17/ALT_STATES_NEG=18``) gives the canonical ``-N``
   semantics; the ``-alt/-neg`` implementation of ``nmrPipe -fn FT`` (``~/pipe/nmruser/userproc.c
   uFT()``: ``-alt`` calls ``vAlt``, ``-neg`` calls ``vNeg``) shows that **conversion only writes
-  the header and does not adjust signs** -- the sign adjustment must be applied by the FT flag at
+  the header and does not adjust signs** -- the sign adjustment must be applied by the FT flag
+  at
   processing time, and the two sides must not both do it.
 
 Coverage (and the trade-off "when it cannot be judged, do not add")
 ------------------------------------------------------------------
 Only sequences/axes for which **the action of the stepped phase program in that dimension's
 quadrature block on the target pathway is uniquely determined** are listed. Each dimension must
-additionally satisfy: the quadrature block in the pulse program agrees with the family implied by
+additionally satisfy: the quadrature block in the pulse program agrees with the family implied
+by
 ``FnMODE`` (``F1EA`` <-> gradients/alternation, ``F1PH`` <-> phase stepping). Anything that does
 not satisfy this is ``unknown``:
 
@@ -83,10 +91,12 @@ dimension identical to the data owner's ``smile.com`` -- see
 ``docs/backend/fid_com_parameter_sources.md`` §8.3).
 
 Known to be unlisted (if a later round wants them, literature/pulse-program evidence must come
-first): ``hncacbgp3d``/``hncocacbgp3d`` (``F1PH(calph(ph5,-90) & calph(ph4,-90), ...)`` steps two
+first): ``hncacbgp3d``/``hncocacbgp3d`` (``F1PH(calph(ph5,-90) & calph(ph4,-90), ...)`` steps
+two
 13C phases at once, so the per-phase dp is not unique and only the net sum is known; the F2 of
 ``hncacbgp3d`` is E/A => unknown), ``noesyhsqc*3d`` (t1 is 1H and ``ip`` falls on both the 1H 90
-and the 1H 180, whose ``dp = -2p`` has an uncertain sign), ``hbhaconhgp3d``/``hnhagp3d`` (t1 goes
+and the 1H 180, whose ``dp = -2p`` has an uncertain sign), ``hbhaconhgp3d``/``hnhagp3d`` (t1
+goes
 through a mixed 1H/HMQC path).
 """
 
@@ -220,11 +230,13 @@ class PhaseIncrement:
 
         - ``calph(phN, +-D)`` (the additional mc clause of manual §11.3, the ``calph`` of
           §3.3.7): an explicit +-D degrees -- the quadrature increment of real pulse programs
-          (such as ``cbcaconhgpwg3d``/``hncacbgp3d.x``) is usually written in this form, with the
+          (such as ``cbcaconhgpwg3d``/``hncacbgp3d.x``) is usually written in this form, with
+          the
           angle in the argument and independent of the phase-table divisor;
         - ``ipN``/``dpN``: +-``steps``*360/d (manual §3.3.7: add/subtract 360/d degrees to **all
           phases** of that phase program; it is not a pointer step -- a phase program that has
-          been manipulated explicitly is also no longer advanced automatically by ``go``, §3.3.5);
+          been manipulated explicitly is also no longer advanced automatically by ``go``,
+          §3.3.5);
           §3.3.2: when the phase table has no ``(d)`` prefix the divisor **defaults to 4** => an
           ordinary ``ip`` = +90, ``dp`` = -90, ``ipN*2`` = +-180.
         """
@@ -265,9 +277,7 @@ class QuadratureBlock:
                 operator = "ip" if match.group(1).lower() == "i" else "dp"
                 steps = int(match.group(3) or 1)
                 found.append(
-                    PhaseIncrement(
-                        phase=f"ph{match.group(2)}", operator=operator, steps=steps
-                    )
+                    PhaseIncrement(phase=f"ph{match.group(2)}", operator=operator, steps=steps)
                 )
         return tuple(found)
 
@@ -316,9 +326,7 @@ class McClause:
     @property
     def family(self) -> str:
         suffix = self.clause[2:].upper()
-        return {"PH": FAMILY_F1PH, "EA": FAMILY_F1EA, "QF": FAMILY_F1QF}.get(
-            suffix, FAMILY_F1PH
-        )
+        return {"PH": FAMILY_F1PH, "EA": FAMILY_F1EA, "QF": FAMILY_F1QF}.get(suffix, FAMILY_F1PH)
 
 
 def _match_paren(text: str, open_index: int) -> int:
@@ -443,9 +451,7 @@ def acquisition_blocks(text: str | None) -> tuple[QuadratureBlock, ...]:
         match = _LOOP_RE.match(stripped)
         if match:
             blocks.append(
-                QuadratureBlock(
-                    label=match.group(1), count=match.group(2), body=tuple(body)
-                )
+                QuadratureBlock(label=match.group(1), count=match.group(2), body=tuple(body))
             )
             body = []
             continue
@@ -453,12 +459,11 @@ def acquisition_blocks(text: str | None) -> tuple[QuadratureBlock, ...]:
     return tuple(blocks)
 
 
-def quadrature_block(
-    text: str | None, logical_axis: str, ndim: int
-) -> QuadratureBlock | None:
+def quadrature_block(text: str | None, logical_axis: str, ndim: int) -> QuadratureBlock | None:
     """The quadrature block (``times 2``) of this logical dimension; ``None`` when unavailable.
 
-    In 2D the only quadrature block is logical F1. In 3D the two quadrature blocks from inside to
+    In 2D the only quadrature block is logical F1. In 3D the two quadrature blocks from inside
+    to
     outside are logical **F2** (``acqu2s``) and **F1** (``acqu3s``) -- based on the
     ``F1PH(inner)/F2PH(outer)`` expansion of ``mc`` and TopSpin's ``td1/td2`` attribution, and
     checked one by one against the ``FnMODE`` family of 14 deposited pulse programs.
@@ -472,14 +477,13 @@ def quadrature_block(
     return pairs[0] if logical_axis == "F1" else None
 
 
-def evolution_block(
-    text: str | None, logical_axis: str, ndim: int
-) -> QuadratureBlock | None:
+def evolution_block(text: str | None, logical_axis: str, ndim: int) -> QuadratureBlock | None:
     """The **evolution block** of this logical dimension (a non-quadrature block such as
     ``times ST1CNT``); ``None`` when unavailable.
 
     It uses the same inside -> outside order as :func:`quadrature_block`: in 2D the block right
-    after the quadrature block; in 3D, F2's evolution block follows F2's quadrature block and F1's
+    after the quadrature block; in 3D, F2's evolution block follows F2's quadrature block and
+    F1's
     follows F1's quadrature block.
     """
     blocks = acquisition_blocks(text)
@@ -498,15 +502,15 @@ def evolution_block(
     return blocks[follower] if follower < len(blocks) else None
 
 
-def acquisition_family(
-    text: str | None, logical_axis: str, ndim: int
-) -> str | None:
+def acquisition_family(text: str | None, logical_axis: str, ndim: int) -> str | None:
     """The acquisition family of this dimension (``F1PH``/``F1EA``/``F1QF``); ``None`` when it
     cannot be judged.
 
-    The family comes from the pulse program itself (whether the quadrature block steps a gradient
+    The family comes from the pulse program itself (whether the quadrature block steps a
+    gradient
     table = the E/A signature) and is cross-checked by the caller against that dimension's
-    ``FnMODE`` from ``acquNs`` -- neither the family alone nor ``FnMODE`` alone is enough (manual
+    ``FnMODE`` from ``acquNs`` -- neither the family alone nor ``FnMODE`` alone is enough
+    (manual
     table 11.1: one and the same ``F1PH`` switches between QSEQ/TPPI/States/States-TPPI via
     ``FnMODE``).
     """
@@ -568,7 +572,8 @@ def evolution_delays(text: str | None, logical_axis: str, ndim: int) -> tuple[st
     program (the criterion for the evolution period).
 
     Both forms are read: for an unexpanded one the ``caldel(dN, +-inN)`` in the ``mc`` clause's
-    second argument; for an expanded one the ``idN``/``ddN``/``rdN`` in that dimension's evolution
+    second argument; for an expanded one the ``idN``/``ddN``/``rdN`` in that dimension's
+    evolution
     block. When nothing is found it cannot be judged (the caller treats it as ``unknown``).
     """
     clause = mc_clause_for(text, logical_axis)
@@ -606,9 +611,7 @@ def _pulse_label(line: str, phase: str) -> str:
     """The pulse label carrying that phase on the pulse line (``p13``/``sp2`` ...); the first one
     found is returned.
     """
-    label = re.search(
-        r"\(([^()]*\b" + re.escape(phase) + r"\b[^()]*)\)", line
-    )
+    label = re.search(r"\(([^()]*\b" + re.escape(phase) + r"\b[^()]*)\)", line)
     return label.group(1) if label else ""
 
 
@@ -649,7 +652,8 @@ def pulse_role_in_evolution(
     * ``create``: the single pulse falls **before the evolution delay** => it creates the
       coherence that enters the evolution period (target coherence 0 -> -1) => ``dp = -1`` =>
       ``qphase = +90`` => normal;
-    * ``handover``: the single pulse falls **after the evolution delay** => it hands the coherence
+    * ``handover``: the single pulse falls **after the evolution delay** => it hands the
+    coherence
       over (-1 -> 0) => ``dp = +1`` => ``qphase = -90`` => conjugated;
     * anything else (several phases stepped at once, the same phase used by several pulses, a
       pulse **inside** the evolution period, a comment that explicitly says 180 degrees, no
@@ -714,9 +718,7 @@ def _fnmode_of(experiment: Experiment, logical_axis: str) -> int | None:
         return None
 
 
-def read_pulseprogram(
-    experiment: Experiment, data_dir: Path | str | None = None
-) -> str | None:
+def read_pulseprogram(experiment: Experiment, data_dir: Path | str | None = None) -> str | None:
     """Read this dataset's ``pulseprogram`` (the expanded pulse program); ``None`` when it is
     absent or unreadable.
     """
@@ -793,9 +795,7 @@ def handedness_for(
     normalised => ``unknown`` (**not added by default**).
     """
     axis = str(logical_axis)
-    dimension = next(
-        (dim for dim in experiment.dimensions if dim.logical_axis == axis), None
-    )
+    dimension = next((dim for dim in experiment.dimensions if dim.logical_axis == axis), None)
     if dimension is None or dimension.role is AxisRole.DIRECT:
         return Handedness(axis=axis, handedness=HANDEDNESS_UNKNOWN, reason="not_indirect")
     ndim = int(experiment.ndim)
@@ -845,9 +845,7 @@ def handedness_for(
         # quadrature increment (manual §11.2)
         increments = clause.increments
     if not increments:
-        return replace(
-            base, reason="no_quadrature_pair" if family is None else "no_increment"
-        )
+        return replace(base, reason="no_quadrature_pair" if family is None else "no_increment")
     if annotation is not None and annotation.get("steps"):
         # (1) **explicit annotations take precedence**: use them when the sequence/axis is in the
         #     table and has dp steps (settled by literature or data)
@@ -890,9 +888,7 @@ def _annotated_verdict(
                 if delta_deg is None:
                     return replace(base, reason="unsupported_phase_program")
                 qphase -= delta_deg
-    return _verdict_from_qphase(
-        replace(base, source=str(annotation.get("source") or "")), qphase
-    )
+    return _verdict_from_qphase(replace(base, source=str(annotation.get("source") or "")), qphase)
 
 
 def _content_verdict(
@@ -907,10 +903,13 @@ def _content_verdict(
 
     What can be established is "which phase program this dimension's quadrature increment falls
     on, how large dphi is, the acquisition family, and the shape of that pulse"; a **determined
-    handedness needs the ``p`` of the coherence pathway selected by the phase cycle**, which is a
+    handedness needs the ``p`` of the coherence pathway selected by the phase cycle**, which is
+    a
     pathway-solving problem (see the "three-layer architecture" in the module docs and
-    ``docs/backend/fid_com_parameter_sources.md`` §9) that this module **has not solved yet**, so
-    it always returns ``unknown`` + ``pathway_not_solved`` (user, 2026-09-25: "do not force a neg
+    ``docs/backend/fid_com_parameter_sources.md`` §9) that this module **has not solved yet**,
+    so
+    it always returns ``unknown`` + ``pathway_not_solved`` (user, 2026-09-25: "do not force a
+    neg
     on it"; truth samples are used for verification only, never as evidence).
     """
     facts = {
@@ -928,9 +927,7 @@ def _content_verdict(
         facts["pulse_role"] = role
         pulses = pulses_using_phase(text, increment.phase)
         if len(pulses) > 1:
-            return replace(
-                base, reason="phase_used_by_several_pulses", **facts
-            )
+            return replace(base, reason="phase_used_by_several_pulses", **facts)
         if not pulses:
             return replace(base, reason="phase_not_in_any_pulse", **facts)
         if pulse_flip_angle_hint(text, pulses[0][1], increment.phase) == 180:
@@ -1004,9 +1001,7 @@ def review_reason_text(result: Handedness) -> str:
     if reason == "f1qf":
         return tr("the acquisition is phase insensitive (F1QF/QF): there is no quadrature pair")
     if reason == "family_conflict":
-        return tr(
-            "the pulse program loop and acquNs FnMODE={p0} disagree", p0=result.fnmode
-        )
+        return tr("the pulse program loop and acquNs FnMODE={p0} disagree", p0=result.fnmode)
     if reason == "unknown_sequence":
         return tr(
             "the pulse program {p0} is not in the coherence-pathway table", p0=result.sequence
@@ -1037,9 +1032,7 @@ def review_reason_text(result: Handedness) -> str:
     if reason == "phase_not_in_any_pulse":
         return tr("the stepped phase program is not used by any pulse")
     if reason == "stepped_pulse_is_180":
-        return tr(
-            "the stepped pulse is a 180 degree pulse (its coherence-order change is not +-1)"
-        )
+        return tr("the stepped pulse is a 180 degree pulse (its coherence-order change is not +-1)")
     if reason == "no_evidence_for_2d_states":
         return tr(
             "no real Data has been verified for a 2D States/States-TPPI indirect dimension yet, "
@@ -1058,8 +1051,10 @@ def review_line(result: Handedness, ndim: int) -> str:
     """One reminder line (the same sentence in ``format_fid_step_report`` / the import warning /
     the log).
 
-    Finalised by the user on 2026-09-25 for the second time ("we let the user check it themselves
-    anyway, so use the rule with the lowest error probability"): the automatic criterion only gets
+    Finalised by the user on 2026-09-25 for the second time ("we let the user check it
+    themselves
+    anyway, so use the rule with the lowest error probability"): the automatic criterion only
+    gets
     it right **as far as it can** (``acquisition_encoding.simple_neg_rule``); a dimension it
     cannot judge is reported truthfully as "no ``-neg`` added automatically" plus **where to
     decide** -- the indirect-dimension flip control of the spectrum step (``sampling.flip_f1`` /
@@ -1067,8 +1062,10 @@ def review_line(result: Handedness, ndim: int) -> str:
     """
     letter = axis_letter(ndim, result.axis)
     return tr(
-        "{p0}MODE ({p1}): no FT -neg was applied automatically ({p2}); use the indirect-dimension "
-        "flip control in the spectrum step if this dimension needs it",
+        "{p0}MODE ({p1}): no FT -neg was applied automatically ({p2}); first look at the "
+        "spectrum: if this dimension's peaks come out mirrored relative to what you expect, "
+        "add the flip with the indirect-dimension flip control in the spectrum step (it "
+        "re-applies the matching phase automatically)",
         p0=letter,
         p1=result.axis,
         p2=review_reason_text(result),
@@ -1080,17 +1077,40 @@ def neg_applied_line(decision: Any, ndim: int) -> str:
     :func:`review_line` in the log/report/import).
 
     A sign change must be told to the user (user, 2026-09-25: the spectrum is checked by hand in
-    the end) together with a way to undo it -- the indirect-dimension flip control of the spectrum
+    the end) together with a way to undo it -- the indirect-dimension flip control of the
+    spectrum
     step (untick it / re-select the same entry). The criterion and reason code stay auditable in
     ``mode_symbol_audit()["dims"]``.
     """
     letter = axis_letter(ndim, decision.axis)
     return tr(
-        "{p0}MODE ({p1}): FT -neg was applied automatically; if the sign is wrong, use the "
-        "indirect-dimension flip control in the spectrum step to undo it",
+        "{p0}MODE ({p1}): FT -neg was applied automatically; check that this "
+        "indirect dimension's direction is correct - if it is not, choose "
+        "the indirect-dimension flip after running the spectrum "
+        "generation and run the script again",
         p0=letter,
         p1=decision.axis,
     )
+
+
+def is_neg_notice(line: str) -> bool:
+    """Return whether a line is an automatic ``-neg`` notice or reminder.
+
+    These notices appear in the import log, the FID-generation report and the conversion log.
+    They should not also open a popup, which would interrupt the user with duplicate
+    information.
+    The GUI uses this predicate to omit the notices from popups while keeping them in logs and
+    reports.
+
+    Identify the line by its source format, not merely by the presence of ``-neg``: the stable
+    prefix is ``<axis letter>MODE (<axis name>):`` (for example, ``xMODE (F2):`` or
+    ``yMODE (F1):``). No other report line uses this form. The notice text is produced in this
+    module, so keeping the predicate beside its source prevents a separate GUI regular
+    expression
+    from silently drifting.
+    """
+    text = str(line or "").lstrip()
+    return bool(re.match(r"^[xyz]MODE \([^)]+\):", text))
 
 
 def _neg_notice_lines(
@@ -1103,8 +1123,10 @@ def _neg_notice_lines(
     """The mode/sign notice lines: ``-neg`` was applied automatically (notice + undo entry) or it
     could not be judged (reminder for the user to decide).
 
-    Only the ``NEG_ADD`` / ``NEG_ASK`` conclusions appear here; ``NEG_NONE`` (the E/A family, the
-    second indirect dimension of a 3D) is a **definite conclusion** of the criterion and no longer
+    Only the ``NEG_ADD`` / ``NEG_ASK`` conclusions appear here; ``NEG_NONE`` (the E/A family,
+    the
+    second indirect dimension of a 3D) is a **definite conclusion** of the criterion and no
+    longer
     disturbs the user.
     """
     from core.experiment.acquisition_encoding import (
@@ -1140,14 +1162,13 @@ def handedness_by_axis(
     return results
 
 
-def review_lines(
-    experiment: Experiment, *, data_dir: Path | str | None = None
-) -> list[str]:
+def review_lines(experiment: Experiment, *, data_dir: Path | str | None = None) -> list[str]:
     """The reminder lines for all dimensions that need a notice/review (in the F2->F1 fid.com
     axis order).
 
     After the second finalisation on 2026-09-25 there are two kinds: dimensions where the
-    automatic criterion **added** `-neg` (notice + undo entry) and dimensions it **cannot judge**
+    automatic criterion **added** `-neg` (notice + undo entry) and dimensions it **cannot
+    judge**
     (``ask_user``, not added by default); a definite "do not add" no longer produces a reminder.
     """
     ndim = int(experiment.ndim)
@@ -1162,7 +1183,8 @@ def mode_symbol_audit(
     """The "mode/sign" audit record of this dataset (carried into ``mode_symbol`` of
     ``*.fid.conversion.json``).
 
-    The same approach as the spectral width/carrier frequency: a single source produces **lines**
+    The same approach as the spectral width/carrier frequency: a single source produces
+    **lines**
     here (the reminder text, the same in the log/report/import) plus **dims** (the per-dimension
     verdict details and the automatic criterion's conclusion, for later review).
     """
@@ -1225,6 +1247,7 @@ __all__ = [
     "canonical_negated",
     "handedness_by_axis",
     "handedness_for",
+    "is_neg_notice",
     "mc_clause_for",
     "mc_clauses",
     "mode_symbol_audit",

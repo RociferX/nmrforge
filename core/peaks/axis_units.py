@@ -51,7 +51,8 @@ MEASUREMENT_WINDOW_LINEWIDTH_FACTOR = 1.5
 
 def ppm_per_point(axis_ppm: Sequence[float]) -> float:
     """Point spacing of an axis array (ppm/point); the median of adjacent differences is
-    robust against endpoints and uneven spacing."""
+    robust against endpoints and uneven spacing.
+    """
     values = np.asarray(axis_ppm, dtype=float)
     if values.size < 2:
         return 0.0
@@ -62,9 +63,7 @@ def ppm_per_point(axis_ppm: Sequence[float]) -> float:
     return float(np.median(steps))
 
 
-def points_for_ppm(
-    axis_ppm: Sequence[float], width_ppm: float, *, minimum: int = 1
-) -> int:
+def points_for_ppm(axis_ppm: Sequence[float], width_ppm: float, *, minimum: int = 1) -> int:
     """Physical width (ppm) -> data points (>= ``minimum``); 0 when it cannot be converted."""
     step = ppm_per_point(axis_ppm)
     if step <= 0:
@@ -101,7 +100,8 @@ def linewidth_hz(
     linewidth_hz_by_nucleus: Mapping[str, float] | None = None,
 ) -> float:
     """Estimated linewidth of that nucleus in Hz; the built-in default when the
-    configuration does not define one."""
+    configuration does not define one.
+    """
     table = dict(DEFAULT_LINEWIDTH_HZ)
     if linewidth_hz_by_nucleus:
         for key, value in linewidth_hz_by_nucleus.items():
@@ -121,9 +121,7 @@ def physical_width_ppm(
     linewidth_hz_by_nucleus: Mapping[str, float] | None = None,
 ) -> float:
     """Linewidth factor -> physical width (ppm)."""
-    return hz_to_ppm(
-        float(factor) * linewidth_hz(nucleus, linewidth_hz_by_nucleus), obs_mhz
-    )
+    return hz_to_ppm(float(factor) * linewidth_hz(nucleus, linewidth_hz_by_nucleus), obs_mhz)
 
 
 def edge_margin_ppm(
@@ -134,7 +132,8 @@ def edge_margin_ppm(
     factor: float = EDGE_MARGIN_LINEWIDTH_FACTOR,
 ) -> float:
     """Default physical width of the axis peak exclusion margin (ppm; one band above and
-    one below axis 0)."""
+    one below axis 0).
+    """
     return physical_width_ppm(
         nucleus,
         obs_mhz,
@@ -166,7 +165,8 @@ def describe_axis(
     width_ppm: float | None = None,
 ) -> dict[str, Any]:
     """For records: the nucleus, point spacing, physical width and equivalent number of
-    points of one axis."""
+    points of one axis.
+    """
     step = ppm_per_point(axis_ppm)
     out: dict[str, Any] = {
         "nucleus": str(nucleus or ""),

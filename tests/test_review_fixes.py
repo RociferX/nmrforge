@@ -65,7 +65,7 @@ def _project(tmp_path: Path, title: str = "demo"):
 def test_ext_range_1h_stays_strict() -> None:
     assert validate_ext_range("10.5", "6.5", "1H") == ""
     assert validate_ext_range("", "", "1H") == ""
-    assert validate_ext_range("60", "20", "1H") != ""       # 1H excludes 60 ppm
+    assert validate_ext_range("60", "20", "1H") != ""  # 1H excludes 60 ppm
     # The high-field end must be larger than the low-field end.
     assert validate_ext_range("6.5", "10.5", "1H") != ""
     assert validate_ext_range("abc", "", "1H") != ""
@@ -119,9 +119,7 @@ def test_ui_state_not_written_for_trashed_data(tmp_path: Path) -> None:
     assert data_is_trashed(manager, exp.id, data.id) is True
     assert ui_state_path(manager, exp.id, data.id).exists() is False
 
-    written = update_ui_state(
-        manager, exp.id, data.id, "peaks", {"threshold": 40.0}
-    )
+    written = update_ui_state(manager, exp.id, data.id, "peaks", {"threshold": 40.0})
     assert written is False
     # Critical: the deleted data directory must not be rebuilt (otherwise
     # recover_trashed would wrongly judge it as resurrected)
@@ -130,9 +128,7 @@ def test_ui_state_not_written_for_trashed_data(tmp_path: Path) -> None:
 
 def test_ui_state_still_written_for_active_data(tmp_path: Path) -> None:
     manager, exp, data = _project(tmp_path, "trash_write_ok")
-    written = update_ui_state(
-        manager, exp.id, data.id, "peaks", {"threshold": 30.0}
-    )
+    written = update_ui_state(manager, exp.id, data.id, "peaks", {"threshold": 30.0})
     assert written is True
     assert ui_state_path(manager, exp.id, data.id).is_file()
 
@@ -159,9 +155,7 @@ def test_recover_trashed_ignores_ui_records_only(tmp_path: Path) -> None:
 # ---------------------------------------------------------------- tree double-click on spectrum
 
 
-def test_double_click_ft1_opens_spectrum(
-    tmp_path: Path, qapp: QApplication, host
-) -> None:
+def test_double_click_ft1_opens_spectrum(tmp_path: Path, qapp: QApplication, host) -> None:
     from gui.project_tree import ProjectTreePanel
 
     manager, exp, data = _project(tmp_path, "ft1_click")

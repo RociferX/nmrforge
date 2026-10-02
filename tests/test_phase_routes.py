@@ -57,9 +57,7 @@ class _FakeBackend:
         params = dict(params or {})
         self.process_calls.append((experiment, plan, params, dict(direct_phase_override or {})))
         if script_name:
-            (self.work / script_name).write_text(
-                f"# fake script {script_name}\n", encoding="utf-8"
-            )
+            (self.work / script_name).write_text(f"# fake script {script_name}\n", encoding="utf-8")
         path = str(self.work / (out_file or "final.ft2"))
         Path(path).write_bytes(b"x")
         return {"success": True, "spectrum_path": path, "logs": []}
@@ -166,9 +164,7 @@ def test_unified_route_uniform_magnitude_skips_phase_search(
     result = routes.unified_route(experiment, backend, work_dir=work)
     # F2 preview + joint (processing-parameter optimisation) + final run (no F1 preview)
     assert len(backend.process_calls) == 3
-    assert all(
-        call[2].get("preview_axis") != "F1" for call in backend.process_calls
-    )
+    assert all(call[2].get("preview_axis") != "F1" for call in backend.process_calls)
     assert set(result["phases"]) == {"F2"}
     assert result["spectrum_path"]
 
@@ -187,9 +183,7 @@ def test_unified_route_uniform_hmbc_skips_all_phase_search(
     result = routes.unified_route(experiment, backend, work_dir=work)
     # No preview: joint + final run
     assert len(backend.process_calls) == 2
-    assert all(
-        call[2].get("preview_axis") is None for call in backend.process_calls
-    )
+    assert all(call[2].get("preview_axis") is None for call in backend.process_calls)
     assert result["phases"]["F2"] == (0.0, 0.0)
     assert any("幅度谱不自动调相" in line for line in result["logs"])
     assert result["spectrum_path"]
@@ -252,12 +246,13 @@ def test_disambiguate_180_mixed_uses_region_sign_convention() -> None:
 
     n = 64
     dims = [
-        Dimension(logical_axis="F3", nucleus="1H", sf=600.0, sw=8196.0,
-                  o1p=4.7, role=AxisRole.DIRECT),
-        Dimension(logical_axis="F2", nucleus="15N", sf=60.8, sw=2189.0,
-                  o1p=118.0),
-        Dimension(logical_axis="F1", nucleus="13C", sf=150.9, sw=11312.0,
-                  o1p=39.0, td=n, ft_size=n),
+        Dimension(
+            logical_axis="F3", nucleus="1H", sf=600.0, sw=8196.0, o1p=4.7, role=AxisRole.DIRECT
+        ),
+        Dimension(logical_axis="F2", nucleus="15N", sf=60.8, sw=2189.0, o1p=118.0),
+        Dimension(
+            logical_axis="F1", nucleus="13C", sf=150.9, sw=11312.0, o1p=39.0, td=n, ft_size=n
+        ),
     ]
     exp = Experiment(
         dataset_id="x",
@@ -334,9 +329,7 @@ def test_unified_route_carries_manual_flip_into_every_nus_run(
         "core.optimization.phase_consensus.search_direct_phase_real_ht",
         lambda arr, axis=-1, sign_mode="uniform", **kwargs: (0.0, 0.0, 80.0),
     )
-    monkeypatch.setattr(
-        routes, "_read_real_ft3", lambda path: np.zeros((4, 8), dtype=float)
-    )
+    monkeypatch.setattr(routes, "_read_real_ft3", lambda path: np.zeros((4, 8), dtype=float))
     monkeypatch.setattr(
         routes,
         "_read_complex_preview",
@@ -374,11 +367,7 @@ def test_optimize_nus_processing_carries_manual_flip_into_joint_spectrum(
         {"F1": (0.0, 0.0)},
         {"sampling": {"flip_f1": True}},
     )
-    joint = [
-        call
-        for call in backend.finalize_calls
-        if call["params"].get("zero_fill")
-    ]
+    joint = [call for call in backend.finalize_calls if call["params"].get("zero_fill")]
     assert joint, backend.finalize_calls
     for call in joint:
         assert call["params"].get("sampling") == {"flip_f1": True}, call["params"]
@@ -421,7 +410,8 @@ def test_unified_route_nus_reconstruct_then_finalize(
         lambda arr, axis=-1, sign_mode="uniform", **kwargs: (30.0, 0.0, 80.0),
     )
     monkeypatch.setattr(
-        routes, "_read_real_ft3",
+        routes,
+        "_read_real_ft3",
         lambda path: np.zeros((32, 64), dtype=float),
     )
 
@@ -473,11 +463,7 @@ def test_unified_route_nus_reconstruct_then_finalize(
     # the indirect-dimension re-search must exclude the preview axis itself -- otherwise
     # generating with the old phase searches a residual (~0) and overwrites the lost
     # absolute phase
-    f1_previews = [
-        c
-        for c in backend.finalize_calls
-        if c["params"].get("preview_axis") == "F1"
-    ]
+    f1_previews = [c for c in backend.finalize_calls if c["params"].get("preview_axis") == "F1"]
     assert len(f1_previews) == 2  # first search + re-search
     assert "F1" not in f1_previews[-1]["phases"]
     # 0.2.155/0.2.160: when the diagnostic detects a DC offset the final-run script
@@ -487,8 +473,10 @@ def test_unified_route_nus_reconstruct_then_finalize(
     assert "direct_poly_time" in final_params
     assert backend.reconstruct_params[0].get("direct_poly_time") is None
     assert final_params.get("direct_poly_time") is True
-    assert "== 谱图质量报告 ==" in result["logs"]
-    assert any("◆ 最终谱图质量" in line for line in result["logs"])
+    from workflow.optimization_report import spectrum_report_title
+
+    assert spectrum_report_title() in result["logs"]
+    assert any("◆ 终谱质量" in line for line in result["logs"])
     assert any("相位搜索完成,耗时" in line for line in result["logs"])
     assert any("终跑完成,耗时" in line for line in result["logs"])
     # 0.2.156: the first-run script is kept as {dataset_id}_before_optimize.com
@@ -498,7 +486,6 @@ def test_unified_route_nus_reconstruct_then_finalize(
     assert "# fake nus script #1" in no_opt.read_text(encoding="utf-8")
     assert "# fake nus script #2" not in no_opt.read_text(encoding="utf-8")
     assert any("初跑脚本保留" in line for line in result["logs"])
-
 
 
 def test_optimize_nus_processing_baseline_and_window(
@@ -619,9 +606,7 @@ def test_optimize_nus_processing_baseline_and_window(
     assert calls[0]["baseline"] == {}
 
 
-def test_unified_route_nus_progress_stages(
-    tmp_path: Path, monkeypatch, bruker_dir: Path
-) -> None:
+def test_unified_route_nus_progress_stages(tmp_path: Path, monkeypatch, bruker_dir: Path) -> None:
     """NUS: progress covers the first SMILE pass / processing-parameter optimisation
     / full-script final run stages."""
     experiment = read_dataset(bruker_dir / "nus_2d")
@@ -639,11 +624,13 @@ def test_unified_route_nus_progress_stages(
         lambda arr, axis=-1, sign_mode="uniform", **kwargs: (30.0, 0.0, 80.0),
     )
     monkeypatch.setattr(
-        routes, "_read_real_ft3",
+        routes,
+        "_read_real_ft3",
         lambda path: np.zeros((32, 64), dtype=float),
     )
     monkeypatch.setattr(
-        routes, "_read_complex_preview",
+        routes,
+        "_read_complex_preview",
         lambda path, unpack_axis=None: _synthetic_preview(0, -30.0),
     )
     monkeypatch.setattr(
@@ -657,9 +644,7 @@ def test_unified_route_nus_progress_stages(
         },
     )
     messages: list[str] = []
-    result = routes.unified_route(
-        experiment, backend, work_dir=work, progress=messages.append
-    )
+    result = routes.unified_route(experiment, backend, work_dir=work, progress=messages.append)
     joined = "\n".join(messages)
     assert "第一遍 SMILE 完成" in joined, messages
     assert "F1 复型预览中" in joined, messages
@@ -670,7 +655,6 @@ def test_unified_route_nus_progress_stages(
     assert all(call["progress"] is not None for call in backend.finalize_calls)
     # 0.2.199-patch29do: iterative -> 5
     assert result["backend_runs"] == 5
-
 
 
 def test_unified_route_nus_final_ext_apply_to_opt(
@@ -706,7 +690,8 @@ def test_unified_route_nus_final_ext_apply_to_opt(
         lambda arr, axis=-1, sign_mode="uniform", **kwargs: (30.0, 0.0, 80.0),
     )
     monkeypatch.setattr(
-        routes, "_read_real_ft3",
+        routes,
+        "_read_real_ft3",
         lambda path: np.zeros((32, 64), dtype=float),
     )
     monkeypatch.setattr(
@@ -823,8 +808,10 @@ def test_unified_route_uniform_runs_processing_optimization(
     monkeypatch.setattr(
         "workflow.baseline_optimize.optimize_baseline",
         lambda experiment, path, **kwargs: BaselineOptimizeResult(
-            baseline={"F1": {"enabled": True, "mode": "order", "order": 2},
-                      "F2": {"enabled": False}},
+            baseline={
+                "F1": {"enabled": True, "mode": "order", "order": 2},
+                "F2": {"enabled": False},
+            },
             scores={},
             spectrum_path=str(path),
             logs=["测试基线"],
@@ -860,15 +847,14 @@ def test_unified_route_uniform_runs_processing_optimization(
     assert result["baseline"]["F1"]["order"] == 2
     assert result["window"]["F2"]["type"] == "sine_bell"
     assert "diagnostics" in result
-    # 0.2.166: the uniform summary is symmetric with NUS -- baseline/window/zero fill
-    # enter the "spectrum quality report" (0.2.169-patch readability: sections,
-    # overall verdict, per-item grades); since 2026-09-23 the data-quality diagnosis
-    # belongs to the "Generate FID" step and is not in this report
-    assert "== 谱图质量报告 ==" in result["logs"]
-    assert any("◆ 最终谱图质量" in line for line in result["logs"])
+
+    from workflow.optimization_report import spectrum_report_title
+
+    assert spectrum_report_title() in result["logs"]
+    assert any("◆ 终谱质量" in line for line in result["logs"])
     assert any("  基线:" in line for line in result["logs"])
     assert any("  窗函数:" in line for line in result["logs"])
-    assert any("  填零:" in line for line in result["logs"])
+    assert any("  零填充:" in line for line in result["logs"])
     assert not any("◆ 数据质量诊断" in line for line in result["logs"])
     # 0.2.166: the uniform first-run script is kept (a copy of the joint script that
     # cleanup does not remove)
@@ -995,7 +981,8 @@ def test_unified_route_nus_final_ext_renormalizes_p1(
         lambda arr, axis=-1, sign_mode="uniform", **kwargs: (30.0, 15.0, 80.0),
     )
     monkeypatch.setattr(
-        routes, "_read_real_ft3",
+        routes,
+        "_read_real_ft3",
         lambda path: np.zeros((32, 64), dtype=float),
     )
     monkeypatch.setattr(
@@ -1028,9 +1015,7 @@ def test_unified_route_nus_final_ext_renormalizes_p1(
     # p0 unchanged
     assert final_params["direct_phase_override"] == [30.0, 7.5]
     assert result["direct_phase"] == (30.0, 7.5)
-    assert any(
-        "窗口重归一化" in line and "7.5" in line for line in result["logs"]
-    )
+    assert any("窗口重归一化" in line and "7.50" in line for line in result["logs"])
     # On by default: the first-pass reconstruction and the final run share the window
     # (8.5-6.5) and p1 is not renormalised
     backend2 = _FakeBackend(tmp_path / "nus_p1_work_on")
@@ -1043,9 +1028,7 @@ def test_unified_route_nus_final_ext_renormalizes_p1(
     final2 = backend2.reconstruct_params[1]
     assert final2["direct_phase_override"] == [30.0, 15.0]
     assert result2["direct_phase"] == (30.0, 15.0)
-    assert not any(
-        "窗口重归一化" in line for line in result2["logs"]
-    )
+    assert not any("窗口重归一化" in line for line in result2["logs"])
 
 
 def test_unified_route_uniform_progress_stages(
@@ -1101,28 +1084,25 @@ def test_finalize_nus_progress_callback(tmp_path: Path, monkeypatch, bruker_dir:
     # the concrete "phase optimisation: ...")
     assert messages == []
 
+
 def test_split_final_ext_apply_to_opt_default_on() -> None:
     """0.2.199-patch3: "apply this range to the optimisation" is on by default and the
     parameters pass through the parser."""
     from workflow.phase_routes import _split_final_ext
 
-    p, lo, hi, apply = _split_final_ext(
-        {"final_ext_lo": "8.0", "final_ext_hi": "6.0"}
-    )
+    p, lo, hi, apply = _split_final_ext({"final_ext_lo": "8.0", "final_ext_hi": "6.0"})
     assert (lo, hi, apply) == ("8.0", "6.0", True)
     assert "apply_ext_to_opt" not in p
     assert "final_ext_lo" not in p
-    p, lo, hi, apply = _split_final_ext(
-        {"final_ext_lo": "8.0", "apply_ext_to_opt": "0"}
-    )
+    p, lo, hi, apply = _split_final_ext({"final_ext_lo": "8.0", "apply_ext_to_opt": "0"})
     assert (lo, hi, apply) == ("8.0", None, False)
     p, lo, hi, apply = _split_final_ext({"apply_ext_to_opt": "off"})
     assert (lo, hi, apply) == (None, None, False)
 
 
 def test_direct_phase_cache_roundtrip(tmp_path: Path) -> None:
-    '''Direct-dimension phase cache: save -> load hit; a shape/parameter change
-    invalidates it.'''
+    """Direct-dimension phase cache: save -> load hit; a shape/parameter change
+    invalidates it."""
     from core.data.internal_data_model import (
         AxisRole,
         Dimension,
@@ -1156,21 +1136,14 @@ def test_direct_phase_cache_roundtrip(tmp_path: Path) -> None:
     assert fp == _direct_phase_params_fp(exp, dict(params))
     assert fp != _direct_phase_params_fp(exp, {"ext_lo": 9.0, "ext_hi": 7.0})
 
-    _save_direct_phase_cache(
-        tmp_path, exp, params, shape, 12.5, -3.0, 40.0, 22.3
-    )
+    _save_direct_phase_cache(tmp_path, exp, params, shape, 12.5, -3.0, 40.0, 22.3)
     data = _load_direct_phase_cache(tmp_path, exp, params, shape)
     assert data is not None
     assert float(data["p0"]) == 12.5
     assert float(data["p1"]) == -3.0
     assert float(data["duration_s"]) == 22.3
     assert _load_direct_phase_cache(tmp_path, exp, params, (21, 16, 12)) is None
-    assert (
-        _load_direct_phase_cache(
-            tmp_path, exp, {"ext_lo": 9.0, "ext_hi": 7.0}, shape
-        )
-        is None
-    )
+    assert _load_direct_phase_cache(tmp_path, exp, {"ext_lo": 9.0, "ext_hi": 7.0}, shape) is None
     # 0.2.166: the direct-dimension window affects the reconstruction plane, so the
     # cache fingerprint must include window
     assert (
@@ -1187,7 +1160,6 @@ def test_direct_phase_cache_roundtrip(tmp_path: Path) -> None:
         )
         is None
     )
-
 
 
 def test_append_final_summary_readable_report(tmp_path: Path) -> None:
@@ -1236,18 +1208,19 @@ def test_append_final_summary_readable_report(tmp_path: Path) -> None:
         ],
     )
     text = "\n".join(logs)
-    assert "== 谱图质量报告 ==" in text
-    assert "◆ 最终谱图质量" in text
-    assert "综合判定:" in text
+    from workflow.optimization_report import spectrum_report_title
+
+    assert spectrum_report_title() in text
+    assert "◆ 终谱质量" in text
+    assert "综合结果:" in text
     assert "- 基线: 需注意" in text or "- 基线: 较差" in text
     assert "基线指标" in text
-    assert "基线不平原因:" in text
-    assert "保持 off" in text
-    # 2026-09-23 (user request): the diagnosis belongs to the "Generate FID" step, so
-    # the spectrum report has no such section
+    assert "建议复核:" in text
+    assert "检测到基线倾斜/偏移" in text
+
     assert "◆ 数据质量诊断" not in text
     assert "POLY -time" not in text
-    assert "◆ 处理参数与优化" in text
+    assert "◆ 处理设置" in text
 
 
 def test_cleanup_unified_intermediates(tmp_path: Path) -> None:
@@ -1359,9 +1332,7 @@ def test_load_preview_memory_error_hint(tmp_path, monkeypatch) -> None:
     def boom(path, unpack_axis=None):
         raise MemoryError
 
-    monkeypatch.setattr(
-        "workflow.phase_routes._read_complex_preview", boom
-    )
+    monkeypatch.setattr("workflow.phase_routes._read_complex_preview", boom)
     import pytest
 
     with pytest.raises(RuntimeError) as ei:

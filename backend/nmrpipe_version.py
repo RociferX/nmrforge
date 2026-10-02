@@ -4,7 +4,8 @@
 Why this lives in the backend layer: the NMRPipe version can only be obtained by running its
 executable, and ``core`` may not depend on the backend. The backend calls
 ``register_nmrpipe_versions`` once it has really parsed an NMRPipe installation directory, and
-``ProjectManager.finish_run`` then merges the registered versions into WorkflowRun.tool_versions.
+``ProjectManager.finish_run`` then merges the registered versions into
+WorkflowRun.tool_versions.
 
 Constraints:
 
@@ -23,11 +24,11 @@ from pathlib import Path
 from core.version import register_tool_version
 
 _TIMEOUT_SECONDS = 5.0
-  # probed directory -> {tool name: version}; failures are cached too (an empty table) to avoid
+# probed directory -> {tool name: version}; failures are cached too (an empty table) to avoid
 # respawning
 _CACHE: dict[str, dict[str, str]] = {}
 
-_EXECUTABLES = {"nmrpipe": "nmrPipe", "smile": "smile"}
+_EXECUTABLES = {"nmrpipe": "nmrPipe"}
 _VERSION_RE = re.compile(r"\b(\d+\.\d+(?:[.\-]\w+)*)\b")
 
 
@@ -38,6 +39,7 @@ def _probe(executable: Path) -> str:
             [str(executable), "-version"],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=_TIMEOUT_SECONDS,
             check=False,
         )
@@ -49,7 +51,8 @@ def _probe(executable: Path) -> str:
 
 def register_nmrpipe_versions(bin_dir: Path | None) -> dict[str, str]:
     """Probe and register the NMRPipe / SMILE versions under ``bin_dir``; returns this run
-    result."""
+    result.
+    """
     if bin_dir is None:
         return {}
     key = str(bin_dir)
@@ -65,8 +68,29 @@ def register_nmrpipe_versions(bin_dir: Path | None) -> dict[str, str]:
         if version:
             found[name] = version
             register_tool_version(name, version)
+    # :func:`backend.environment_probe.probe_smile_plugin`。
+    if "nmrpipe" in found:
+        smile_version = _probe_smile_plugin_version()
+        if smile_version:
+            found["smile"] = smile_version
+            register_tool_version("smile", smile_version)
     _CACHE[key] = found
     return dict(found)
+
+
+def _probe_smile_plugin_version() -> str:
+    """Run ``nmrPipe -fn SMILE -help`` through csh and read the plugin-reported version.
+
+    Failures are silent, matching :func:`_probe`: a missing plugin, unavailable csh, or timeout
+    simply means no version is available. This does not affect processing and never fabricates
+    a version string.
+    """
+    try:
+        from backend.environment_probe import probe_smile_plugin
+    except Exception:
+        return ""
+    status = probe_smile_plugin()
+    return status.version if status.available else ""
 
 
 def clear_cache() -> None:

@@ -3,14 +3,15 @@ Purpose: Verify the end-to-end link of the external interface on real NMRPipe + 
 (Reference spectrum/refer to script freeze -> two reference peak tables -> parameter combination
 -> candidate spectrum -> two kinds of positioning -> two unified peak tables -> records), and
 print the key results into one line ``RESULT_JSON``. Usage (VM, the data path is given by
-environment variables or parameters):: nmrforge/bin/python scripts/vm_api_smoke.py \
---data ~/nmr_corpus_work/bmr6980/n15hsqc.fid \\ --peaks
+environment variables or parameters):: nmrforge/bin/python scripts/vm_api_smoke.py --data
+~/nmr_corpus_work/bmr6980/n15hsqc.fid \\ --peaks
 ~/nmr_corpus_work/bmr6980/reference_peaks.csv The default parameter combination is
 ``window.F1.off = [0.35, 0.45] x zero_fill = [1, 2]``(4 workflows). Two conditions (A/B)
 example::... scripts/vm_api_smoke.py --fresh \\ --data-a <apo directory > --data-b <holo
 directory > \\ --combos combos.csv NUS The same is true for 2D data, just replace the axis with
 SMILE parameter::... scripts/vm_api_smoke.py --fresh --data <2D NUS directory > \\ --axes
-'{"nsigma": [3, 5, 7], "thresh": [0.95]}'."""
+'{"nsigma": [3, 5, 7], "thresh": [0.95]}'.
+"""
 
 from __future__ import annotations
 
@@ -44,14 +45,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--data", default="", help="Bruker raw data for condition A directory")
     parser.add_argument("--data-a", default="", help="Condition A (equivalent to --data)")
-    parser.add_argument("--data-b", default="", help=
-        "Condition B (optional, both conditions have the same parameter)")
+    parser.add_argument(
+        "--data-b",
+        default="",
+        help="Condition B (optional, both conditions have the same parameter)",
+    )
     parser.add_argument(
         "--peaks",
         default="",
-        help=
-            "Optional: external reference peak table (.list or peak_id, H_ppm, N_ppm CSV); default "
-            "= automatic peak picking",
+        help="Optional: external reference peak table (.list or peak_id, H_ppm, N_ppm CSV); "
+        "default "
+        "= automatic peak picking",
     )
     parser.add_argument(
         "--axes",
@@ -61,13 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--combos",
         default="",
-        help="Explicit combination table CSV/TSV/YAML/JSON (optional with --axes)",
-    )
-    parser.add_argument(
-        "--localization",
-        choices=("parabolic", "gaussian", "both"),
-        default="parabolic",
-        help="Combination mode refinement method: parabolic (default) / gaussian (2D only) / both",
+        help="显式组合表 CSV/TSV/YAML/JSON(与 --axes 二选一)",
     )
     parser.add_argument(
         "--edge-margin-ppm",
@@ -80,8 +78,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--max-runs", type=int, default=8)
     parser.add_argument("--max-peaks", type=int, default=0)
-    parser.add_argument("--fresh", action="store_true", help=
-        "Delete the research directory first and then run")
+    parser.add_argument(
+        "--fresh", action="store_true", help="Delete the research directory first and then run"
+    )
     args = parser.parse_args(argv)
 
     source_a = args.data_a or args.data
@@ -111,14 +110,16 @@ def main(argv: list[str] | None = None) -> int:
         study,
         peaks=Path(args.peaks).expanduser() if args.peaks else None,
         max_peaks=args.max_peaks,
-        localization=args.localization,
+        localization="parabolic",
         edge_margin_ppm=args.edge_margin_ppm,
         progress=log,
         **kwargs,
     )
+
     def _table_report(run: Any, method: str) -> dict:
         """Peak table structure check: column header, row number, whether reference_peak_id is left
-        blank."""
+        blank.
+        """
         path = run.peak_table_path(method)
         if not path:
             return {"method": method, "present": False}
@@ -128,9 +129,7 @@ def main(argv: list[str] | None = None) -> int:
             "present": True,
             "path": path,
             "n_rows": len(rows),
-            "columns_ok": list(rows[0].keys()) == list(PEAK_TABLE_COLUMNS)
-            if rows
-            else None,
+            "columns_ok": list(rows[0].keys()) == list(PEAK_TABLE_COLUMNS) if rows else None,
             "reference_peak_id_all_empty": all(
                 str(row.get("reference_peak_id", "")) == "" for row in rows
             ),
@@ -146,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
 
     payload = {
         "elapsed_s": round(time.time() - started, 1),
-        "localization_requested": args.localization,
+        "localization_requested": "parabolic",
         "references": [
             {
                 "condition": reference.condition,
@@ -182,9 +181,7 @@ def main(argv: list[str] | None = None) -> int:
                 "wall_s": run.wall_time_s,
                 "window": run.window,
                 "detection": (run.parameters_resolved or {}).get("detection"),
-                "peak_tables_report": [
-                    _table_report(run, method) for method in ("parabolic", "gaussian")
-                ],
+                "peak_tables_report": [_table_report(run, "parabolic")],
             }
             for run in result.runs
         ],

@@ -2,14 +2,19 @@
 fraction / peak symmetry.
 
 Scoring follows established literature:
-- negative-area minimisation (de Brouwer et al., JMR 201 (2009) 230-238): apply a robust baseline
+- negative-area minimisation (de Brouwer et al., JMR 201 (2009) 230-238): apply a robust
+baseline
   correction first and then measure the negative area -- a phase error spreads absorption energy
-  into dispersive side lobes and the negative area rises to first order with the error, which makes
+  into dispersive side lobes and the negative area rises to first order with the error, which
+  makes
   it the most discriminative continuous metric in the +-5 deg neighbourhood;
-- spectral-entropy minimisation (Ernst 1966; the efficient Chen 2002 version): a correct phase gives
-  the most concentrated spectrum, with the lowest positive-part entropy, pointing the same way as
+- spectral-entropy minimisation (Ernst 1966; the efficient Chen 2002 version): a correct phase
+gives
+  the most concentrated spectrum, with the lowest positive-part entropy, pointing the same way
+  as
   the negative area;
-- the absorption ratio (real/imaginary balance) and the negative-peak count (the 180 deg inverted
+- the absorption ratio (real/imaginary balance) and the negative-peak count (the 180 deg
+inverted
   fallback) as complements.
 """
 
@@ -20,7 +25,9 @@ from typing import Any
 
 import numpy as np
 
-from core.qc import peak_detection
+from core.qc import noise, peak_detection
+
+NEGATIVE_PEAK_SIGMA = 12.0
 
 
 @dataclass
@@ -31,16 +38,18 @@ class PhaseQuality:
     entropy: float = 0.0
     symmetry: float = 0.0
     score: float = 0.0
+    negative_peak_sigma: float = NEGATIVE_PEAK_SIGMA
+    noise_sigma: float = 0.0
 
 
-def negative_area_fraction(
-    real: Any, radius: int = 8, *, symmetry_gated: bool = True
-) -> float:
+def negative_area_fraction(real: Any, radius: int = 8, *, symmetry_gated: bool = True) -> float:
     """Negative-area fraction over the peak windows: detect peaks, then measure the negative share
     inside the peak window (weighted by peak height).
 
-    Since 0.2.63 this is measured over the peak windows rather than the whole spectrum (calibrated
-    on real VM data): the whole-spectrum negative area is diluted by noise and baseline and hardly
+    Since 0.2.63 this is measured over the peak windows rather than the whole spectrum
+    (calibrated
+    on real VM data): the whole-spectrum negative area is diluted by noise and baseline and
+    hardly
     phase-sensitive (sampleF scored only 0.02 points across +-5 deg), whereas the dispersive
     negative side lobes of a phase error sit inside the peak window, whose negative fraction is
     sharp and sensitive (sampleF: ~2 points of 100 on the coarse grid).
@@ -61,7 +70,7 @@ def negative_area_fraction(
     # phase-sensitive signal (of 501 peaks measured the real signal peaks are a minority, and
     # averaging over all of them leaves the negative area at ~0, which loses the phase contrast)
     heights = np.asarray([float(p.height) for p in peaks])
-    threshold = max(float(np.percentile(np.abs(arr), 99.5)), 0.0)
+    threshold = max(float(np.percentile(np.abs(arr - np.median(arr)), 99.5)), 0.0)
     strong = [p for p, h in zip(peaks, heights) if h >= threshold]
     # skip edge peaks (an incomplete window makes the statistic meaningless; FFT boundary artefacts
     # often sit at both ends of the array)
@@ -86,8 +95,7 @@ def negative_area_fraction(
     for peak in strong:
         pos = np.round(np.asarray(peak.position)).astype(int)
         slices = tuple(
-            slice(max(0, i - radius), min(s, i + radius + 1))
-            for i, s in zip(pos, arr.shape)
+            slice(max(0, i - radius), min(s, i + radius + 1)) for i, s in zip(pos, arr.shape)
         )
         win = arr[slices]
         if symmetry_gated and not neg_majority:
@@ -96,11 +104,7 @@ def negative_area_fraction(
             # asymmetric dispersive negative lobes are penalised
             flipped = np.flip(win)
             denom = float(np.sum(win * win) * np.sum(flipped * flipped))
-            corr = (
-                float(np.sum(win * flipped) / np.sqrt(denom))
-                if denom > 1e-12
-                else 0.0
-            )
+            corr = float(np.sum(win * flipped) / np.sqrt(denom)) if denom > 1e-12 else 0.0
             if corr >= 0.0:
                 continue
         total_abs += float(np.sum(np.abs(win)))
@@ -112,29 +116,28 @@ def negative_area_axis(real: Any, axis: int, radius: int = 8) -> float:
     """Negative area of the peak window along a 1D profile of the chosen axis (the per-axis phase
     tuning of the older NMRFlow project).
 
-    The dispersive negative lobes of a phase error spread along the axis being tuned; take the 1D
+    The dispersive negative lobes of a phase error spread along the axis being tuned; take the
+    1D
     profile at the peak positions along that axis and measure the negative share (positive and
-    negative peaks detected separately, strong peaks only, weighted by height). A 2D window would
-    include peak shapes whose direction is already corrected (an absorbed F2) and dilute the phase
+    negative peaks detected separately, strong peaks only, weighted by height). A 2D window
+    would
+    include peak shapes whose direction is already corrected (an absorbed F2) and dilute the
+    phase
     signal of the target axis -- on VM sampleF the 2D aggregate ranked differently from the 1D
     main-peak profile, which matches the 1D peak shapes the user sees.
     """
     arr = np.asarray(np.real(real), dtype=float)
-    peaks = list(peak_detection.detect(arr)) + list(
-        peak_detection.detect(-arr)
-    )
+    peaks = list(peak_detection.detect(arr)) + list(peak_detection.detect(-arr))
     if not peaks:
         return 0.0
     heights = np.asarray([float(p.height) for p in peaks])
-    threshold = max(float(np.percentile(np.abs(arr), 99.5)), 0.0)
+    threshold = max(float(np.percentile(np.abs(arr - np.median(arr)), 99.5)), 0.0)
     strong = [p for p, h in zip(peaks, heights) if h >= threshold]
     strong = [
         p
         for p in strong
         if 0 <= axis < arr.ndim
-        and radius
-        <= int(round(float(np.atleast_1d(p.position)[axis])))
-        < arr.shape[axis] - radius
+        and radius <= int(round(float(np.atleast_1d(p.position)[axis]))) < arr.shape[axis] - radius
     ]
     if not strong:
         return 0.0
@@ -158,31 +161,30 @@ def negative_area_axis(real: Any, axis: int, radius: int = 8) -> float:
 
 
 def profile_symmetry_axis(real: Any, axis: int, radius: int = 6) -> float:
-    """Mirror symmetry of a 1D peak-window profile (absorption ~+1, dispersion ~-1), median over the
+    """Mirror symmetry of a 1D peak-window profile (absorption ~+1, dispersion ~-1), median over
+    the
     five tallest peaks.
 
     The older NMRFlow project used the correlation between a 1D profile and its mirror image to
-    resolve the +-90 deg phase ambiguity: an absorption peak is even (mirror correlation ~+1) and a
+    resolve the +-90 deg phase ambiguity: an absorption peak is even (mirror correlation ~+1)
+    and a
     dispersive peak is odd (~-1). Note that flipping the whole spectrum (the old 0.2.38 scheme)
-    mistakes a 90 deg dispersive 2D spectrum for a symmetric one; only the 1D peak-window profile
+    mistakes a 90 deg dispersive 2D spectrum for a symmetric one; only the 1D peak-window
+    profile
     judges the parity correctly.
     """
     arr = np.asarray(np.real(real), dtype=float)
-    peaks = list(peak_detection.detect(arr)) + list(
-        peak_detection.detect(-arr)
-    )
+    peaks = list(peak_detection.detect(arr)) + list(peak_detection.detect(-arr))
     if not peaks:
         return 0.0
     heights = np.asarray([float(p.height) for p in peaks])
-    threshold = max(float(np.percentile(np.abs(arr), 99.5)), 0.0)
+    threshold = max(float(np.percentile(np.abs(arr - np.median(arr)), 99.5)), 0.0)
     strong = [p for p, h in zip(peaks, heights) if h >= threshold]
     strong = [
         p
         for p in strong
         if 0 <= axis < arr.ndim
-        and radius
-        <= int(round(float(np.atleast_1d(p.position)[axis])))
-        < arr.shape[axis] - radius
+        and radius <= int(round(float(np.atleast_1d(p.position)[axis]))) < arr.shape[axis] - radius
     ]
     strong.sort(key=lambda p: p.height, reverse=True)
     strong = strong[:5]
@@ -215,9 +217,7 @@ def _peak_window_nets(real: Any, radius: int = 8) -> list[float]:
     absorption peak (of either sign) nets about +-1 and a dispersive peak about 0.
     """
     arr = np.asarray(np.real(real), dtype=float)
-    peaks = list(peak_detection.detect(arr)) + list(
-        peak_detection.detect(-arr)
-    )
+    peaks = list(peak_detection.detect(arr)) + list(peak_detection.detect(-arr))
     if not peaks:
         return []
     heights = np.asarray([float(p.height) for p in peaks])
@@ -226,8 +226,11 @@ def _peak_window_nets(real: Any, radius: int = 8) -> list[float]:
     # (95/75) lets real signal peaks through, matching the fallback in the optimiser
     # _lock_discrete_traces
     strong: list[Any] = []
+    # Peak.height is baseline-relative; the selection quantile must use the
+    # same reference or an offset baseline can discard every valid peak window.
+    relative_magnitude = np.abs(arr - np.median(arr))
     for pct in (99.5, 95.0, 75.0):
-        threshold = max(float(np.percentile(np.abs(arr), pct)), 0.0)
+        threshold = max(float(np.percentile(relative_magnitude, pct)), 0.0)
         strong = [p for p, h in zip(peaks, heights) if h >= threshold]
         strong = [
             p
@@ -294,19 +297,14 @@ def _peak_window_nets(real: Any, radius: int = 8) -> list[float]:
                     )
                 ].ravel()
                 if left_base.size >= 4 and right_base.size >= 4:
-                    baseline = 0.5 * (
-                        float(np.median(left_base)) + float(np.median(right_base))
-                    )
+                    baseline = 0.5 * (float(np.median(left_base)) + float(np.median(right_base)))
                 else:
                     baseline = float(np.median(profile))
                 peak_h = float(np.max(np.abs(profile)))
                 if peak_h > 1e-12 and abs(baseline) / peak_h >= 0.01:
                     prof = profile - baseline
             net = float(
-                (
-                    np.clip(prof, 0.0, None).sum()
-                    + np.clip(prof, None, 0.0).sum()
-                )
+                (np.clip(prof, 0.0, None).sum() + np.clip(prof, None, 0.0).sum())
                 / float(np.abs(prof).sum() + 1e-12)
             )
             if best is None or abs(net) < best[1]:
@@ -342,10 +340,14 @@ def evaluate(data: Any, *, sign_mode: str = "uniform") -> PhaseQuality:
     symmetry).
 
     score = 100 x (0.25 x absorption + 0.40 x (1 - negative area) + 0.20 x (1 - entropy)
-    + 0.15 x (1 - negative fraction)). A real-valued final spectrum (D005) has an absorption of 1,
-    so the discrimination rests on the negative area and the entropy; the negative-peak count is the
-    180 deg inverted fallback. Mirror symmetry no longer scores: a 90 deg dispersive spectrum is in
-    fact highly symmetric, and the old formula mistook it for good phase quality (the field is kept
+    + 0.15 x (1 - negative fraction)). A real-valued final spectrum (D005) has an absorption of
+    1,
+    so the discrimination rests on the negative area and the entropy; the negative-peak count is
+    the
+    180 deg inverted fallback. Mirror symmetry no longer scores: a 90 deg dispersive spectrum is
+    in
+    fact highly symmetric, and the old formula mistook it for good phase quality (the field is
+    kept
     for callers to read).
     """
     arr = np.asarray(data)
@@ -355,8 +357,12 @@ def evaluate(data: Any, *, sign_mode: str = "uniform") -> PhaseQuality:
     abs_imag = float(np.mean(np.abs(imag))) + 1e-12
     absorption = abs_real / (abs_real + abs_imag)
 
-    positive = peak_detection.detect(arr)
-    negative = peak_detection.detect(-real)
+    sigma = float(noise.estimate(arr).global_sigma)
+    significant = NEGATIVE_PEAK_SIGMA * sigma
+    positive = [peak for peak in peak_detection.detect(arr) if float(peak.height) >= significant]
+    negative = [
+        peak for peak in peak_detection.detect(-real) if abs(float(peak.height)) >= significant
+    ]
     total = len(positive) + len(negative)
     neg_fraction = len(negative) / total if total else 0.0
     na = negative_area_fraction(real)
@@ -406,4 +412,6 @@ def evaluate(data: Any, *, sign_mode: str = "uniform") -> PhaseQuality:
         entropy=float(ent),
         symmetry=float(symmetry),
         score=score,
+        negative_peak_sigma=NEGATIVE_PEAK_SIGMA,
+        noise_sigma=sigma,
     )

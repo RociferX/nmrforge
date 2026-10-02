@@ -2,14 +2,18 @@
 
 User scheme: manual 3D phase tuning looks at three projection planes -- the 1D spectrum of the
 direct dimension is the set of complex traces of every (F1,F2) combination along the direct axis
-(and likewise for the two indirect dimensions); phase these 1D spectra one by one and then take the
+(and likewise for the two indirect dimensions); phase these 1D spectra one by one and then take
+the
 statistically best phase. Each dimension is independent and does not disturb the others: the
 phase of
-the other dimensions only contributes a per-peak constant offset that cancels symmetrically across
+the other dimensions only contributes a per-peak constant offset that cancels symmetrically
+across
 traces/peaks.
 
-Requirement: the upstream must keep complex data (the full NMRPipe chain keeps PS without -di, or
-holds complex data itself) so every 1D trace carries an imaginary part for the absorption/dispersion
+Requirement: the upstream must keep complex data (the full NMRPipe chain keeps PS without -di,
+or
+holds complex data itself) so every 1D trace carries an imaginary part for the
+absorption/dispersion
 discrimination and the per-dimension phase fit.
 """
 
@@ -62,15 +66,19 @@ def _lock_trace_peaks(
 
     A 99-percentile threshold on a short trace (48 points, say) would cut everything but the
     strongest peak; here the gate is the larger of local MAD noise x snr and global maximum x
-    global_frac, so a multi-peak trace locks all its peaks while a pure-noise trace (peak ~3-4x MAD
+    global_frac, so a multi-peak trace locks all its peaks while a pure-noise trace (peak ~3-4x
+    MAD
     < 8x MAD) returns None.
 
-    0.2.199-patch29m: exclude the ringing side lobes of strong peaks -- the phase of a real peak is
-    smooth inside a +-1 window (Lorentzian w~2 points: phase change ~+-27 deg) whereas ringing side
+    0.2.199-patch29m: exclude the ringing side lobes of strong peaks -- the phase of a real peak
+    is
+    smooth inside a +-1 window (Lorentzian w~2 points: phase change ~+-27 deg) whereas ringing
+    side
     lobes alternate by ~180 deg point to point (on real data this systematically pulled the
     per-trace
     p1 concentration fit towards the +-90 boundary). With coherent=True, candidates whose phase
-    change across the +-1 window is too large are dropped; with separation>0, greedy selection keeps
+    change across the +-1 window is too large are dropped; with separation>0, greedy selection
+    keeps
     the largest peak and, within +-separation, only the tallest.
     """
     mag = np.abs(row)
@@ -80,9 +88,7 @@ def _lock_trace_peaks(
     if hi <= lo + 2:
         return None
     local = np.zeros(n, dtype=bool)
-    local[lo:hi] = (mag[lo:hi] >= mag[lo - 1:hi - 1]) & (
-        mag[lo:hi] > mag[lo + 1:hi + 1]
-    )
+    local[lo:hi] = (mag[lo:hi] >= mag[lo - 1 : hi - 1]) & (mag[lo:hi] > mag[lo + 1 : hi + 1])
     med = float(np.median(mag))
     mad = float(np.median(np.abs(mag - med))) * 1.4826 + 1e-12
     thr = max(snr * mad, global_frac * global_max)
@@ -134,16 +140,19 @@ def search_axis_phase_consensus(
     consensus.
 
     Per trace:
-      - lock clean peaks (``_row_peak_positions``: row noise/global thresholds plus the leading and
+      - lock clean peaks (``_row_peak_positions``: row noise/global thresholds plus the leading
+      and
         trailing margin);
       - p1: fit the multi-peak phase concentration (``_row_p1_fit``, decoupled from the trace
         constant);
       - p0: negate the circular mean of the peak phases under that p1 (``_row_p0_raw``, no early
         +-180 flip).
     Cross-trace consensus:
-      - p1 = the median of the per-trace p1 values (the signal ramp; the PS correction negates it);
+      - p1 = the median of the per-trace p1 values (the signal ramp; the PS correction negates
+      it);
       - p0 = the circular mean of the raw per-trace p0 values after folding them into +-180 for
-        alignment (two iterations); finally the global +-180 disambiguation uses the absorption of
+        alignment (two iterations); finally the global +-180 disambiguation uses the absorption
+        of
         every peak window under the consensus phase (sign_mode=mixed skips the positive-peak
         preference and scores negative absorption peaks as well);
       - score = 100 x the median peak-window absorption of the traces under the consensus phase
@@ -153,9 +162,8 @@ def search_axis_phase_consensus(
     if cancel is not None and cancel():
         raise RuntimeError(
             tr(
-            "cancelled by the user: dimension-by-dimension consensus phase "
-            "search",
-        )
+                "cancelled by the user: dimension-by-dimension consensus phase search",
+            )
         )
     moved = np.moveaxis(np.asarray(complex_arr, dtype=np.complex128), axis, -1)
     flat = moved.reshape(-1, moved.shape[-1])
@@ -182,12 +190,13 @@ def search_axis_phase_consensus(
     if not infos:
         return None
     if progress is not None:
-        progress(tr(
-            "Dimension-wise consensus phase: axis {p0} locked {p1} clean "
-            "trace",
-            p0=axis,
-            p1=len(infos),
-        ))
+        progress(
+            tr(
+                "Dimension-wise consensus phase: axis {p0} locked {p1} clean trace",
+                p0=axis,
+                p1=len(infos),
+            )
+        )
     p1_rows: list[float] = []
     for arr, pos, heights in infos:
         fit = _row_p1_fit(arr, pos, heights)
@@ -239,9 +248,8 @@ def search_axis_phase_consensus(
     if cancel is not None and cancel():
         raise RuntimeError(
             tr(
-            "cancelled by the user: dimension-by-dimension consensus phase "
-            "search",
-        )
+                "cancelled by the user: dimension-by-dimension consensus phase search",
+            )
         )
     return p0, p1, score
 
@@ -250,11 +258,16 @@ def _hilbert(x: np.ndarray) -> np.ndarray:
     """One-dimensional Hilbert transform to supply the imaginary part, matching the display layer
     (scipy.signal.hilbert).
 
-    0.2.199-patch29o fix: the direct-dimension search supplies the imaginary part with the standard
-    analytic signal (positive frequencies doubled), matching the viewer ``_display_phase`` and what
-    nmrDraw shows the eye -- the user tuned sampleK direct p0 to ~150 by hand, scipy gives a median
-    per-trace p0 of 146.7 in agreement, whereas the imaginary part of the nmrPipe HT function itself
-    (-H_scipy, state.md 0.2.101) would return the conjugate phase here (17.6/197.6, off by ~48 deg).
+    0.2.199-patch29o fix: the direct-dimension search supplies the imaginary part with the
+    standard
+    analytic signal (positive frequencies doubled), matching the viewer ``_display_phase`` and
+    what
+    nmrDraw shows the eye -- the user tuned sampleK direct p0 to ~150 by hand, scipy gives a
+    median
+    per-trace p0 of 146.7 in agreement, whereas the imaginary part of the nmrPipe HT function
+    itself
+    (-H_scipy, state.md 0.2.101) would return the conjugate phase here (17.6/197.6, off by ~48
+    deg).
     The search output is exactly the p0 the script PS should carry.
     """
     n = x.size
@@ -262,10 +275,10 @@ def _hilbert(x: np.ndarray) -> np.ndarray:
     h = np.zeros(n)
     if n % 2 == 0:
         h[0] = h[n // 2] = 1.0
-        h[1:n // 2] = 2.0
+        h[1 : n // 2] = 2.0
     else:
         h[0] = 1.0
-        h[1:(n + 1) // 2] = 2.0
+        h[1 : (n + 1) // 2] = 2.0
     return np.fft.ifft(X * h)
 
 
@@ -275,15 +288,19 @@ def _direct_projected_traces(
 ) -> np.ndarray | None:
     """Direct-dimension projection traces (matching the XZ/YZ planes of proj3D.tcl -sum).
 
-    For a 3D+ spectrum, sum as complex along each of the other axes (for a purely real spectrum a
-    complex sum is a real sum) to get the projection planes, then take one trace along ``axis`` per
+    For a 3D+ spectrum, sum as complex along each of the other axes (for a purely real spectrum
+    a
+    complex sum is a real sum) to get the projection planes, then take one trace along ``axis``
+    per
     point of the other dimension from each plane and concatenate them -- matching the two proj3D
-    outputs that contain the direct dimension (summed over an indirect one); for a 2D spectrum the
+    outputs that contain the direct dimension (summed over an indirect one); for a 2D spectrum
+    the
     rows are used directly.
 
     Note: experiments such as HNN legitimately contain two indirect nuclei with the same name
     (15N/15N) and therefore repeated header labels, which proj3D.tcl cannot disambiguate when it
-    picks an axis by label (sampleK reported "bad axis name Y"); this implementation picks the plane
+    picks an axis by label (sampleK reported "bad axis name Y"); this implementation picks the
+    plane
     by the role and size of the direct axis instead.
     """
     arr = np.asarray(real_spectrum, dtype=float)
@@ -319,27 +336,35 @@ def search_direct_phase_real_ht(
     real final spectrum, supply the imaginary part of each by HT, phase each trace and take the
     statistical optimum (user scheme 0.2.199-patch29l/patch29p).
 
-    The 1D spectra are the direct-dimension projection traces (3D: one per F2 point summed along F1
-    plus one per F1 point summed along F2, i.e. indirect-1 points + indirect-2 points; 2D: one per
-    indirect point), matching the XZ/YZ planes of NMRPipe proj3D.tcl -sum (summed along the third
-    axis); each real trace gets its imaginary part from a Hilbert transform (the display-layer scipy
+    The 1D spectra are the direct-dimension projection traces (3D: one per F2 point summed along
+    F1
+    plus one per F1 point summed along F2, i.e. indirect-1 points + indirect-2 points; 2D: one
+    per
+    indirect point), matching the XZ/YZ planes of NMRPipe proj3D.tcl -sum (summed along the
+    third
+    axis); each real trace gets its imaginary part from a Hilbert transform (the display-layer
+    scipy
     convention, Im = +H_scipy); per trace p1 is fitted from the phase concentration (multi-peak,
     decoupled from the cluster centre and the trace constant) and p0 then follows under that p1;
     across traces: p1 = median, p0 = circular mean folded onto the half circle.
 
-    The +-180 flip is not forced: the sign only decides whether peaks point up and affects neither
-    peak picking nor the lineshape (the user confirmed), and the projection traces mix 13C CA+ and
-    CB-, which makes the sign statistics unreliable (a uniform flip once took 100/30 to 180 deg away
-    from the hand-tuned value). The result is always the value folded into 0-180 deg, as in manual
-    tuning (102/100/101 ~ 150, 30 ~ 2). score = 100 x the median peak absorption under the consensus
+    The +-180 flip is not forced: the sign only decides whether peaks point up and affects
+    neither
+    peak picking nor the lineshape (the user confirmed), and the projection traces mix 13C CA+
+    and
+    CB-, which makes the sign statistics unreliable (a uniform flip once took 100/30 to 180 deg
+    away
+    from the hand-tuned value). The result is always the value folded into 0-180 deg, as in
+    manual
+    tuning (102/100/101 ~ 150, 30 ~ 2). score = 100 x the median peak absorption under the
+    consensus
     phase.
     """
     if cancel is not None and cancel():
         raise RuntimeError(
             tr(
-            "cancelled by the user: direct-dimension HT trace-by-trace phase "
-            "search",
-        )
+                "cancelled by the user: direct-dimension HT trace-by-trace phase search",
+            )
         )
     flat = _direct_projected_traces(real_spectrum, axis)
     if flat is None:
@@ -352,7 +377,9 @@ def search_direct_phase_real_ht(
     for row in flat:
         cplx = _hilbert(row)
         peaks = _lock_trace_peaks(
-            np.abs(cplx), margin=margin, max_peaks=max_peaks,
+            np.abs(cplx),
+            margin=margin,
+            max_peaks=max_peaks,
             global_max=global_max,
         )
         if peaks is not None and peaks[0].size >= 1:
@@ -369,11 +396,12 @@ def search_direct_phase_real_ht(
         if keep:
             ht_rows = [ht_rows[i] for i in keep]
     if progress is not None:
-        progress(tr(
-            "direct dimension HT item by item phase: locked {p0} projection "
-            "trace",
-            p0=len(ht_rows),
-        ))
+        progress(
+            tr(
+                "direct dimension HT item by item phase: locked {p0} projection trace",
+                p0=len(ht_rows),
+            )
+        )
     # inlined per-trace consensus (avoiding the gmax mismatch a second peak-locking pass inside
     # search_axis_phase_consensus would cause): fit p1 per trace from the concentration, then p0 per
     # trace under that global p1, take the folded circular mean and disambiguate +-180 by the
@@ -381,7 +409,9 @@ def search_direct_phase_real_ht(
     infos: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
     for cplx in ht_rows:
         peaks = _lock_trace_peaks(
-            np.abs(cplx), margin=margin, max_peaks=max_peaks,
+            np.abs(cplx),
+            margin=margin,
+            max_peaks=max_peaks,
             global_max=global_max,
         )
         if peaks is not None and peaks[0].size >= 1:
@@ -421,10 +451,10 @@ def search_direct_phase_real_ht(
     if cancel is not None and cancel():
         raise RuntimeError(
             tr(
-            "cancelled by the user: direct-dimension HT trace-by-trace phase "
-            "search",
-        )
+                "cancelled by the user: direct-dimension HT trace-by-trace phase search",
+            )
         )
     return p0, p1, score
+
 
 __all__ = ["search_axis_phase_consensus", "search_direct_phase_real_ht"]

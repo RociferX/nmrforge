@@ -52,28 +52,40 @@ def main(argv: list[str] | None = None) -> int:
     sw = _load(opts.software)
     manual = _load(opts.manual)
     print(f"software {opts.software}:")
-    print(f"  shape={sw['data'].shape} FDTRANSPOSED={sw['dic'].get('FDTRANSPOSED')} "
-          f"labels=({sw['label1']},{sw['label2']})")
-    print(f"  axes: {sw['label1']} {sw['ppm1'][0]:.2f}..{sw['ppm1'][-1]:.2f} ppm | "
-          f"{sw['label2']} {sw['ppm2'][0]:.2f}..{sw['ppm2'][-1]:.2f} ppm")
+    print(
+        f"  shape={sw['data'].shape} FDTRANSPOSED={sw['dic'].get('FDTRANSPOSED')} "
+        f"labels=({sw['label1']},{sw['label2']})"
+    )
+    print(
+        f"  axes: {sw['label1']} {sw['ppm1'][0]:.2f}..{sw['ppm1'][-1]:.2f} ppm | "
+        f"{sw['label2']} {sw['ppm2'][0]:.2f}..{sw['ppm2'][-1]:.2f} ppm"
+    )
     p1, p2 = _find_peak(sw)
     print(f"  main peak = ({p1:.2f} {sw['label1']}, {p2:.2f} {sw['label2']})")
 
     print(f"manual {opts.manual}:")
-    print(f"  shape={manual['data'].shape} FDTRANSPOSED={manual['dic'].get('FDTRANSPOSED')} "
-          f"labels=({manual['label1']},{manual['label2']})")
-    print(f"  axes: {manual['label1']} {manual['ppm1'][0]:.2f}..{manual['ppm1'][-1]:.2f} ppm | "
-          f"{manual['label2']} {manual['ppm2'][0]:.2f}..{manual['ppm2'][-1]:.2f} ppm")
+    print(
+        f"  shape={manual['data'].shape} FDTRANSPOSED={manual['dic'].get('FDTRANSPOSED')} "
+        f"labels=({manual['label1']},{manual['label2']})"
+    )
+    print(
+        f"  axes: {manual['label1']} {manual['ppm1'][0]:.2f}..{manual['ppm1'][-1]:.2f} ppm | "
+        f"{manual['label2']} {manual['ppm2'][0]:.2f}..{manual['ppm2'][-1]:.2f} ppm"
+    )
     m1, m2 = _find_peak(manual)
     print(f"  main peak = ({m1:.2f} {manual['label1']}, {m2:.2f} {manual['label2']})")
 
     if opts.software_noext:
         noext = _load(opts.software_noext)
         print(f"software-noext {opts.software_noext}:")
-        print(f"  shape={noext['data'].shape} FDTRANSPOSED={noext['dic'].get('FDTRANSPOSED')} "
-              f"labels=({noext['label1']},{noext['label2']})")
-        print(f"  axes: {noext['label1']} {noext['ppm1'][0]:.2f}..{noext['ppm1'][-1]:.2f} ppm | "
-              f"{noext['label2']} {noext['ppm2'][0]:.2f}..{noext['ppm2'][-1]:.2f} ppm")
+        print(
+            f"  shape={noext['data'].shape} FDTRANSPOSED={noext['dic'].get('FDTRANSPOSED')} "
+            f"labels=({noext['label1']},{noext['label2']})"
+        )
+        print(
+            f"  axes: {noext['label1']} {noext['ppm1'][0]:.2f}..{noext['ppm1'][-1]:.2f} ppm | "
+            f"{noext['label2']} {noext['ppm2'][0]:.2f}..{noext['ppm2'][-1]:.2f} ppm"
+        )
         # Water peak 4.7 ppm: Project on the 1H axis to find the maximum value; vertical line =
         # water peak energy is concentrated in a single 1H ppm column (stretched along the 15N
         # direction), horizontal line = concentrated in a single 15N row.
@@ -86,9 +98,11 @@ def main(argv: list[str] | None = None) -> int:
         peak_row = int(np.argmax(row_prof))
         ppm_col = (noext["ppm2"] if h_axis == 1 else noext["ppm1"])[peak_col]
         ppm_row = (noext["ppm1"] if h_axis == 1 else noext["ppm2"])[peak_row]
-        print(f"  water-probe: 1H axis={noext['label1'] if h_axis==0 else noext['label2']}"
-              f"  peak col ppm={ppm_col:.2f} (sum over 15N),"
-              f" peak row ppm={ppm_row:.2f} (sum over 1H)")
+        print(
+            f"  water-probe: 1H axis={noext['label1'] if h_axis == 0 else noext['label2']}"
+            f"  peak col ppm={ppm_col:.2f} (sum over 15N),"
+            f" peak row ppm={ppm_row:.2f} (sum over 1H)"
+        )
     return 0
 
 

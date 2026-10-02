@@ -5,16 +5,17 @@ Entry point for the documentation that ships with the repository.
 ## Start here
 
 1. [README](../README.md) - what nmrForge is, how to install it, how to run it.
-2. [Getting started](getting-started.md) - the AppImage path for users and a no-NMRPipe walkthrough
-   for developers.
-3. [Installation](installation.md) - source install and the deferred AppImage boundary
-   (development).
+2. [Getting started](getting-started.md) - source/AppImage startup options and a no-NMRPipe walkthrough.
+3. [Installation](installation.md) - source installation and the version boundary for AppImages.
 
-## Two tracks
+## Desktop application and Python/CLI API
 
-nmrForge has two tracks; both are at their first version. Pick the one that matches your work.
+The desktop application and `nmrforge_api` are supported interfaces in the same source tree. The
+Python API is versioned separately (`API_VERSION = "1.0"`) and exposes a compatibility manifest
+for behaviour and contract changes. A released AppImage corresponds to a specific source version;
+source updates do not update that binary automatically.
 
-### Track A - the desktop application (mature)
+### Desktop application
 
 - [GUI guide](gui.md) - window layout, the four pipeline steps, a typical session.
 - [QC system](qc-system.md) - FID, sampling and spectrum-level quality control.
@@ -25,12 +26,7 @@ nmrForge has two tracks; both are at their first version. Pick the one that matc
   comparison figure, the inspection verdict, the match rate, the QC scores, the two parameter sets
   and a real-machine repeatability snapshot.
 
-### Track B - the Python/CLI API (first version)
-
-The parameter-study surface is released as its **first version** (`API_VERSION = "1.0"`, since
-2026-09-22); names, defaults and the records it writes are managed through
-`nmrforge_api.compat_manifest()` (`behavior_digest`, `compat_level`, `affected`) and recorded in the
-release notes. Pin a commit and compare the manifest before treating a set of numbers as comparable.
+### Python/CLI API
 
 - [Python API](python-api.md) - the public `nmrforge_api` surface versus the internal layers.
 - [CLI reference](cli.md) - `python -m nmrforge_api` subcommands and options.
@@ -43,8 +39,6 @@ release notes. Pin a commit and compare the manifest before treating a set of nu
 ## Design and contracts
 
 - [Architecture](architecture.md) - layers, responsibilities, dependency directions.
-- [API contract](API_CONTRACT.md) - the shared contract between GUI, workflow, backend and the
-  project model.
 - [Development](development.md) - local development, testing, environment notes.
 - [Packaging](packaging.md) - the AppImage and what it contains.
 - [Roadmap](roadmap.md) - longer-term plans (not a statement about current behaviour).
@@ -52,8 +46,5 @@ release notes. Pin a commit and compare the manifest before treating a set of nu
 ## Release and licensing
 
 - [THIRD_PARTY.md](../THIRD_PARTY.md) - third-party dependencies and their licences.
-- [LICENSE_OPTIONS.md](../LICENSE_OPTIONS.md) - why the source is Apache-2.0 while the AppImage
-  carries LGPL-3.0 obligations for the Qt/PySide6 libraries it bundles.
-- Release notes, the preparation record and the binary release gate are kept in the
-  maintainer's private repository; each version's user-facing summary lives on the
-  GitHub releases page.
+- [LICENSE](../LICENSE) and [THIRD_PARTY.md](../THIRD_PARTY.md) - source and third-party licence information.
+- Version-specific changes are listed on the GitHub releases page.

@@ -12,6 +12,8 @@ from typing import Any
 
 import numpy as np
 
+from ui_support.i18n import tr
+
 
 @dataclass
 class NoiseEstimate:
@@ -19,6 +21,7 @@ class NoiseEstimate:
     local_sigma: dict[str, float] = field(default_factory=dict)
     confidence: float = 0.0
     method: str = ""
+    baseline: float = 0.0
 
 
 def estimate(data: Any) -> NoiseEstimate:
@@ -27,9 +30,16 @@ def estimate(data: Any) -> NoiseEstimate:
     flat = np.real(arr).ravel()
     if flat.size == 0:
         return NoiseEstimate()
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(tr("Spectrum contains non-finite values; peak detection was stopped"))
     median = np.median(flat)
     mad = np.median(np.abs(flat - median))
     sigma = float(1.4826 * mad)
     if sigma < 1e-12:
         sigma = float(np.std(flat))
-    return NoiseEstimate(global_sigma=sigma, confidence=0.9, method="robust_mad")
+    return NoiseEstimate(
+        global_sigma=sigma,
+        confidence=0.9,
+        method="robust_mad",
+        baseline=float(median),
+    )

@@ -17,7 +17,6 @@ def test_dag_add_and_invalidates() -> None:
     assert dag.nodes["phase"].invalidates == ["baseline", "qc"]
 
 
-
 def test_select_method_includes_baseline_nodes(bruker_dir: Path) -> None:
     """The default plan has a baseline node per dimension (mode=auto, enabled=True)."""
     from core.data.bruker_reader import read_dataset
@@ -25,12 +24,8 @@ def test_select_method_includes_baseline_nodes(bruker_dir: Path) -> None:
 
     exp = read_dataset(bruker_dir / "hsqc_2d")
     plan = select_method(exp)
-    baseline_nodes = [
-        n for n in plan.dag.nodes.values() if n.operation == "baseline"
-    ]
+    baseline_nodes = [n for n in plan.dag.nodes.values() if n.operation == "baseline"]
     assert len(baseline_nodes) == 2
-    f2 = next(
-        n for n in baseline_nodes if n.params.get("axis") == "F2"
-    )
+    f2 = next(n for n in baseline_nodes if n.params.get("axis") == "F2")
     assert f2.params["mode"] == "auto"
     assert f2.params["enabled"] is True

@@ -77,7 +77,8 @@ _SIGN_TO_DETECTION: dict[str, str] = {
 
 def _invalid(reason: str) -> QualityResult:
     """Input that cannot be evaluated: judge ``rollback`` and state why (never raises; the
-    ``evaluate`` contract)."""
+    ``evaluate`` contract).
+    """
     return QualityResult(
         score=QualityScore(overall=0.0, components=ScoreComponents()),
         decision=QcDecision.ROLLBACK,
@@ -172,19 +173,20 @@ def evaluate(
     if arr.size == 0:
         return _invalid(tr("empty array: nothing to evaluate"))
     real = np.real(arr)
-    if not bool(np.all(np.isfinite(real))):
+    if not bool(np.all(np.isfinite(arr))):
         return _invalid(
             tr(
-            "the spectrum contains NaN/Inf: fix the data first; the quality score takes no part in "
-            "the decision",
-        )
+                "the spectrum contains NaN/Inf: fix the data first; the quality score takes no "
+                "part in "
+                "the decision",
+            )
         )
     if float(np.ptp(real)) == 0.0:
         return _invalid(
             tr(
-            "constant/all-zero spectrum: there is no signal (not something a quality score can "
-            "judge)",
-        )
+                "constant/all-zero spectrum: there is no signal (not something a quality score can "
+                "judge)",
+            )
         )
     sigma = noise.estimate(arr).global_sigma
     if not float(sigma) > 0.0:
@@ -203,76 +205,62 @@ def evaluate(
         # signs. The criterion is the intensity mass above 6 sigma (peak counts drown in
         # noise), and the coexistence threshold shares its source with the peak-picking
         # step (_MIXED_INTEN_SHARE).
-        both = peak_detection.detect(
-            arr, peak_detection.PeakDetectionParams(sign_mode="both")
-        )
+        both = peak_detection.detect(arr, peak_detection.PeakDetectionParams(sign_mode="both"))
         pos_peaks = [peak for peak in both if peak.height > 0]
         neg_peaks = [peak for peak in both if peak.height < 0]
         pos_mass, neg_mass = _sign_masses(real, sigma)
         major = max(pos_mass, neg_mass)
         if major <= 0.0:
             peaks = both
-            sign_note = (
-                tr(
-                    "sign judgement: no signal above {p0:g} sigma (evaluating the detected peaks "
-                    "as they "
-                    "are)",
-                    p0=_SIGN_MASS_FACTOR,
-                )
+            sign_note = tr(
+                "sign judgement: no signal above {p0:g} sigma (evaluating the detected peaks "
+                "as they "
+                "are)",
+                p0=_SIGN_MASS_FACTOR,
             )
         elif min(pos_mass, neg_mass) / major >= _MIXED_INTEN_SHARE:
             peaks = both
             judged_mixed = True
-            sign_note = (
-                tr(
-                    "sign judgement: both signs coexist (positive mass {p0:.4g} / negative mass "
-                    "{p1:.4g})",
-                    p0=pos_mass,
-                    p1=neg_mass,
-                )
+            sign_note = tr(
+                "sign judgement: both signs coexist (positive mass {p0:.4g} / negative mass "
+                "{p1:.4g})",
+                p0=pos_mass,
+                p1=neg_mass,
             )
         elif pos_mass > neg_mass:
             peaks = pos_peaks
-            sign_note = (
-                tr(
-                    "sign judgement: single-sign positive (positive mass {p0:.4g} / negative mass "
-                    "{p1:.4g})",
-                    p0=pos_mass,
-                    p1=neg_mass,
-                )
+            sign_note = tr(
+                "sign judgement: single-sign positive (positive mass {p0:.4g} / negative mass "
+                "{p1:.4g})",
+                p0=pos_mass,
+                p1=neg_mass,
             )
         else:
             peaks = neg_peaks
             auto_flip = True
-            sign_note = (
-                tr(
-                    "sign judgement: single-sign negative (positive mass {p0:.4g} / negative mass "
-                    "{p1:.4g}); flipping the whole array and scoring as 'peaks "
-                    "up'",
-                    p0=pos_mass,
-                    p1=neg_mass,
-                )
+            sign_note = tr(
+                "sign judgement: single-sign negative (positive mass {p0:.4g} / negative mass "
+                "{p1:.4g}); flipping the whole array and scoring as 'peaks "
+                "up'",
+                p0=pos_mass,
+                p1=neg_mass,
             )
     elif detection_mode == "positive":
         # Single-sign spectrum (uniform): the project convention is that the final
         # spectrum has its peaks up -- one "both" detection collects the positive peaks for
         # the S/N, and the negative peaks only serve to judge "this data is inverted / the
         # phase was never disambiguated".
-        both = peak_detection.detect(
-            arr, peak_detection.PeakDetectionParams(sign_mode="both")
-        )
+        both = peak_detection.detect(arr, peak_detection.PeakDetectionParams(sign_mode="both"))
         peaks = [peak for peak in both if peak.height > 0]
         pos_sum = sum(float(peak.height) for peak in peaks)
         neg_sum = sum(-float(peak.height) for peak in both if peak.height < 0)
         if neg_sum > pos_sum:
-            sign_anomaly = (
-                tr(
-                    "single-sign spectrum: negative peaks dominate (negative total {p0:.4g} > "
-                    "positive {p1:.4g}); the data is inverted overall or the +/-180 phase was not "
-                    "disambiguated",
-                    p0=neg_sum,
-                    p1=pos_sum,
-                )
+            sign_anomaly = tr(
+                "single-sign spectrum: negative peaks dominate (negative total {p0:.4g} > "
+                "positive {p1:.4g}); the data is inverted overall or the +/-180 phase was not "
+                "disambiguated",
+                p0=neg_sum,
+                p1=pos_sum,
             )
     else:
         peaks = peak_detection.detect(
@@ -285,9 +273,7 @@ def evaluate(
         # its positive mirror image.
         arr = -np.asarray(arr)
         real = np.real(arr)
-        peaks = peak_detection.detect(
-            arr, peak_detection.PeakDetectionParams(sign_mode="positive")
-        )
+        peaks = peak_detection.detect(arr, peak_detection.PeakDetectionParams(sign_mode="positive"))
     effective_mode = (
         ("mixed" if judged_mixed else "uniform")
         if mode_key in {"auto", "single_sign"}
@@ -312,9 +298,7 @@ def evaluate(
         weights={"snr": 0.35, "phase": 0.25, "baseline": 0.20, "artifact": 0.20},
     )
     overall = score.compute()
-    resolution_penalty = (
-        _resolution_penalty(arr.shape, min_shape) if min_shape is not None else 0.0
-    )
+    resolution_penalty = _resolution_penalty(arr.shape, min_shape) if min_shape is not None else 0.0
     if resolution_penalty > 0:
         # write the penalty back into score.overall so callers read the overall score including it
         overall = float(max(0.0, overall - resolution_penalty))
@@ -338,33 +322,19 @@ def evaluate(
         reasons.append(sign_anomaly)
     if snr_value < 10:
         reasons.append(tr("Global SNR is low ({p0:.1f})", p0=snr_value))
-    # 0.2.199-patch29z: in a spectrum with both signs (mixed, such as CBCA(CO)NH/HNN) the
-    # negative fraction is naturally about half, so "too many negative peaks" is not reported
-    if (
-        sign_mode != "mixed"
-        and phase_metrics.negative_peak_fraction > 0.15
-    ):
-        reasons.append(
-            tr(
-            "the fraction of negative peaks is high "
-            "({p0:.2f})",
-            p0=phase_metrics.negative_peak_fraction,
-        )
-        )
     if baseline_metrics.needs_correction:
         reasons.append(
             tr(
-            "baseline tilt/offset detected (worst storage axis): baseline correction "
-            "recommended",
-        )
+                "baseline tilt/offset detected (worst storage axis): baseline correction "
+                "recommended",
+            )
         )
     if artifact_report.isolated_peak_clusters > 0:
         reasons.append(
             tr(
-            "detected {p0} cluster(s) of isolated "
-            "peaks",
-            p0=artifact_report.isolated_peak_clusters,
-        )
+                "detected {p0} cluster(s) of isolated peaks",
+                p0=artifact_report.isolated_peak_clusters,
+            )
         )
 
     if overall >= 60.0:
@@ -376,9 +346,8 @@ def evaluate(
     if decision is not QcDecision.ACCEPT and not reasons:
         reasons.append(
             tr(
-            "overall quality {p0:.1f} did not reach the automatic accept "
-            "threshold",
-            p0=overall,
-        )
+                "overall quality {p0:.1f} did not reach the automatic accept threshold",
+                p0=overall,
+            )
         )
     return QualityResult(score=score, decision=decision, reasons=reasons)

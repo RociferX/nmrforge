@@ -128,9 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     # ~2.6 ppm).
     if 0 not in points:
         points[0] = 0
-    (dst / "nuslist").write_text(
-        "\n".join(str(p) for p in points) + "\n", encoding="utf-8"
-    )
+    (dst / "nuslist").write_text("\n".join(str(p) for p in points) + "\n", encoding="utf-8")
 
     fids = ser.reshape(rows_file, x_n)  # (Incremental row, direct dimension int32).
     rows = [mult * p + k for p in points for k in range(mult)]
@@ -145,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Construction completed: {dst}")
     print(
         f" complex point grid={grid}(NusTD={nus_td} row) sampling point ={opts.points} "
-        f"({100*opts.points/grid:.1f}%)"
+        f"({100 * opts.points / grid:.1f}%)"
     )
     print(f" The first 8 lines of nuslist: {(dst / 'nuslist').read_text().splitlines()[:8]}")
     print(f"  ser: {len(rows)} Increment row x {x_n} {dt.str[1:]} = {new_size} byte")

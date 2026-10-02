@@ -21,9 +21,7 @@ def create_backend(config: dict[str, Any]) -> ProcessingBackend:
     NotImplementedError halfway through a run.
     """
     backend_cfg = config.get("backend") or {}
-    provider = (
-        str(backend_cfg.get("provider", "nmrpipe") or "nmrpipe").strip().lower()
-    )
+    provider = str(backend_cfg.get("provider", "nmrpipe") or "nmrpipe").strip().lower()
     if provider == "nmrpipe":
         from backend.config import nmrpipe_path
 
@@ -31,9 +29,8 @@ def create_backend(config: dict[str, Any]) -> ProcessingBackend:
     supported = ",".join(SUPPORTED_PROVIDERS)
     raise ValueError(
         tr(
-        "Unknown backend provider: {p0} (currently only {p1} is "
-        "supported)",
-        p0=provider,
-        p1=supported,
-    )
+            "Unknown backend provider: {p0} (currently only {p1} is supported)",
+            p0=provider,
+            p1=supported,
+        )
     )

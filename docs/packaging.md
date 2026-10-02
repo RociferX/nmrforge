@@ -1,9 +1,10 @@
 # AppImage packaging solution (NMRForge)
 
-Status: **released with v1.0.1**. The source stays Apache-2.0; the Linux AppImage ships in the
-release. **Since 2026-09-22 the release carries one artefact**, with the interface language chosen at
-run time; it is built from the released source commit recorded in
-`usr/share/doc/NMRForge/BUILD_INFO.txt`.
+Status: **v1.0.2 source and AppImage release in preparation**. Build, privacy and
+portability checks must pass before publication. The source stays Apache-2.0.
+The supported binary distribution is a single Linux AppImage with runtime language
+selection; its source commit is recorded in `usr/share/doc/NMRForge/BUILD_INFO.txt`.
+Previously released v1.0.1 binaries are historical snapshots, not this source tree.
 
 This page records the Linux AppImage build plan. Before every release the root
 `APPIMAGE_RELEASE_CHECKLIST.md` must be completed, and the licences of the bundled PySide6/Qt and
@@ -11,7 +12,7 @@ other components must be re-checked.
 
 ## Release strategy (PACK-015, decided 2026-09-12)
 
-- **v1.0.1 ships both the source and the AppImage.** The AppImage is
+- **Releases provide source and one AppImage.** The AppImage is
   built by PyInstaller; `nmrforge_data/config`, `nmrforge_data/presets`, `gui/assets` and
   `ui_support/locales` reach `_MEIPASS` through the spec's `datas` (the data package keeps its
   shape), and resources are located through `core/app_paths.py` and `ui_support/i18n.py`.
@@ -55,16 +56,17 @@ other components must be re-checked.
 
 ## Product boundary
 
-**Packaged into AppImage: **.
+Packaged into the AppImage:
 
 - The application itself (Python bytecode + PySide6 + pyqtgraph + numpy/scipy/matplotlib/nmrglue and other dependencies)
 - nmrforge_data/config and nmrforge_data/presets (into _MEIPASS via PyInstaller datas, see core/app_paths.py)
 - Application icon and desktop file
 
-**Not packaged (discovered at runtime): **.
+Not packaged (discovered at runtime):
 
-- NMRPipe/SMILE and other external backends: follow the runtime search strategy of NMRFlow
-  (PATH -> csh environment ~/.cshrc NMRPIPEBIN -> common installation directory), AppImage is not built-in.
+- NMRPipe/SMILE: supplied separately by the user. Discovery checks explicit settings,
+  the user's csh environment, then PATH/common installation locations; see
+  [external-dependencies.md](external-dependencies.md).
   The application within the AppImage uses `core/app_paths.py` to locate its own resources, regardless of the external backend.
 
 ## Build process (executed on Linux Builder/VM)
@@ -130,6 +132,8 @@ Key steps:
   Jitter will report "Failed to download runtime"; it can be extracted from appimagetool itself.
   (`--appimage-offset` + `dd`) and then put it into the cache directory, and the script will automatically reuse it.
 
+
+## Historical build record (not acceptance of the current version)
 
 - Builder: VM Ubuntu 22.04 (glibc 2.35), uv python 3.12.13
   PyInstaller 6.22.2, appimagetool continuous 8c8c91f, mksquashfs system package.

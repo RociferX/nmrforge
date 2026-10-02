@@ -19,10 +19,10 @@ what the interface does; the underlying engine behaviour is in
 python main.py    # 1.0.1 source entry point (the AppImage starts it internally)
 ```
 
-The 1.0.1 Linux AppImage is on the releases page (one artefact, interface language switched at
-run time); the first
-normal run installs the desktop entry (`--remove-desktop` removes it). Build and acceptance
-records are in [packaging.md](packaging.md).
+The published Linux AppImage is v1.0.1. This guide follows the current source tree; the AppImage
+has not been rebuilt to include the newer interface details below. The first normal run installs
+the desktop entry (`--remove-desktop` removes it). Build and acceptance records are in
+[packaging.md](packaging.md).
 
 ## Window layout
 
@@ -32,8 +32,10 @@ The window has **four columns** (the separators can be dragged; the View menu on
 | --- | --- |
 | 1 | Project tree: Project -> Experiment -> Input / Processing / Output / Figures. Selecting a node sets the context for everything else. |
 | 2 | Processing pipeline for the selected dataset: a breadcrumb plus the status-driven step list and the "what next" prompt. |
-| 3 | Task log: the permanent middle column, scoped to the current selection (single dataset, data group, experiment type, or global). |
-| 4 | Spectrum panel: the embedded viewer plus the list of spectra produced for the current context. |
+| 3 | Task log: the permanent middle column. Dataset, group and global logs are independent; individual member runs go to that member's log, and group runs go to the group log. |
+| 4 | Spectrum panel: selecting a dataset automatically shows its current spectrum (large files load in the background); 3D opens on the F3-F2 plane. Expanded comparison places the reference on the left and current spectrum in the centre, with independent controls and equal plot heights. |
+
+Single, segmented and batch import forms stay inline on the experiment page. Scroll that page to reach them; importing from the experiment's project-tree context menu is also available.
 
 Menus: `File` (new/open/save project, recent projects), `experiment` (new/rename/delete
 experiment), `View` (hide/show the project tree, the pipeline or the spectra), `Tools` (data-quality inspection, spectrum
@@ -94,7 +96,7 @@ positions and the branches of every step are in the tutorial.
    spectrum in column 4 - wheel to zoom, middle button to pan, an intensity slider, overlaid
    spectra; clicking a row in the peak table jumps to that peak.
 6. **Adjust as needed** (usual after looking at the spectrum, and done before picking peaks): to
-   change the spectrum centre, use the **Generate FID manual** entry to edit `CAR` and then run it;
+   change the spectrum centre, edit `CAR` manually in the **Generate spectrum** step and run it;
    to flip an indirect dimension, select the dimension and click **"Re-run the final script"**;
    anything else, use the **manual** entry, edit the script and run it.
 7. **Pick peaks** and export the peak table (POKY / Sparky `.list`). When the picked peaks are not
@@ -113,9 +115,21 @@ dimension range and the indirect-dimension flips (the flip control and the rerun
 box: in 2D the checkbox is a state, in 3D the dropdown is a command); "Reference spectrum" on the
 Peak picking step row picks a dataset that already has a peak table as the reference, so that peak
 picking keeps only the peaks matching the reference peak table. **Manual path** - any generated
-script can be opened in the script editor, edited and run directly; editing a script is a deliberate
-override, so it is recorded separately from the automated run, and when a step has failed its row
-offers "View log" to jump straight to the log entry.
+script can be opened in the script editor, edited and run directly. Successful runs report command
+and parameter differences from the last successful script; failed runs label those differences as
+attempted changes. A successful rerun or optimisation refreshes the target spectrum without changing
+the selected dataset. When a step has failed its row offers "View log" to jump straight to the log entry.
+
+Numeric labels and units sit outside their step arrows. Type a value and press Enter to apply it;
+arrow buttons and keys still adjust by the configured step. The aspect-ratio field accepts decimal
+values such as `0.8`; `0` means free aspect ratio. After switching datasets the viewer loads the
+spectrum automatically, with large files read in the background.
+
+An aligned peak export shifts only the exported peak table and leaves the spectrum file unchanged.
+When too few peaks match, the interface warns about the low alignment rate and skips aligned export,
+leaving the current peak table and spectrum unchanged. The Tools menu's data-quality inspection can
+read one FID file or a folder of slices; it does not modify FIDs or processing records. Peak
+localisation is three-point parabolic only, with no method chooser.
 
 ## Importing segmented acquisitions / averaged repeat experiments
 

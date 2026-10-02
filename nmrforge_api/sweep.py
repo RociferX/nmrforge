@@ -50,8 +50,6 @@ from core.version import software_commit, software_version, tool_versions
 from nmrforge_api.compat import record_stamp
 from nmrforge_api.errors import SweepError
 from nmrforge_api.localization_targets import (
-    ALL_METHOD_KEYS,
-    METHOD_KEYS,
     ConditionalTargets,
     LocalizationTargets,
     combine_target_specs,
@@ -86,14 +84,9 @@ STATUS_WARNING = "success_with_warning"
 STATUS_FAILED = "failed"
 SUCCESS_STATUSES: frozenset[str] = frozenset({STATUS_SUCCESS, STATUS_WARNING})
 
-#: warning codes (spec D9/G3: anything affecting reading must be recorded, not silent)
-# 2026-09-14 (independent picking): the peak-tracking warnings are gone
-# (peak_not_detected / peak_window_edge / peak_out_of_range / window_points_fallback
-# are no longer produced); a combination reports its own localisation QC only.
-WARN_GAUSSIAN_FALLBACK = "gaussian_fallback"
-WARN_GAUSSIAN_BOUNDARY_HIT = "gaussian_boundary_hit"
-WARN_GAUSSIAN_UNSUPPORTED = "gaussian_unsupported_ndim"
-#: this workflow's complete processing script cannot be found (spec D1: never drop it)
+# (peak_not_detected / peak_window_edge / peak_out_of_range /
+# ``boundary_hit``。
+WARN_BOUNDARY_HIT = "boundary_hit"
 WARN_SCRIPT_NOT_FOUND = "processing_script_not_found"
 #: the combination left the spectrum bit-identical to the reference: the parameter did nothing
 WARN_NO_SPECTRUM_CHANGE = "no_spectrum_change"
@@ -214,8 +207,7 @@ def parse_phase_axis(key: str) -> tuple[str, str, str]:
     if kind not in ("phase", "phase_delta") or not rest:
         raise SweepError(
             tr(
-                "malformed phase axis: {p0} (expected phase.<axis>.p0 or "
-                "phase_delta.<axis>.p1)",
+                "malformed phase axis: {p0} (expected phase.<axis>.p0 or phase_delta.<axis>.p1)",
                 p0=key,
             )
         )
@@ -299,23 +291,18 @@ def _locked_threshold_error(key: Any) -> SweepError:
 def _detection_note(key: Any) -> str:
     """A note for a detection key (never blocking)."""
     if str(key).split(".", 1)[-1].startswith("targets"):
-        return (
-            tr(
-                "note: {p0} is this row's **target-peak list** (a CSV with a peak_id column): only "
-                "the listed peaks take the chosen method's refinement (a per-method key applies to "
-                "that method only); detection, row count and peak_id numbering are unchanged and "
-                "unlisted peaks are "
-                "kept",
-                p0=key,
-            )
-        )
-    return (
-        tr(
-            "note: {p0} overrides the **refinement** per combination (parabolic/gaussian/both); "
-            "only the chosen table is written (the threshold stays locked to the "
-            "reference)",
+        return tr(
+            "note: {p0} is this row's **target-peak list** (a CSV with a peak_id column): only "
+            "the listed peaks take the parabolic refinement; detection, row count and peak_id "
+            "numbering are unchanged and unlisted peaks are "
+            "kept",
             p0=key,
         )
+    return tr(
+        "note: {p0} overrides the **refinement** per combination (parabolic is the only "
+        "method left); the threshold stays locked to the "
+        "reference",
+        p0=key,
     )
 
 
@@ -347,14 +334,20 @@ def _localization_methods(value: Any) -> list[str]:
         name = str(item).strip().lower()
         if name in ("", "none"):
             continue
-        if name in ("both", "all"):
-            for method in ("parabolic", "gaussian"):
-                if method not in out:
-                    out.append(method)
-            continue
-        if name not in ("parabolic", "gaussian"):
+        if name in ("gaussian", "both", "all", "gauss", "gaussian_fit"):
             raise SweepError(
-                tr("unknown localisation: {p0!r} (parabolic / gaussian / both)", p0=value)
+                tr(
+                    "localisation {p0!r}: the Gaussian peak-fitting method was removed; peak "
+                    "localisation is parabolic only",
+                    p0=value,
+                )
+            )
+        if name != "parabolic":
+            raise SweepError(
+                tr(
+                    "unknown localisation: {p0!r} (only parabolic remains)",
+                    p0=value,
+                )
             )
         if name not in out:
             out.append(name)
@@ -362,7 +355,7 @@ def _localization_methods(value: Any) -> list[str]:
 
 
 def split_combo(
-    combo: Mapping[str, Any]
+    combo: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, float], dict[str, Any]]:
     """A combination -> (processing overrides, phase-axis overrides, detection overrides).
 
@@ -387,28 +380,20 @@ def split_combo(
                 detection["targets"] = value
                 continue
             if sub.startswith("targets."):
-                # localization.targets.<method>: restrict that method only (per-method)
-                method = sub.split(".", 1)[1].strip().lower()
-                if method not in METHOD_KEYS + ALL_METHOD_KEYS:
-                    raise SweepError(
-                        tr(
-                            "unknown per-method target key: {p0!r} (methods are limited to "
-                            "{p1})",
-                            p0=name,
-                            p1=METHOD_KEYS + ALL_METHOD_KEYS,
-                        )
+                raise SweepError(
+                    tr(
+                        "{p0!r}: per-method target keys were removed with the Gaussian "
+                        "peak-fitting method; write localization.targets = <CSV> instead",
+                        p0=name,
                     )
-                detection.setdefault("targets_by_method", {})[
-                    "all" if method == "both" else method
-                ] = value
-                continue
+                )
             if sub in DETECTION_KEYS:
                 detection["methods"] = _localization_methods(value)
                 continue
             raise SweepError(
                 tr(
                     "unknown detection key: {p0!r} (a combination table allows localization = "
-                    "parabolic / gaussian / both, plus localization.targets = a target-peak "
+                    "parabolic, plus localization.targets = a target-peak "
                     "CSV)",
                     p0=name,
                 )
@@ -444,8 +429,8 @@ class SweepPlan:
     reference_spectrum_sha256: str = ""
     reference_peak_table_sha256: str = ""
     max_runs: int = DEFAULT_MAX_RUNS
-    design: str = "full"      # "full" (expanded) | "explicit" (external table)
-    n_full: int = 0           # full-factorial size (comparison; explicit == combos)
+    design: str = "full"  # "full" (expanded) | "explicit" (external table)
+    n_full: int = 0  # full-factorial size (comparison; explicit == combos)
     diagnostics: dict[str, Any] = field(default_factory=dict)
     phase_locked: bool = True
     notes: list[str] = field(default_factory=list)
@@ -494,9 +479,7 @@ class SweepPlan:
             grid_sha256=str(data.get("grid_sha256", "")),
             reference_script_sha256=str(data.get("reference_script_sha256", "")),
             reference_spectrum_sha256=str(data.get("reference_spectrum_sha256", "")),
-            reference_peak_table_sha256=str(
-                data.get("reference_peak_table_sha256", "")
-            ),
+            reference_peak_table_sha256=str(data.get("reference_peak_table_sha256", "")),
             max_runs=int(data.get("max_runs", DEFAULT_MAX_RUNS) or DEFAULT_MAX_RUNS),
             design=str(data.get("design", "full")),
             n_full=int(data.get("n_full", 0) or 0),
@@ -542,9 +525,7 @@ class SweepRun:
     logs_tail: list[str] = field(default_factory=list)
     versions: dict[str, str] = field(default_factory=dict)
     resume_fingerprint: str = ""
-    measurements_by_method: dict[str, list[PeakMeasurement]] = field(
-        default_factory=dict
-    )
+    measurements_by_method: dict[str, list[PeakMeasurement]] = field(default_factory=dict)
 
     @property
     def run_id(self) -> str:
@@ -569,7 +550,7 @@ class SweepRun:
     def to_dict(self) -> dict[str, Any]:
         return {
             "workflow_id": self.workflow_id,
-            "run_id": self.workflow_id,          # legacy field, same value
+            "run_id": self.workflow_id,  # legacy field, same value
             "index": int(self.index),
             "condition": self.condition,
             "dataset": self.dataset,
@@ -605,19 +586,13 @@ class SweepRun:
             index=int(data.get("index", 0) or 0),
             condition=str(data.get("condition", "")),
             dataset=dict(data.get("dataset") or {}),
-            parameters_requested=dict(
-                data.get("parameters_requested") or data.get("combo") or {}
-            ),
-            parameters_used=dict(
-                data.get("parameters_used") or data.get("params") or {}
-            ),
+            parameters_requested=dict(data.get("parameters_requested") or data.get("combo") or {}),
+            parameters_used=dict(data.get("parameters_used") or data.get("params") or {}),
             parameters_resolved=dict(data.get("parameters_resolved") or {}),
             phase=dict(data.get("phase") or {}),
             status=str(data.get("status", "pending")),
             warnings=[
-                dict(item)
-                for item in (data.get("warnings") or [])
-                if isinstance(item, dict)
+                dict(item) for item in (data.get("warnings") or []) if isinstance(item, dict)
             ],
             message=str(data.get("message", "")),
             run_dir=str(data.get("run_dir", "")),
@@ -642,9 +617,7 @@ class SweepRun:
             wall_time_s=float(data.get("wall_time_s", 0.0) or 0.0),
             phase_locked=bool(data.get("phase_locked", True)),
             logs_tail=[str(x) for x in (data.get("logs_tail") or [])],
-            versions={
-                str(k): str(v) for k, v in (data.get("versions") or {}).items()
-            },
+            versions={str(k): str(v) for k, v in (data.get("versions") or {}).items()},
             resume_fingerprint=str(data.get("resume_fingerprint", "")),
         )
 
@@ -669,10 +642,7 @@ def expand_grid(axes: Mapping[str, Sequence[Any]]) -> list[dict[str, Any]]:
         if not options:
             raise SweepError(tr("parameter axis {p0} has no candidate values", p0=key))
         values.append(options)
-    return [
-        dict(zip(keys, combination))
-        for combination in itertools.product(*values)
-    ]
+    return [dict(zip(keys, combination)) for combination in itertools.product(*values)]
 
 
 def _axis_root(key: str) -> str:
@@ -680,9 +650,7 @@ def _axis_root(key: str) -> str:
     return str(key).split(".", 1)[0]
 
 
-def validate_axes(
-    axes: Mapping[str, Sequence[Any]], *, sampling: str = "uniform"
-) -> list[str]:
+def validate_axes(axes: Mapping[str, Sequence[Any]], *, sampling: str = "uniform") -> list[str]:
     """Check grid keys: locked keys raise, deterministic or unknown ones only warn.
 
     - locked keys (``phases``/``direct_phase``/``phase_route``/``sampling.auto_phase``)
@@ -727,8 +695,8 @@ def validate_axes(
                 continue
             raise SweepError(
                 tr(
-                    "unknown detection key: {p0!r} (only localization = parabolic / gaussian / "
-                    "both, plus localization.targets = a target-peak "
+                    "unknown detection key: {p0!r} (only localization = parabolic, plus "
+                    "localization.targets = a target-peak "
                     "CSV)",
                     p0=key,
                 )
@@ -761,9 +729,7 @@ def validate_axes(
     return notes
 
 
-def merge_overrides(
-    base: Mapping[str, Any], overrides: Mapping[str, Any]
-) -> dict[str, Any]:
+def merge_overrides(base: Mapping[str, Any], overrides: Mapping[str, Any]) -> dict[str, Any]:
     """Merge dotted-key overrides into the base parameters (the input dict is untouched)."""
     result = copy.deepcopy(dict(base))
     for dotted, value in overrides.items():
@@ -793,9 +759,7 @@ def infer_axes(combos: Sequence[Mapping[str, Any]]) -> dict[str, list[Any]]:
 def _encode_column(rows: Sequence[Mapping[str, Any]], key: str) -> list[float]:
     """A column's values -> numbers (numeric as-is, categorical by first-seen order)."""
     raw = [row.get(key) for row in rows]
-    if all(
-        isinstance(v, (int, float)) and not isinstance(v, bool) for v in raw
-    ):
+    if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in raw):
         return [float(v) for v in raw]
     order: list[Any] = []
     for value in raw:
@@ -804,9 +768,7 @@ def _encode_column(rows: Sequence[Mapping[str, Any]], key: str) -> list[float]:
     return [float(order.index(value)) for value in raw]
 
 
-def _pairwise_correlation(
-    rows: Sequence[Mapping[str, Any]], key_a: str, key_b: str
-) -> float:
+def _pairwise_correlation(rows: Sequence[Mapping[str, Any]], key_a: str, key_b: str) -> float:
     """Correlation of two coded columns (0 when either side is constant)."""
     values_a = _encode_column(rows, key_a)
     values_b = _encode_column(rows, key_b)
@@ -855,10 +817,8 @@ def design_diagnostics(
     duplicated = sum(count - 1 for count in seen.values() if count > 1)
     max_corr = 0.0
     for index, key_a in enumerate(keys):
-        for key_b in keys[index + 1:]:
-            max_corr = max(
-                max_corr, abs(_pairwise_correlation(rows, key_a, key_b))
-            )
+        for key_b in keys[index + 1 :]:
+            max_corr = max(max_corr, abs(_pairwise_correlation(rows, key_a, key_b)))
     diagnostics: dict[str, Any] = {
         "n_runs": len(rows),
         "factors": keys,
@@ -890,12 +850,13 @@ def combos_from_rows(
     combos: list[dict[str, Any]] = []
     for index, row in enumerate(rows, start=1):
         if not isinstance(row, Mapping):
-            raise SweepError(tr(
-                "row {p0} of the combination table is not a mapping: "
-                "{p1!r}",
-                p0=index,
-                p1=row,
-            ))
+            raise SweepError(
+                tr(
+                    "row {p0} of the combination table is not a mapping: {p1!r}",
+                    p0=index,
+                    p1=row,
+                )
+            )
         # an empty cell or null means **unspecified** (keep the base), not "override to empty":
         # a blank CSV cell leaves that parameter untouched for this row.
         combo = {
@@ -908,18 +869,18 @@ def combos_from_rows(
         if axes is not None:
             for key, value in combo.items():
                 if key not in axes:
-                    raise SweepError(tr(
-                        "{p0!r} in row {p1} was not declared in "
-                        "axes",
-                        p0=key,
-                        p1=index,
-                    ))
+                    raise SweepError(
+                        tr(
+                            "{p0!r} in row {p1} was not declared in axes",
+                            p0=key,
+                            p1=index,
+                        )
+                    )
                 levels = list(axes[key])
                 if levels and value not in levels:
                     raise SweepError(
                         tr(
-                            "{p0}={p1!r} in row {p2} is outside the declared levels "
-                            "{p3!r}",
+                            "{p0}={p1!r} in row {p2} is outside the declared levels {p3!r}",
                             p0=key,
                             p1=value,
                             p2=index,
@@ -953,6 +914,8 @@ _TARGET_KEYS: tuple[str, ...] = (
     "localization.targets",
     "detection.localization.targets",
 )
+
+
 def _maybe_target_mapping(token: str) -> Mapping[str, Any] | None:
     """A CSV cell written as ``{A: a.csv, B: b.csv}`` -> a condition mapping.
 
@@ -975,10 +938,7 @@ def _maybe_target_mapping(token: str) -> Mapping[str, Any] | None:
 def _resolve_target_paths(value: Any, base_dir: Path) -> Any:
     """Resolve target-spec relative paths against the table directory (nested mappings too)."""
     if isinstance(value, Mapping):
-        return {
-            key: _resolve_target_paths(item, base_dir)
-            for key, item in value.items()
-        }
+        return {key: _resolve_target_paths(item, base_dir) for key, item in value.items()}
     if isinstance(value, str):
         token = value.strip()
         if not token:
@@ -994,9 +954,7 @@ def _resolve_target_paths(value: Any, base_dir: Path) -> Any:
     return value
 
 
-def _resolve_combo_targets(
-    combos: list[dict[str, Any]], base_dir: Path
-) -> list[dict[str, Any]]:
+def _resolve_combo_targets(combos: list[dict[str, Any]], base_dir: Path) -> list[dict[str, Any]]:
     """Resolve target-peak CSV paths against the **combination table's** directory.
 
     Absolute paths are kept as written; a relative path that cannot be found under
@@ -1004,10 +962,9 @@ def _resolve_combo_targets(
     with the original spelling). Paths inside a condition mapping
     (``{A: a.csv, B: b.csv}`` / ``default`` plus ``by_condition``) resolve as well.
     """
+
     def _is_target_key(name: str) -> bool:
-        return name in _TARGET_KEYS or any(
-            name.startswith(f"{base}.") for base in _TARGET_KEYS
-        )
+        return name in _TARGET_KEYS or any(name.startswith(f"{base}.") for base in _TARGET_KEYS)
 
     for combo in combos:
         for key in list(combo):
@@ -1052,9 +1009,7 @@ def load_combo_table(path: Path | str) -> list[dict[str, Any]]:
     return _resolve_combo_targets(combos_from_rows(data), target.parent)
 
 
-def write_combo_table(
-    path: Path | str, combos: Sequence[Mapping[str, Any]]
-) -> Path:
+def write_combo_table(path: Path | str, combos: Sequence[Mapping[str, Any]]) -> Path:
     """Write a combination table (CSV; columns = every key seen, in first-seen order)."""
     import csv
 
@@ -1070,9 +1025,7 @@ def write_combo_table(
 
 
 def _grid_sha256(combos: Sequence[Mapping[str, Any]]) -> str:
-    payload = json.dumps(
-        [dict(c) for c in combos], sort_keys=True, ensure_ascii=False
-    )
+    payload = json.dumps([dict(c) for c in combos], sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -1228,21 +1181,13 @@ def _phase_entries(
     touched_axes = {parse_phase_axis(key)[1] for key in phase_part}
     overridden = {
         axis: sorted(
-            {
-                parse_phase_axis(key)[1]
-                for key in phase_part
-                if parse_phase_axis(key)[1] == axis
-            }
+            {parse_phase_axis(key)[1] for key in phase_part if parse_phase_axis(key)[1] == axis}
         )
         for axis in touched_axes
     }
     entries: dict[str, Any] = {}
     for axis, values in effective_phase.items():
-        kinds = {
-            parse_phase_axis(key)[0]
-            for key in phase_part
-            if parse_phase_axis(key)[1] == axis
-        }
+        kinds = {parse_phase_axis(key)[0] for key in phase_part if parse_phase_axis(key)[1] == axis}
         if kinds == {"phase"}:
             mode = "manual_absolute"
         elif "phase_delta" in kinds:
@@ -1254,9 +1199,7 @@ def _phase_entries(
             "actual_p0": float(values[0]),
             "actual_p1": float(values[1]),
             "source": (
-                f"reference_run:{reference.run_id}"
-                if reference.run_id
-                else "reference_run"
+                f"reference_run:{reference.run_id}" if reference.run_id else "reference_run"
             ),
             "overridden_components": overridden.get(str(axis), []),
         }
@@ -1282,15 +1225,11 @@ def _smile_entries(
         if actual is None and user_key is None:
             continue
         entries[key] = {
-            "requested": (
-                requested[user_key] if user_key is not None else "auto(smile_tier)"
-            ),
+            "requested": (requested[user_key] if user_key is not None else "auto(smile_tier)"),
             "actual": actual,
             "source": "user" if user_key is not None else "auto(smile_tier)",
         }
     return entries
-
-
 
 
 def _write_log(
@@ -1316,8 +1255,7 @@ def _write_log(
         lines.append("--- warnings ---")
         for warning in warnings:
             lines.append(
-                f"[{warning.get('code')}] {warning.get('message')} "
-                f"(count={warning.get('count')})"
+                f"[{warning.get('code')}] {warning.get('message')} (count={warning.get('count')})"
             )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -1438,11 +1376,14 @@ def _axis_gate_check(
                     )
             elif root == "baseline" and sub == "order":
                 combo_mode = combo.get(f"baseline.{axis}.mode")
-                mode = str(
-                    combo_mode
-                    if combo_mode is not None
-                    else (base_baseline.get(axis) or {}).get("mode", "auto")
-                ) or "auto"
+                mode = (
+                    str(
+                        combo_mode
+                        if combo_mode is not None
+                        else (base_baseline.get(axis) or {}).get("mode", "auto")
+                    )
+                    or "auto"
+                )
                 if mode != "order":
                     notes.append(
                         tr(
@@ -1471,15 +1412,9 @@ def _merged_localization_targets(
     for one condition is ``ConditionalTargets.for_condition(condition)``.
     """
     merged: dict[str, ConditionalTargets | None] = dict(fallback or {})
-    spec = combine_target_specs(
-        detection.get("targets"), detection.get("targets_by_method")
-    )
+    spec = combine_target_specs(detection.get("targets"), detection.get("targets_by_method"))
     if spec is not None:
-        merged.update(
-            resolve_localization_targets_by_method(
-                spec, methods=methods, source="combo"
-            )
-        )
+        merged.update(resolve_localization_targets_by_method(spec, methods=methods, source="combo"))
     return merged
 
 
@@ -1488,8 +1423,6 @@ def _resume_fingerprint(
     combo: Mapping[str, Any],
     target: DatasetRef,
     reference: ReferenceSpectrum,
-    roi_f1_ppm: float | None,
-    roi_f2_ppm: float | None,
     localization_methods: Sequence[str] | None = None,
     edge_margin_ppm: float | None = None,
     base_params: Mapping[str, Any] | None = None,
@@ -1504,22 +1437,15 @@ def _resume_fingerprint(
     base_params = dict(base_params or {}) or dict(reference.sweep_params)
     params = merge_overrides(base_params, param_part)
     effective_phase = apply_phase_axes(
-        {
-            axis: list(pair)
-            for axis, pair in (reference.direct_phase_override() or {}).items()
-        },
+        {axis: list(pair) for axis, pair in (reference.direct_phase_override() or {}).items()},
         phase_part,
     )
     sigma_locked, sigma_origin = locked_detection_sigma(reference)
-    methods = list(
-        detection.get("methods") or localization_methods or ["parabolic"]
-    )
+    methods = list(detection.get("methods") or localization_methods or ["parabolic"])
     # A per-row target list wins over the call argument (a per-method key overrides that
     # method only); the fingerprint must carry the **resolved** list (path + SHA-256 +
     # ids), so the same path with different content re-runs.
-    active_by_method = _merged_localization_targets(
-        detection, methods, localization_targets
-    )
+    active_by_method = _merged_localization_targets(detection, methods, localization_targets)
     payload = {
         "schema": "nmrforge_api.resume.v2",
         "dataset": target.to_dict(),
@@ -1536,16 +1462,9 @@ def _resume_fingerprint(
             "sigma_origin": sigma_origin,
             "localization": methods,
             "edge_margin_ppm": edge_margin_ppm,
-            "roi_f1_ppm": roi_f1_ppm,
-            "roi_f2_ppm": roi_f2_ppm,
-            # per-condition view: only this condition's own list (a single file written
-            # per condition carries no whole-file SHA-256, so editing A's rows does not
-            # make B re-run; unchanged numbers never have to re-run)
             "localization_targets": {
                 method: (
-                    active_by_method[method].fingerprint_view(
-                        _condition_name(target)
-                    )
+                    active_by_method[method].fingerprint_view(_condition_name(target))
                     if active_by_method.get(method) is not None
                     else None
                 )
@@ -1581,9 +1500,7 @@ def _check_combo_targets(
     half way through.
     """
     _params, _phase, detection = split_combo(combo)
-    spec = combine_target_specs(
-        detection.get("targets"), detection.get("targets_by_method")
-    )
+    spec = combine_target_specs(detection.get("targets"), detection.get("targets_by_method"))
     if spec is None:
         return
     resolve_localization_targets_by_method(
@@ -1591,9 +1508,7 @@ def _check_combo_targets(
     )
 
 
-def _condition_base_params(
-    plan: SweepPlan, reference: ReferenceSpectrum
-) -> dict[str, Any]:
+def _condition_base_params(plan: SweepPlan, reference: ReferenceSpectrum) -> dict[str, Any]:
     """Resolve a condition base: its reference parameters, then the batch override.
 
     Behaviour the reference run decided through diagnostics or routing (a direct-dimension DC
@@ -1634,13 +1549,7 @@ def _candidate_script_paths(
     if reference.work_dir:
         paths.append(Path(reference.work_dir) / name)
     paths.append(session.work_dir / name)
-    paths.append(
-        session.root
-        / target.exp_id
-        / target.data_id
-        / f"{target.data_id}.nmrpipe"
-        / name
-    )
+    paths.append(session.root / target.exp_id / target.data_id / f"{target.data_id}.nmrpipe" / name)
     return paths
 
 
@@ -1685,8 +1594,7 @@ def _workflow_record(runs: Sequence[SweepRun], plan: SweepPlan) -> dict[str, Any
         "index": int(first.index) if first else 0,
         "status": status,
         "message": "; ".join(
-            f"{run.condition or run.dataset.get('key', '')}: {run.status}"
-            for run in ordered
+            f"{run.condition or run.dataset.get('key', '')}: {run.status}" for run in ordered
         ),
         "parameters_requested": dict(first.parameters_requested) if first else {},
         "conditions": [run.condition for run in ordered],
@@ -1771,8 +1679,6 @@ def run_sweep(
     localize_peaks: Any = None,
     edge_margin_ppm: float | None = None,
     sign: str = "abs",
-    roi_f1_ppm: float | None = None,
-    roi_f2_ppm: float | None = None,
     resume: bool = True,
     stop_on_error: bool = False,
     progress: Callable[[str], None] | None = None,
@@ -1890,12 +1796,13 @@ def run_sweep(
                         p0=ref.ndim,
                     )
                 )
-            raise SweepError(tr(
-                "{p0}D/{p1} combinations are not "
-                "supported",
-                p0=ref.ndim,
-                p1=ref.sampling,
-            ))
+            raise SweepError(
+                tr(
+                    "{p0}D/{p1} combinations are not supported",
+                    p0=ref.ndim,
+                    p1=ref.sampling,
+                )
+            )
 
     experiments = {
         target.key: read_experiment(session.manager, target.exp_id, target.data_id)
@@ -1924,10 +1831,7 @@ def run_sweep(
                 work_dir = Path(ref.work_dir)
             else:
                 work_dir = (
-                    session.root
-                    / target.exp_id
-                    / target.data_id
-                    / f"{target.data_id}.nmrpipe"
+                    session.root / target.exp_id / target.data_id / f"{target.data_id}.nmrpipe"
                 )
             work_dir.mkdir(parents=True, exist_ok=True)
             if hasattr(session.backend, "work_dir"):
@@ -1941,8 +1845,6 @@ def run_sweep(
                 localization_methods=methods,
                 localization_targets=localization_targets,
                 edge_margin_ppm=edge_margin_ppm,
-                roi_f1_ppm=roi_f1_ppm,
-                roi_f2_ppm=roi_f2_ppm,
             )
             if resume:
                 cached = _load_run(run_dir)
@@ -1954,8 +1856,7 @@ def run_sweep(
                     results.append(cached)
                     _emit(
                         tr(
-                            "[{p0}/{p1}] exists, skipping "
-                            "(resume)",
+                            "[{p0}/{p1}] exists, skipping (resume)",
                             p0=workflow_id,
                             p1=target.condition,
                         )
@@ -1977,8 +1878,6 @@ def run_sweep(
                 localization_methods=methods,
                 localization_targets=localization_targets,
                 edge_margin_ppm=edge_margin_ppm,
-                roi_f1_ppm=roi_f1_ppm,
-                roi_f2_ppm=roi_f2_ppm,
                 resume_fingerprint=fingerprint,
                 emit=_emit,
                 extra_warnings=extra_warnings,
@@ -1990,8 +1889,7 @@ def run_sweep(
                 break
         write_workflow_record(session, workflow_id, plan, runs=results)
         if stop_on_error and any(
-            run.workflow_id == workflow_id and run.status == STATUS_FAILED
-            for run in results
+            run.workflow_id == workflow_id and run.status == STATUS_FAILED for run in results
         ):
             break
     return results
@@ -2010,10 +1908,9 @@ def _run_condition_with_log(session: StudySession, **kwargs: Any) -> SweepRun:
     append_run_log_line(
         log_path,
         tr(
-            "run start: workflow={p0} "
-            "condition={p1}",
-            p0=kwargs.get('workflow_id'),
-            p1=getattr(kwargs.get('target'), 'condition', '-'),
+            "run start: workflow={p0} condition={p1}",
+            p0=kwargs.get("workflow_id"),
+            p1=getattr(kwargs.get("target"), "condition", "-"),
         ),
     )
     try:
@@ -2036,8 +1933,6 @@ def _run_condition(
     experiment: Any,
     run_dir: Path,
     base_params: Mapping[str, Any],
-    roi_f1_ppm: float | None,
-    roi_f2_ppm: float | None,
     resume_fingerprint: str,
     localization_methods: Sequence[str] | None = None,
     localization_targets: Mapping[str, ConditionalTargets | None] | None = None,
@@ -2053,25 +1948,18 @@ def _run_condition(
         emit(f"[{workflow_id}/{target.condition}] {message}")
 
     param_part, phase_part, detection_part = split_combo(combo)
-    methods = list(
-        detection_part.get("methods") or localization_methods or ["parabolic"]
-    )
+    methods = list(detection_part.get("methods") or localization_methods or ["parabolic"])
     # targeted localization: a per-row target list wins over the call argument (a
     # per-method key overrides that method only); condition granularity resolves this
     # run's own list **before processing**.
-    active_by_method = _merged_localization_targets(
-        detection_part, methods, localization_targets
-    )
+    active_by_method = _merged_localization_targets(detection_part, methods, localization_targets)
     condition_name = _condition_name(target)
     per_run_targets: dict[str, LocalizationTargets | None] = {}
     for method in methods:
         resolved = active_by_method.get(method)
         per_run_targets[method] = (
-            resolved.for_condition(condition_name)
-            if resolved is not None
-            else None
+            resolved.for_condition(condition_name) if resolved is not None else None
         )
-    # a changed fingerprint means a re-run: clear the old table so no stale artefact survives
     for method in ("parabolic", "gaussian"):
         table = run_dir / f"peak_table_{method}.csv"
         table.unlink(missing_ok=True)
@@ -2132,8 +2020,7 @@ def _run_condition(
                     nus_params["direct_phase"] = [float(pair[0]), float(pair[1])]
             if effective_phase:
                 nus_params["phases"] = {
-                    axis: [values[0], values[1]]
-                    for axis, values in effective_phase.items()
+                    axis: [values[0], values[1]] for axis, values in effective_phase.items()
                 }
             response = session.backend.reconstruct_nus(
                 experiment,
@@ -2193,9 +2080,7 @@ def _run_condition(
     script_src = next(
         (
             path
-            for path in _candidate_script_paths(
-                session, target, reference, workflow_id, response
-            )
+            for path in _candidate_script_paths(session, target, reference, workflow_id, response)
             if path.is_file() and path.stat().st_size > 0
         ),
         None,
@@ -2212,12 +2097,9 @@ def _run_condition(
             logs.append(
                 tr(
                     "script diff (reference -> this workflow): {p0} lines; ",
-                    p0=run.script_diff['n_changed'],
+                    p0=run.script_diff["n_changed"],
                 )
-                + " | ".join(
-                    str(line)
-                    for line in (run.script_diff.get("changed_lines") or [])[:6]
-                )
+                + " | ".join(str(line) for line in (run.script_diff.get("changed_lines") or [])[:6])
             )
     else:
         script_warning = {
@@ -2282,9 +2164,7 @@ def _run_condition(
                 axes=spectrum_axes,
                 sigma_multiplier=sigma_locked,
                 edge_margin_ppm=edge_margin_ppm,
-                method=method,
-                roi_f1_ppm=roi_f1_ppm,
-                roi_f2_ppm=roi_f2_ppm,
+                experiment=experiment,
                 targets=(
                     per_run_targets[method].peak_ids
                     if per_run_targets.get(method) is not None
@@ -2294,8 +2174,7 @@ def _run_condition(
                 # on_missing="none" has an empty target list, and "refine nothing" is
                 # then declared behaviour rather than an empty-list error
                 allow_empty_targets=bool(
-                    per_run_targets.get(method) is not None
-                    and not per_run_targets[method].peak_ids
+                    per_run_targets.get(method) is not None and not per_run_targets[method].peak_ids
                 ),
             )
             for row in rows:
@@ -2312,8 +2191,7 @@ def _run_condition(
                     positions={
                         nucleus: float(row[key])
                         for nucleus, key in (("1H", "H_ppm"), ("15N", "N_ppm"))
-                        if isinstance(row.get(key), float)
-                        and not math.isnan(row[key])
+                        if isinstance(row.get(key), float) and not math.isnan(row[key])
                     },
                     intensity=float(row["intensity"]),
                     noise_sigma=float(meta["noise_sigma"]),
@@ -2362,8 +2240,7 @@ def _run_condition(
             continue
         logs.append(
             tr(
-                "localization scope [{p0}]: {p1} target peaks / {p2} detected "
-                "({p3})",
+                "localization scope [{p0}]: {p1} target peaks / {p2} detected ({p3})",
                 p0=method,
                 p1=resolved.n_targets,
                 p2=len(tables[method]),
@@ -2407,7 +2284,7 @@ def _run_condition(
                             "threshold and the "
                             "data)",
                             p0=method,
-                            p1=meta.get('sigma_multiplier'),
+                            p1=meta.get("sigma_multiplier"),
                         )
                     ),
                     "count": 0,
@@ -2415,33 +2292,15 @@ def _run_condition(
                     "localization_method": method,
                 }
             )
-        if int(meta.get("n_fallback", 0)):
-            warnings.append(
-                {
-                    "code": WARN_GAUSSIAN_FALLBACK,
-                    "message": (
-                        tr(
-                            "{p0}: {p1} peaks fell back from the Gaussian fit(reasons "
-                            "{p2})",
-                            p0=method,
-                            p1=meta['n_fallback'],
-                            p2=meta.get('fallback_reasons'),
-                        )
-                    ),
-                    "count": int(meta["n_fallback"]),
-                    "peaks": [],
-                    "localization_method": method,
-                }
-            )
         if int(meta.get("n_boundary_hit", 0)):
             warnings.append(
                 {
-                    "code": WARN_GAUSSIAN_BOUNDARY_HIT,
+                    "code": WARN_BOUNDARY_HIT,
                     "message": tr(
-                        "{p0}: {p1} peaks hit a fit "
-                        "boundary",
+                        "{p0}: {p1} peaks have the parabolic vertex on the ±0.5-point limit "
+                        "(linewidth may be underestimated)",
                         p0=method,
-                        p1=meta['n_boundary_hit'],
+                        p1=meta["n_boundary_hit"],
                     ),
                     "count": int(meta["n_boundary_hit"]),
                     "peaks": [],
@@ -2468,9 +2327,7 @@ def _run_condition(
                 }
             )
     for method in methods:
-        path = write_peak_table(
-            run_dir / f"peak_table_{method}.csv", tables[method]
-        )
+        path = write_peak_table(run_dir / f"peak_table_{method}.csv", tables[method])
         run.peak_tables[method] = peak_table_digest(path)
     run.peak_localization = {
         method: {
@@ -2480,9 +2337,7 @@ def _run_condition(
             "n_fallback": int(metas[method]["n_fallback"]),
             "fallback_reasons": dict(metas[method]["fallback_reasons"]),
             "n_boundary_hit": int(metas[method]["n_boundary_hit"]),
-            "localization_scope": str(
-                metas[method].get("localization_scope", "all")
-            ),
+            "localization_scope": str(metas[method].get("localization_scope", "all")),
             "n_targeted": int(metas[method].get("n_targeted", 0)),
             "n_skipped": int(metas[method].get("n_skipped", 0)),
             "n_duplicate": int(
@@ -2500,16 +2355,10 @@ def _run_condition(
                 "ppm": float(first_meta["edge_margin_ppm"]),
                 "effective_ppm": float(first_meta["edge_margin_ppm"]),
                 "source": str(first_meta["edge_margin_source"]),
-                "nucleus": (
-                    spectrum_axes.nuclei[0] if spectrum_axes.nuclei else ""
-                ),
-                "obs_mhz": (
-                    float(spectrum_axes.obs[0]) if spectrum_axes.obs else 0.0
-                ),
+                "nucleus": (spectrum_axes.nuclei[0] if spectrum_axes.nuclei else ""),
+                "obs_mhz": (float(spectrum_axes.obs[0]) if spectrum_axes.obs else 0.0),
                 "ppm_per_point": (
-                    round(axis_units.ppm_per_point(axis0_ppm), 6)
-                    if axis0_ppm is not None
-                    else 0.0
+                    round(axis_units.ppm_per_point(axis0_ppm), 6) if axis0_ppm is not None else 0.0
                 ),
             }
         }
@@ -2532,8 +2381,11 @@ def _run_condition(
             "methods": list(methods),
             "independent": True,
             "reference_matching": "external",
-            # targeted localization (2026-09-19): the target list is recorded
-            # (path + SHA-256 + peak count, same style as direct_range.source)
+            **(
+                {"axial_screening": first_meta["axial_screening"]}
+                if "axial_screening" in first_meta
+                else {}
+            ),
             "localization_targets": localization_targets_record(
                 {method: active_by_method.get(method) for method in methods},
                 {method: metas[method] for method in methods},
@@ -2558,18 +2410,12 @@ def _run_condition(
             # locked keys and must never become sweep axes
             "flags": sign_sampling_flags(params),
             "flags_source": "reference(locked)",
-            "route": (
-                "reconstruct_nus"
-                if str(reference.sampling) == "nus"
-                else "process"
-            ),
+            "route": ("reconstruct_nus" if str(reference.sampling) == "nus" else "process"),
             "evidence": list(reference.sampling_evidence or [])[:5],
         },
         # the **actual** automatic values (spec G1/G2): SMILE nSigma/thresh
         "smile": (
-            _smile_entries(params, combo, response.get("effective_params") or {})
-            if is_nus
-            else {}
+            _smile_entries(params, combo, response.get("effective_params") or {}) if is_nus else {}
         ),
         # this combination's own noise sigma (robust MAD): the SNR denominator, recorded
         # so it can be recomputed
@@ -2583,19 +2429,16 @@ def _run_condition(
     run.warnings = warnings
     if warnings:
         run.status = STATUS_WARNING
-        run.message = (
-            tr("done with warnings: {p0}", p0=', '.join(str(w.get('code')) for w in warnings))
+        run.message = tr(
+            "done with warnings: {p0}", p0=", ".join(str(w.get("code")) for w in warnings)
         )
     else:
         run.status = STATUS_SUCCESS
-        run.message = (
-            tr(
-                "done: independent picking at sigma={p0:g}({p1}, locked), peaks ",
-                p0=first_meta['sigma_multiplier'],
-                p1=sigma_origin,
-            )
-            + ", ".join(f"{m}={metas[m]['n_peaks']}" for m in methods)
-        )
+        run.message = tr(
+            "done: independent picking at sigma={p0:g}({p1}, locked), peaks ",
+            p0=first_meta["sigma_multiplier"],
+            p1=sigma_origin,
+        ) + ", ".join(f"{m}={metas[m]['n_peaks']}" for m in methods)
     run.log_path = str(
         _write_log(
             run_dir / "log.txt",
@@ -2651,9 +2494,7 @@ def load_runs(session: StudySession) -> list[SweepRun]:
     for workflow_dir in sorted(path for path in root.iterdir() if path.is_dir()):
         if active is not None and workflow_dir.name not in active:
             continue
-        for condition_dir in sorted(
-            path for path in workflow_dir.iterdir() if path.is_dir()
-        ):
+        for condition_dir in sorted(path for path in workflow_dir.iterdir() if path.is_dir()):
             run = _load_run(condition_dir)
             if run is not None:
                 runs.append(run)
@@ -2688,9 +2529,7 @@ def workflow_summary(runs: Sequence[SweepRun]) -> dict[str, Any]:
     return {
         "n_runs": len(runs),
         "success": sum(1 for run in runs if run.status == STATUS_SUCCESS),
-        "success_with_warning": sum(
-            1 for run in runs if run.status == STATUS_WARNING
-        ),
+        "success_with_warning": sum(1 for run in runs if run.status == STATUS_WARNING),
         "failed": sum(1 for run in runs if run.status == STATUS_FAILED),
     }
 
@@ -2703,9 +2542,7 @@ __all__ = [
     "SUCCESS_STATUSES",
     "SweepPlan",
     "SweepRun",
-    "WARN_GAUSSIAN_BOUNDARY_HIT",
-    "WARN_GAUSSIAN_FALLBACK",
-    "WARN_GAUSSIAN_UNSUPPORTED",
+    "WARN_BOUNDARY_HIT",
     "WARN_SCRIPT_NOT_FOUND",
     "WARN_NO_SPECTRUM_CHANGE",
     "locked_detection_sigma",

@@ -1,7 +1,8 @@
 """Direct-dimension / final-spectrum phase search.
 
 Direct-dimension phase search primitives (used by the backend and the unified phase route):
-- ``search_direct_spectrum_phase``: aggregated (p0, p1) search on a direct-dimension FT spectrum;
+- ``search_direct_spectrum_phase``: aggregated (p0, p1) search on a direct-dimension FT
+spectrum;
 - ``nus_direct_phase``: non-uniform DFT phase correction of the NUS direct dimension;
 - ``search_direct_phase_on_spectrum``: symmetry-scored search on a reconstructed plane or final
   spectrum.
@@ -34,7 +35,8 @@ def direct_ft_traces(
     sp_pow: float = 1,
 ) -> np.ndarray:
     """Apply SP+ZF+FT along the direct dimension (the last axis); returns complex traces shaped
-    (n_traces, n)."""
+    (n_traces, n).
+    """
     arr = np.asarray(fid)
     n = arr.shape[-1]
     t = np.linspace(0.0, 1.0, n)
@@ -48,9 +50,7 @@ def direct_ft_traces(
     return spectrum.reshape(-1, spectrum.shape[-1])
 
 
-def _trace_profiles(
-    traces: np.ndarray, positions: np.ndarray, radius: int = 5
-) -> np.ndarray:
+def _trace_profiles(traces: np.ndarray, positions: np.ndarray, radius: int = 5) -> np.ndarray:
     """Slice a +-radius window at each fixed peak position; returns (m, 2*radius+1) profiles."""
     n = traces.shape[-1]
     offset = np.arange(-radius, radius + 1)
@@ -84,7 +84,8 @@ def _row_peak_positions(
     """Lock the top-K local peaks of a 1D direct-dimension spectrum; returns (indices, heights).
 
     A peak must exceed 5x the corner noise (a pure-noise trace returns None). With margin>0 the
-    first and last margin points are excluded (in real data the ends of a direct-dimension FT are
+    first and last margin points are excluded (in real data the ends of a direct-dimension FT
+    are
     often DC/Nyquist artefacts, several times stronger than real peaks).
     """
     arr = np.asarray(spectrum, dtype=np.complex128)
@@ -122,8 +123,10 @@ def _row_absorption(
     """Peak-height-weighted (absorption, signed ratio) over a fixed +-radius peak window, matching
     the frequency-domain rotation of NMRPipe PS.
 
-    The radius defaults to 1: the edges of the SP window give the peak tails a non-linear phase, so
-    a +-5 window absorption actually drops at the correct phase (0.46 vs 0.51 measured), whereas a
+    The radius defaults to 1: the edges of the SP window give the peak tails a non-linear phase,
+    so
+    a +-5 window absorption actually drops at the correct phase (0.46 vs 0.51 measured), whereas
+    a
     +-1 window separates the cases correctly (0.65 vs 0.47).
     """
     n = arr.shape[-1]
@@ -149,10 +152,13 @@ def _row_p1_fit(
 ) -> tuple[float, float] | None:
     """p1 fit from multi-peak traces: after rotation the peak phases are maximally concentrated.
 
-    The peak phase of a trace is the common p0 + that increment t1 (a constant) + p1*k/(n-1); after
-    rotating by a candidate p1, a correct p1 makes every peak phase equal (p0+t1) and the modulus
+    The peak phase of a trace is the common p0 + that increment t1 (a constant) + p1*k/(n-1);
+    after
+    rotating by a candidate p1, a correct p1 makes every peak phase equal (p0+t1) and the
+    modulus
     of the mean unit vector |vec| maximal (phase concentration). p1 is naturally decoupled from
-    p0/t1, so the flatness of the absorption metric along p1 (saturation at small angles) does not
+    p0/t1, so the flatness of the absorption metric along p1 (saturation at small angles) does
+    not
     arise here. Returns (p1, concentration).
     """
     if positions.size < 2:
@@ -212,21 +218,18 @@ def _row_p0_at_p1(
     p0 = float((-np.rad2deg(np.angle(vec))) % 360.0)
     p1_corr = -p1_signal
     _a0, sign0 = _row_absorption(arr, positions, heights, p0, p1_corr)
-    _a1, sign1 = _row_absorption(
-        arr, positions, heights, (p0 + 180.0) % 360.0, p1_corr
-    )
+    _a1, sign1 = _row_absorption(arr, positions, heights, (p0 + 180.0) % 360.0, p1_corr)
     if sign1 > sign0:
         p0 = (p0 + 180.0) % 360.0
     score, _sign = _row_absorption(arr, positions, heights, p0, p1_corr)
     return p0, score
 
 
-def dominant_absorption_ratio(
-    spectrum: np.ndarray, p0: float, p1: float, radius: int = 3
-) -> float:
+def dominant_absorption_ratio(spectrum: np.ndarray, p0: float, p1: float, radius: int = 3) -> float:
     """Absorption ratio |Re|/(|Re|+|Im|) of the dominant (largest) peak after applying (p0, p1).
 
-    Used to pick the better of the old and the new 1D phase result (0.2.199-patch29gk)."""
+    Used to pick the better of the old and the new 1D phase result (0.2.199-patch29gk).
+    """
     arr = np.asarray(spectrum, dtype=np.complex128)
     n = arr.shape[-1]
     k = np.arange(n, dtype=float)
@@ -239,13 +242,13 @@ def dominant_absorption_ratio(
     return float(np.abs(re) / (np.abs(re) + np.abs(im) + 1e-12))
 
 
-def orient_dominant_positive(
-    spectrum: np.ndarray, p0: float, p1: float, radius: int = 3
-) -> float:
-    """Adjust (p0, p1) so the dominant peak points up (positive absorption): flip p0 by 180 when the
+def orient_dominant_positive(spectrum: np.ndarray, p0: float, p1: float, radius: int = 3) -> float:
+    """Adjust (p0, p1) so the dominant peak points up (positive absorption): flip p0 by 180 when
+    the
     real part of the dominant peak window is negative.
 
-    0.2.199-patch29gk (user: peaks must be upright absorption, not inverted)."""
+    0.2.199-patch29gk (user: peaks must be upright absorption, not inverted).
+    """
     arr = np.asarray(spectrum, dtype=np.complex128)
     n = arr.shape[-1]
     k = np.arange(n, dtype=float)
@@ -267,14 +270,19 @@ def search_direct_spectrum_phase(
     """Aggregated (p0, p1) search on a direct-dimension FT spectrum (pure numpy, no backend rerun).
 
     Input: a (..., n) complex spectrum whose last dimension is the direct one; each row is one
-    indirect increment (one row per file for sliced fids, one row per increment for a single-file
+    indirect increment (one row per file for sliced fids, one row per increment for a
+    single-file
     fid). Aggregation strategy:
-    1) p1 consensus: fit the phase concentration of the multi-peak traces and take the median (t1 is
-       only a per-peak constant offset and does not affect the p1 ramp; single-peak traces cannot
+    1) p1 consensus: fit the phase concentration of the multi-peak traces and take the median
+    (t1 is
+       only a per-peak constant offset and does not affect the p1 ramp; single-peak traces
+       cannot
        determine p1 and are left out);
     2) p0 anchor: p0_source="first" takes the first trace that has peaks (increment 0, t1=0; the
-       direct dimension of sliced NUS data has a clean phase), "strongest" takes the trace with the
-       tallest peaks (a pseudo-uniform spectrum: the strongest row corresponds to a real indirect
+       direct dimension of sliced NUS data has a clean phase), "strongest" takes the trace with
+       the
+       tallest peaks (a pseudo-uniform spectrum: the strongest row corresponds to a real
+       indirect
        frequency and the constant phase offset of the zero-fill side lobes is d~0).
     Returns (p0, p1, score, gain); None when there is no signal or too few points.
     """
@@ -302,9 +310,7 @@ def search_direct_spectrum_phase(
     p1 = -p1_signal
     # p0 anchor: first = the first trace with peaks (increment 0, t1=0); strongest = tallest trace
     if p0_source == "strongest":
-        anchor = max(
-            range(len(infos)), key=lambda i: float(np.max(infos[i][2]))
-        )
+        anchor = max(range(len(infos)), key=lambda i: float(np.max(infos[i][2])))
     else:
         anchor = 0
     _arr, pos, heights = infos[anchor]
@@ -328,11 +334,13 @@ def nus_direct_phase(
 
     Principle: the phase of direct peak k* in slice i is phi(k*) + w1*dt1*p1_i + w2*dt2*p2_i; a
     non-uniform DFT over the increments at the true F1/F2 frequency cancels the t1 modulation
-    exactly (d=0), leaving the peak phase phi(k*) = phi0 + p1*k*/(n-1). p1 comes from fitting the
+    exactly (d=0), leaving the peak phase phi(k*) = phi0 + p1*k*/(n-1). p1 comes from fitting
+    the
     multi-peak phase concentration of every slice and taking the median (the 0.2.88 mechanism).
     Pure numpy; SMILE and the backend are not run.
 
-    Returns (p0_corr, p1_corr, score, gain, kstar); None when there is no signal or too few points.
+    Returns (p0_corr, p1_corr, score, gain, kstar); None when there is no signal or too few
+    points.
     score/gain use the peak-window absorption (radius 1) of the strongest slice under
     (p0_corr, p1_corr) minus the zero-phase baseline (for gating). Both p0 and p1 are PS
     corrections (the negated signal phase).
@@ -381,11 +389,9 @@ def nus_direct_phase(
         f2_coarse = np.arange(n_f2 * os) / os
         F1, F2 = np.meshgrid(f1_coarse, f2_coarse, indexing="ij")
         arg = (
-            2.0 * np.pi
-            * (
-                F1[..., None] * p1[None, None, :] / n_f1
-                + F2[..., None] * p2[None, None, :] / n_f2
-            )
+            2.0
+            * np.pi
+            * (F1[..., None] * p1[None, None, :] / n_f1 + F2[..., None] * p2[None, None, :] / n_f2)
         )
         V = np.sum(v[None, None, :] * np.exp(-1j * arg), axis=-1)
         idx = np.unravel_index(int(np.argmax(np.abs(V))), V.shape)
@@ -402,7 +408,8 @@ def nus_direct_phase(
         f2s = np.arange(max(0.0, f2pk - span), min(n_f2, f2pk + span) + 1e-9, refine_step)
         F1f, F2f = np.meshgrid(f1s, f2s, indexing="ij")
         argf = (
-            2.0 * np.pi
+            2.0
+            * np.pi
             * (
                 F1f[..., None] * p1[None, None, :] / n_f1
                 + F2f[..., None] * p2[None, None, :] / n_f2
@@ -447,23 +454,23 @@ def nus_direct_phase(
 
 def _net_window_metric(profile: np.ndarray) -> float:
     """Net absorption (positive area + negative area) / total absolute area; as in the existing
-    uniform optimisation score."""
+    uniform optimisation score.
+    """
     positive = float(np.clip(profile, 0.0, None).sum())
     negative = float(np.clip(profile, None, 0.0).sum())
     total = float(np.abs(profile).sum())
     return (positive + negative) / total if total else 0.0
 
 
-def _symmetry_sign_metric(
-    profile: np.ndarray, sign_mode: str = "uniform"
-) -> float:
+def _symmetry_sign_metric(profile: np.ndarray, sign_mode: str = "uniform") -> float:
     """Peak-window symmetry plus a shape-aware sign penalty (0..1), imitating nmrDraw phase tuning.
 
     sym = left-right symmetry: a real absorption peak is even (left = right, with negative side
     lobes either side of a positive peak) -> 1; a dispersive peak is odd -> 0.
 
     Sign penalty (0.2.199-patch20, shape-aware, user scheme):
-    - sign_mode="mixed" (a spectrum with both signs, e.g. HNCACB 13C): returns pure sym -- global
+    - sign_mode="mixed" (a spectrum with both signs, e.g. HNCACB 13C): returns pure sym --
+    global
       symmetry is best and negative absorption peaks are not penalised;
     - sign_mode="uniform" (a single-sign spectrum): a negative window is penalised mildly as
       sym*0.2 -- a symmetric negative absorption (an inverted peak with symmetric negative side
@@ -477,16 +484,14 @@ def _symmetry_sign_metric(
         return 0.0
     half = n // 2
     left = f[:half]
-    right = f[n - half:][::-1]
+    right = f[n - half :][::-1]
     denom = 2.0 * (left**2 + right**2) + 1e-12
     sym = float(np.mean((left + right) ** 2 / denom))
     if n % 2 == 1:
         c = f[half]
         sym = float(
             np.mean(
-                np.concatenate(
-                    [np.asarray((left + right) ** 2 / denom), [c**2 / (c**2 + 1e-12)]]
-                )
+                np.concatenate([np.asarray((left + right) ** 2 / denom), [c**2 / (c**2 + 1e-12)]])
             )
         )
     if sign_mode == "mixed":
@@ -503,12 +508,15 @@ def _signal_peak_windows(
     margin: int = 8,
     max_peaks: int = 8,
 ) -> list[tuple[int, int]]:
-    """Pick the signal-row peaks (user scheme: a protein spectrum has only a few tall peaks per row,
+    """Pick the signal-row peaks (user scheme: a protein spectrum has only a few tall peaks per
+    row,
     so noise and artefact regions are excluded first).
 
     For every trace (along axis, not the direct-dimension combination) find local maxima whose
-    height reaches max(snr x row noise (MAD), global_frac x global maximum peak height), allowing at
-    most max_peaks peaks per row (dense artefact rows are excluded). Returns [(row, peak_pos), ...];
+    height reaches max(snr x row noise (MAD), global_frac x global maximum peak height),
+    allowing at
+    most max_peaks peaks per row (dense artefact rows are excluded). Returns [(row, peak_pos),
+    ...];
     [] when there is no clean row.
     """
     n = real.shape[axis]
@@ -523,9 +531,7 @@ def _signal_peak_windows(
         if hi <= lo + 2:
             continue
         local = np.zeros(n, dtype=bool)
-        local[lo:hi] = (mag[lo:hi] >= mag[lo - 1 : hi - 1]) & (
-            mag[lo:hi] > mag[lo + 1 : hi + 1]
-        )
+        local[lo:hi] = (mag[lo:hi] >= mag[lo - 1 : hi - 1]) & (mag[lo:hi] > mag[lo + 1 : hi + 1])
         peaks = np.where(local & (mag > max(snr * mad, global_frac * gmax)))[0]
         if 0 < len(peaks) <= max_peaks:
             for p in peaks:
@@ -548,16 +554,23 @@ def search_direct_phase_on_spectrum(
 ) -> tuple[float, float, float] | None:
     """Search the direct-dimension phase score (p0, p1) on a spectrum.
 
-    axis selects the axis holding the direct dimension (the last one by default: the direct F2 of a
-    final F1xF2 spectrum; for the complex reconstructed plane recon.ft1 the layout is (F2, F1) and
+    axis selects the axis holding the direct dimension (the last one by default: the direct F2
+    of a
+    final F1xF2 spectrum; for the complex reconstructed plane recon.ft1 the layout is (F2, F1)
+    and
     the direct dimension is axis 0 -- 0.2.96).
 
-    0.2.95 (the nmrDraw phase-tuning idea, metric="symmetry" by default): first select the signal
-    row peaks to exclude noise/artefact regions (a few tall peaks per row), then score the locked
-    peak windows for frequency-domain rotational symmetry and take the smallest correction on the
+    0.2.95 (the nmrDraw phase-tuning idea, metric="symmetry" by default): first select the
+    signal
+    row peaks to exclude noise/artefact regions (a few tall peaks per row), then score the
+    locked
+    peak windows for frequency-domain rotational symmetry and take the smallest correction on
+    the
     near-optimal plateau. sign_mode (0.2.199-patch20): mixed = a spectrum with both signs, where
-    global symmetry is best; uniform = a single-sign spectrum with the shape-aware mild penalty on
-    negative windows (anomalous sign-flipped peaks are down-weighted). metric="net" keeps the old
+    global symmetry is best; uniform = a single-sign spectrum with the shape-aware mild penalty
+    on
+    negative windows (anomalous sign-flipped peaks are down-weighted). metric="net" keeps the
+    old
     net-absorption metric (+-90 plateau). Returns (p0, p1, score); None when there is no clean
     signal peak.
     """
@@ -636,8 +649,7 @@ def search_direct_phase_on_spectrum(
         if progress is not None and _evaluated % 100 == 0:
             progress(
                 tr(
-                    "direct-dimension phase search: evaluated {p0}/{p1} grid "
-                    "points",
+                    "direct-dimension phase search: evaluated {p0}/{p1} grid points",
                     p0=_evaluated,
                     p1=total_scores,
                 )
@@ -698,7 +710,5 @@ def search_direct_phase_on_spectrum(
         time.time() - t0,
     )
     if progress is not None:
-        progress(
-            tr("direct-dimension phase search done in {p0:.1f} s", p0=time.time() - t0)
-        )
+        progress(tr("direct-dimension phase search done in {p0:.1f} s", p0=time.time() - t0))
     return p0, p1, s0

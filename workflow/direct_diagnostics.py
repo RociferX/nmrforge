@@ -33,6 +33,7 @@ writeback path (its complex writeback has shape-parsing problems).
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import struct
 from collections.abc import Callable
@@ -42,24 +43,27 @@ from typing import Any
 
 import numpy as np
 
-from core.audit.qc_audit import QcAction, QcAuditLog, read_audit
+from core.audit.qc_audit import (
+    SOURCE_CLEAN_ACTION,
+    QcAction,
+    QcAuditLog,
+    audit_action_label,
+    read_audit,
+)
 from core.data.internal_data_model import Experiment, SamplingMode
+from core.experiment.pulse_pathways import is_neg_notice
 from core.project.manager import atomic_write_text
 from ui_support.i18n import tr
 
-# Thresholds (first version, empirical; calibrated in 0.2.199-patch29cw).
-# Time-domain indicator |FID mean|/|FID peak|: VM measurements on conventional
-# spectra give 0.07-0.20 (100/102/3/28/101) and about 0.49 for a real DC bias
-# (sampleC); the 0.25 threshold separates the two, so no spectrum false-alarms.
-DC_RATIO_THRESHOLD = 0.25          # enable POLY -time above 25% of the strongest amplitude
-BADPOINT_MAD = 12.0                # isolated spike = amplitude 12x MAD outside the local median
-FIRST_POINT_RATIO = 1.6            # first/second point ratio over 1.6x hints at group delay
-BROAD_PEAK_FRACTION = 0.08         # strongest-peak FWHM over 8% of the sweep: broadband (solvent)
-DRIFT_FWHM_MULT = 1.0              # pre/post sampling-period drift over 1 FWHM: re-acquire
-#: at most this many changed points are listed in one QC audit record (beyond it
-#: only the count is kept, so pathological data cannot produce a huge JSONL)
+DC_RATIO_THRESHOLD = 0.25
+BADPOINT_MAD = 12.0
+FIRST_POINT_RATIO = 1.6
+BROAD_PEAK_FRACTION = 0.08
+DRIFT_LW_NEGLIGIBLE = 0.5
+DRIFT_LW_LARGE = 3.0
+DRIFT_LW_SEVERE = 10.0
 AUDIT_DETAIL_LIMIT = 32
-ENERGY_TOP20_THRESHOLD = 0.92      # top 20% of traces holding over 92% of the energy: uneven
+ENERGY_TOP20_THRESHOLD = 0.92  # top 20% of traces holding over 92% of the energy: uneven
 
 # nmrPipe fid header length varies with 2D (2048B) / 3D stream (512B) etc.; it is
 # determined dynamically while parsing
@@ -68,9 +72,6 @@ HEADER_CANDIDATES = (512, 1024, 2048)
 #: on-disk name of the diagnosis conclusion (written by Generate FID, read back by
 #: Generate Spectrum)
 DIAGNOSTICS_FILENAME = "diagnostics.json"
-#: head of the "removed bad points at the source" action in qc_audit.jsonl (written
-#: by backend._record_source_clean); history lookups filter on it (2026-09-23)
-SOURCE_CLEAN_ACTION = "removed_from_source_ser_and_nuslist"
 
 
 @dataclass
@@ -98,9 +99,7 @@ class DirectDiagnosticsResult:
     notes: list[str] = field(default_factory=list)
 
 
-def collect_fid_paths(
-    work: Path, experiment: Experiment
-) -> list[Path]:
+def collect_fid_paths(work: Path, experiment: Experiment) -> list[Path]:
     """Locate the converted fid: the **single source** of "where the converted
     product is" (slice stream / single file).
 
@@ -126,7 +125,7 @@ def collect_fid_paths(
     dataset_id = experiment.dataset_id
     merged = work / "merged"
     # (1) slice stream: segmented data prefers merged/fid (merged slices), single dataset work/fid
-    for base in ((merged, work) if experiment.segments else (work, merged)):
+    for base in (merged, work) if experiment.segments else (work, merged):
         d = base / "fid"
         if d.is_dir():
             # 2026-09-24 review B11: slice names come in two generations -- the new
@@ -193,14 +192,12 @@ def _read_fid_raw(
             expect = header + nrows * fdsize3 * COMPLEX_BYTES
             if len(raw) != expect:
                 continue
-            flat = np.frombuffer(
-                raw, dtype="<f4", count=nrows * fdsize3 * 2, offset=header
-            ).astype(np.float32)
+            flat = np.frombuffer(raw, dtype="<f4", count=nrows * fdsize3 * 2, offset=header).astype(
+                np.float32
+            )
             rows = flat.reshape(nrows, fdsize3 * 2)
             cand = rows[:, :fdsize3] + 1j * rows[:, fdsize3:]
-            if cand.shape == target.shape and np.array_equal(
-                cand, target, equal_nan=True
-            ):
+            if cand.shape == target.shape and np.array_equal(cand, target, equal_nan=True):
                 return target, fdsize3, nrows, header
         # Header length outside the candidates: infer from file size, keep the nmrglue values
         for header in HEADER_CANDIDATES:
@@ -214,9 +211,9 @@ def _read_fid_raw(
         expect = header + specnum * fdsize * COMPLEX_BYTES
         if len(raw) != expect:
             continue
-        flat = np.frombuffer(
-            raw, dtype="<f4", count=specnum * fdsize * 2, offset=header
-        ).astype(np.float32)
+        flat = np.frombuffer(raw, dtype="<f4", count=specnum * fdsize * 2, offset=header).astype(
+            np.float32
+        )
         rows = flat.reshape(specnum, fdsize * 2)
         cand = rows[:, :fdsize] + 1j * rows[:, fdsize:]
         if cand.shape == target.shape and np.array_equal(cand, target, equal_nan=True):
@@ -246,9 +243,7 @@ def _dc_ratio_time(traces: np.ndarray) -> float:
     return float(np.median(ratios))
 
 
-def _trace_metrics(
-    traces: np.ndarray, n: int
-) -> dict[str, float]:
+def _trace_metrics(traces: np.ndarray, n: int) -> dict[str, float]:
     """Compute the DC / first-point / broadband-peak / drift metrics on the top traces."""
     energy = np.sum(np.abs(traces) ** 2, axis=-1)
     order = np.argsort(energy)[::-1]
@@ -274,14 +269,15 @@ def _trace_metrics(
     fwhm_pts = max(float(r - left), 1.0)
     broad = fwhm_pts / n_pad > BROAD_PEAK_FRACTION
     med_amp = np.median(np.abs(top), axis=0)
-    first_ratio = (
-        float(med_amp[0] / max(med_amp[1], 1e-12))
-        if n > 2 and med_amp[1] > 0
-        else 0.0
-    )
-    split = max(int(len(order) * 0.2), 2)
-    head = traces[order[:split]]
-    tail = traces[order[-split:]]
+    first_ratio = float(med_amp[0] / max(med_amp[1], 1e-12)) if n > 2 and med_amp[1] > 0 else 0.0
+    nonzero = np.flatnonzero(energy > 0)
+    if nonzero.size:
+        split = max(int(np.ceil(nonzero.size * 0.2)), 2)
+        split = min(split, max(nonzero.size // 2, 1))
+        head = traces[nonzero[:split]]
+        tail = traces[nonzero[-split:]]
+    else:
+        head = tail = traces[:1]
     pos_head, pos_tail = [], []
     for arr2 in (head, tail):
         w2 = np.zeros((len(arr2), n_pad), dtype=complex)
@@ -429,15 +425,41 @@ def run_fid_diagnostics_paths(
         result = run_fid_diagnostics_paths(["process/exp_001.fid"])
     """
     files: list[Path] = []
+    seen: set[Path] = set()
+
+    def slice_key(path: Path):
+        return tuple(
+            (0, int(part)) if part.isdigit() else (1, part.casefold())
+            for part in re.split(r"(\d+)", path.name)
+        )
+
     for _p in paths:
         _pp = Path(_p)
         if _pp.is_dir():
-            _fs = sorted(_pp.glob("*.fid")) or sorted(_pp.glob("test*.fid"))
-            files.extend(_fs)
+            candidates = sorted(
+                (p for p in _pp.iterdir() if p.is_file() and p.suffix.lower() == ".fid"),
+                key=slice_key,
+            )
         elif _pp.is_file():
-            files.append(_pp)
+            candidates = [_pp]
+        else:
+            candidates = []
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                files.append(candidate)
     _work = files[0].parent if files else Path(".")
-    return _diagnose_paths(files, _work, repair=repair, is_uniform=False)
+    result = _diagnose_paths(
+        files, _work, repair=repair, is_uniform=False, diagnostic_only=not repair
+    )
+    if files:
+        result.reports.insert(0, tr("FID input: {p0} file(s)", p0=len(files)))
+    if not repair:
+        result.reports.append(
+            tr("Detection only: FID files and processing records were not modified.")
+        )
+    return result
 
 
 def _record_bad_point_repair(
@@ -494,29 +516,49 @@ def _diagnose_paths(
     *,
     repair: bool = True,
     is_uniform: bool = False,
+    diagnostic_only: bool = False,
 ) -> DirectDiagnosticsResult:
     res = DirectDiagnosticsResult()
     if not paths:
         res.ran = False
-        res.reports = [tr(
-            "Data quality diagnosis: converted fid not found, skipped (diagnosis does not block "
-            "processing)",
-        )]
+        res.reports = [
+            tr(
+                "Data quality diagnosis: converted fid not found, skipped (diagnosis does not "
+                "block "
+                "processing)",
+            )
+        ]
         return res
     blocks: list[np.ndarray] = []
     parsed: list[tuple[Path, int, int, int, np.ndarray]] = []
     for path in paths:
         got = _read_fid_raw(path)
         if got is None:
+            if diagnostic_only:
+                res.notes.append(
+                    tr("Could not parse FID, excluded from this check: {p0}", p0=path.name)
+                )
             continue
         data, fdsize, specnum, header = got
+        if diagnostic_only and blocks and data.shape[-1] != blocks[0].shape[-1]:
+            res.ran = False
+            res.reports = [
+                tr(
+                    "FID files have inconsistent direct-dimension lengths; "
+                    "they cannot be checked as one slice group: {p0}",
+                    p0=path.name,
+                )
+            ]
+            return res
         blocks.append(data)
         parsed.append((path, fdsize, specnum, header, data))
     if not blocks:
-        res.reports = [tr(
-            "Data quality diagnosis: fid layout cannot be parsed after conversion, "
-            "skipped",
-        )]
+        res.ran = False
+        res.reports = [
+            tr(
+                "Data quality diagnosis: fid layout cannot be parsed after conversion, skipped",
+            )
+        ] + list(res.notes)
         return res
     traces = np.concatenate(blocks, axis=0)
     n = int(traces.shape[-1])
@@ -535,10 +577,16 @@ def _diagnose_paths(
         res.apply_poly_time = True
         reports.append(
             tr(
+                "A DC bias is present in the direct dimension (about {p0:.0f}% of "
+                "the strongest amplitude); consider POLY -time correction during processing",
+                p0=m["dc_ratio"] * 100,
+            )
+            if diagnostic_only
+            else tr(
                 "A DC bias is present in the direct dimension (the FID mean is about {p0:.0f}% of "
                 "the strongest amplitude); POLY -time auto-correction has been "
                 "enabled",
-                p0=m['dc_ratio']*100,
+                p0=m["dc_ratio"] * 100,
             )
         )
 
@@ -590,6 +638,17 @@ def _diagnose_paths(
             if made_backup:
                 path.write_bytes(bytes(raw))
         res.repaired_badpoints = repaired
+    elif diagnostic_only:
+        detected = sum(int(np.count_nonzero(_find_bad_points(row))) for row in traces)
+        res.metrics["detected_badpoints"] = detected
+        if detected:
+            reports.append(
+                tr(
+                    "{p0} spike bad point(s) detected and left untouched "
+                    "(detection only; consider repair during FID processing)",
+                    p0=detected,
+                )
+            )
     if repaired:
         reports.append(
             tr(
@@ -606,11 +665,13 @@ def _diagnose_paths(
             res.notes.append(audit_summary)
         nonzero = int(np.sum(np.sum(np.abs(traces) ** 2, axis=-1) > 0))
         if repaired / max(nonzero * n, 1) > 0.005:
-            reports.append(tr(
-                "the bad-point fraction is high; also check ADC / gain stability on the "
-                "acquisition "
-                "side",
-            ))
+            reports.append(
+                tr(
+                    "the bad-point fraction is high; also check ADC / gain stability on the "
+                    "acquisition "
+                    "side",
+                )
+            )
 
     if m["first_point_ratio"] > FIRST_POINT_RATIO:
         reports.append(
@@ -620,7 +681,7 @@ def _diagnose_paths(
                 "the conversion parameters; if the baseline at high field still tilts, check the "
                 "GRPDLY/DSPFVS parameters in "
                 "acqus",
-                p0=m['first_point_ratio'],
+                p0=m["first_point_ratio"],
             )
         )
     if m["broad_peak"]:
@@ -632,21 +693,8 @@ def _diagnose_paths(
                 "conditions",
             )
         )
-    if m["drift_pts"] > DRIFT_FWHM_MULT * m["fwhm_pts"]:
-        # 2026-09-24 real-bug fix: the linewidth multiple is drift points / FWHM
-        # (points) but was written as a multiplication -- real data d_019 gives 12
-        # points / 10 points = 1.2 linewidths, yet the report said "120.0 linewidths"
-        # (d_004 said 2834).
-        reports.append(
-            tr(
-                "direct-dimension frequency drift between the pre- and post-sampling periods is "
-                "about {p0:.1f} points ({p1:.1f} linewidths), processing cannot remove it "
-                "completely; check temperature control / lock and consider "
-                "re-acquiring",
-                p0=m['drift_pts'],
-                p1=m['drift_pts'] / max(m['fwhm_pts'], 1e-9),
-            )
-        )
+    if drift_linewidths(m["drift_pts"], m["fwhm_pts"]) >= DRIFT_LW_NEGLIGIBLE:
+        reports.append(format_drift_report_line(m["drift_pts"], m["fwhm_pts"]))
     energy = np.sum(np.abs(traces) ** 2, axis=-1)
     # 0.2.199-patch29z: most NUS traces are empty (not acquired), so the top 20%
     # of all traces always hold 100% of the energy and every spectrum false-alarmed --
@@ -708,17 +756,21 @@ def _diagnose_paths(
                 p0=high_energy,
             )
         )
-    res.auto_handled = int(res.apply_poly_time) + (1 if repaired else 0)
+    res.auto_handled = (0 if diagnostic_only else int(res.apply_poly_time)) + (1 if repaired else 0)
     res.clean = not reports
     if not reports:
-        reports = [tr(
-            "Data quality diagnosis: DC offset not detected, peak bad point, first point "
-            "abnormality, broadband peak or "
-            "drift",
-        )]
-    res.reports = reports
+        reports = [
+            tr(
+                "Data quality diagnosis: DC offset not detected, peak bad point, first point "
+                "abnormality, broadband peak or "
+                "drift",
+            )
+        ]
+    res.reports = reports + list(res.notes)
     if made_backup:
         res.backup_dir = str(backup)
+    if diagnostic_only:
+        return res
     try:
         atomic_write_text(
             (work / "diagnostics.json"),
@@ -749,7 +801,8 @@ def _diagnose_paths(
 
 def _fid_signature(paths: list[Path]) -> list[list[str | int]]:
     """fid product signature (file name + byte size + mtime_ns); tells whether a record
-    on disk still describes the current products."""
+    on disk still describes the current products.
+    """
     signature: list[list[str | int]] = []
     for path in paths:
         try:
@@ -817,9 +870,15 @@ def read_source_cleanup_history(
     except OSError:
         actions = []
     for action in actions:
-        if not str(action.action_taken).startswith(SOURCE_CLEAN_ACTION):
+        action_text = str(action.action_taken)
+        source_removed = action.extra.get("source_removed")
+        if not (
+            source_removed is True
+            or action_text.startswith(SOURCE_CLEAN_ACTION)
+            or action_text.startswith(audit_action_label(SOURCE_CLEAN_ACTION))
+        ):
             continue
-        if action.extra.get("source_removed") is False:
+        if source_removed is False:
             continue
         events += 1
         points += max(_as_int(action.before_state.get("bad_points")), 1)
@@ -833,15 +892,16 @@ def read_source_cleanup_history(
     for raw_dir in raw_dirs or []:
         base = Path(raw_dir)
         for name in ("ser.bak", "nuslist.bak"):
-            if (base / name).is_file():
-                backups.append(f"{base.name}/{name}")
             try:
-                children = sorted(child for child in base.iterdir() if child.is_dir())
+                candidates = sorted(path for path in base.rglob(name) if path.is_file())
             except OSError:
-                children = []
-            for child in children:
-                if (child / name).is_file():
-                    backups.append(f"{base.name}/{child.name}/{name}")
+                candidates = []
+            for candidate in candidates:
+                try:
+                    relative = candidate.relative_to(base).as_posix()
+                except ValueError:
+                    relative = candidate.name
+                backups.append(f"{base.name}/{relative}")
     if not events and not backups:
         return {}
     return {
@@ -879,6 +939,32 @@ def _source_history_line(history: dict[str, Any] | None) -> str:
         "this step adds nothing new (details in qc_audit.jsonl){p0}",
         p0=tail,
     )
+
+
+def _unique_lines(items: list[str]) -> list[str]:
+    """Remove exact duplicate lines while preserving the order of first occurrence.
+
+    The correction list combines several sources: source-data anomalies, archived
+    ``sweep_width`` and ``carrier`` values, the ``fid_com_corrections`` sidecar, and
+    archived ``mode_symbol`` values. The same value or note can arrive through two
+    paths: ``patch_fid_com`` warnings enter ``corrections`` through the sidecar, while
+    CAR/MODE text is also archived separately by ``carrier_audit`` or ``mode_audit``.
+    The reader skips only ``xSW/ySW/zSW/xCAR/yCAR/zCAR/out:`` prefixes, so other CAR
+    notes, ``yMODE``, and ``xN`` entries could otherwise appear twice.
+
+    Only byte-for-byte identical lines are removed; content is not rewritten and no
+    fuzzy matching is used. Distinct lines remain distinct, and numbering stays
+    continuous for cross-reference.
+    """
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in items:
+        text = str(item)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        unique.append(text)
+    return unique
 
 
 def _diagnostics_payload(work: Path) -> dict[str, Any] | None:
@@ -944,11 +1030,10 @@ def read_diagnostics_record(work_dir: Path | str) -> DirectDiagnosticsResult | N
     return _result_from_payload(payload) if payload is not None else None
 
 
-def _read_cached_diagnostics(
-    work: Path, experiment: Experiment
-) -> DirectDiagnosticsResult | None:
+def _read_cached_diagnostics(work: Path, experiment: Experiment) -> DirectDiagnosticsResult | None:
     """Read ``diagnostics.json`` back; None when it is missing, unreadable, or its fid
-    signature does not match the current products."""
+    signature does not match the current products.
+    """
     data = _diagnostics_payload(work)
     if data is None:
         return None
@@ -1020,7 +1105,72 @@ def load_or_run_direct_diagnostics(
     return result
 
 
-def _normalized_diagnostic_reports(diagnostics: Any) -> list[str]:
+def drift_linewidths(drift_pts: float, fwhm_pts: float) -> float:
+    """Return direct-dimension frequency drift in linewidths: shift points / FWHM points.
+
+    The ratio (not the product) keeps a 12-point shift over a 10-point FWHM at 1.2
+    linewidths. The denominator is floored at ``1e-9`` when FWHM cannot be measured.
+    """
+    return float(drift_pts) / max(float(fwhm_pts), 1e-9)
+
+
+def format_drift_report_line(drift_pts: float, fwhm_pts: float, *, segmented: bool = False) -> str:
+    """Render a direct-dimension field-drift screening line by apparent shift in linewidths.
+
+    The report distinguishes four ranges and retains both the shift in points and its
+    linewidth ratio:
+
+    - ``< 0.5`` linewidths: normal sampling variation; no action needed.
+    - ``0.5–3``: acceptable but worth monitoring; do not recommend reacquisition.
+    - ``3–10``: processing cannot fully remove the drift; check temperature/lock and
+      consider reacquisition.
+    - ``>= 10``: the spectra barely overlap; recommend reacquisition.
+    """
+    mult = drift_linewidths(drift_pts, fwhm_pts)
+    if mult < DRIFT_LW_NEGLIGIBLE:
+        return tr(
+            "Field-drift screening: the apparent direct-dimension peak-position change between "
+            "the early and late non-empty traces is about "
+            "{p0:.1f} points ({p1:.1f} linewidths); at this magnitude it is a normal sampling "
+            "fluctuation and needs no action",
+            p0=drift_pts,
+            p1=mult,
+        )
+    if mult < DRIFT_LW_LARGE:
+        line = tr(
+            "Field-drift screening: the apparent direct-dimension peak-position change between "
+            "the early and late non-empty traces is about "
+            "{p0:.1f} points ({p1:.1f} linewidths), acceptable but should be monitored (no "
+            "re-acquisition required)",
+            p0=drift_pts,
+            p1=mult,
+        )
+        if segmented:
+            line += tr("; inter-part field-drift correction may be attempted for segmented data")
+        return line
+    if mult < DRIFT_LW_SEVERE:
+        return tr(
+            "Field-drift screening: the apparent direct-dimension peak-position change between "
+            "the early and late non-empty traces is "
+            "about {p0:.1f} points ({p1:.1f} linewidths), processing cannot remove it "
+            "completely if it is true field drift; check temperature control / lock and the raw "
+            "data before considering re-acquisition",
+            p0=drift_pts,
+            p1=mult,
+        )
+    return tr(
+        "Field-drift screening: the apparent direct-dimension peak-position change between the "
+        "early and late non-empty traces is about "
+        "{p0:.1f} points ({p1:.1f} linewidths), far beyond the linewidth; the two periods barely "
+        "overlap. Confirm temperature control / lock and the raw data; if this is true field "
+        "drift, "
+        "re-acquire the spectrum",
+        p0=drift_pts,
+        p1=mult,
+    )
+
+
+def _normalized_diagnostic_reports(diagnostics: Any, *, segmented: bool = False) -> list[str]:
     """FID-layer report lines: old records with the wrong "120.0 linewidths" value are
     recomputed from the metrics.
 
@@ -1038,13 +1188,7 @@ def _normalized_diagnostic_reports(diagnostics: Any) -> list[str]:
     for report in getattr(diagnostics, "reports", []) or []:
         item = str(report)
         if fwhm > 0 and ("个线宽" in item or "linewidths" in item.lower()):  # i18n: keep
-            item = tr(
-                "direct-dimension frequency drift between the pre- and post-sampling periods is "
-                "about {p0:.1f} points ({p1:.1f} linewidths), processing cannot remove it "
-                "completely; check temperature control / lock and consider re-acquiring",
-                p0=drift,
-                p1=drift / fwhm,
-            )
+            item = format_drift_report_line(drift, fwhm, segmented=segmented)
         lines.append(item)
     return lines
 
@@ -1116,30 +1260,39 @@ def _normalized_skip_lines(round_record: dict[str, Any]) -> list[str]:
             continue
         part = _part_number_from_text(text)
         if part is None:
-            lines.append(tr(
-                "a part's per-trace signal-to-noise is too low to measure a drift; no drift could "
-                "be measured, so no correction was applied to that part",
-            ))
+            lines.append(
+                tr(
+                    "a part's per-trace signal-to-noise is too low to measure a drift; no drift "
+                    "could "
+                    "be measured, so no correction was applied to that part",
+                )
+            )
             continue
         index = part - 1
         ratio = quality[index] if 0 <= index < len(quality) else None
         mad = row_mad[index] if 0 <= index < len(row_mad) else None
         if ratio is None or mad is None:
-            lines.append(tr(
-                "part {p0}: the per-trace signal-to-noise is too low to measure a drift; no drift "
-                "could be measured, so no correction was applied",
-                p0=part,
-            ))
+            lines.append(
+                tr(
+                    "part {p0}: the per-trace signal-to-noise is too low to measure a drift; "
+                    "no drift "
+                    "could be measured, so no correction was applied",
+                    p0=part,
+                )
+            )
             continue
-        lines.append(tr(
-            "part {p0}: the per-trace signal-to-noise is too low to measure a drift (correlation "
-            "peak only {p1:.1f}x the background, per-trace estimates disagree by {p2:.1f} Hz, "
-            "{p3:.2f} FFT point(s)); no drift could be measured, so no correction was applied",
-            p0=part,
-            p1=_as_float(ratio, 0.0),
-            p2=_as_float(mad, 0.0),
-            p3=(_as_float(mad, 0.0) / point_hz) if point_hz else 0.0,
-        ))
+        lines.append(
+            tr(
+                "part {p0}: the per-trace signal-to-noise is too low to measure a drift "
+                "(correlation "
+                "peak only {p1:.1f}x the background, per-trace estimates disagree by {p2:.1f} Hz, "
+                "{p3:.2f} FFT point(s)); no drift could be measured, so no correction was applied",
+                p0=part,
+                p1=_as_float(ratio, 0.0),
+                p2=_as_float(mad, 0.0),
+                p3=(_as_float(mad, 0.0) / point_hz) if point_hz else 0.0,
+            )
+        )
     if _measurement_note_needed(round_record, lines):
         lines.append(no_measurement_note())
     return lines
@@ -1186,6 +1339,20 @@ def _drift_report_lines(record: dict[str, Any] | None) -> tuple[list[str], bool,
         notes += consistency_report_lines(consistency)
     if not record.get("checked"):
         reason = str(record.get("reason") or "")
+        applied_hz = record.get("applied_hz") or {}
+        if reason == "manual-segment-shift" and applied_hz:
+            parts_text = ", ".join(
+                tr("part {p0}: {p1} Hz", p0=key, p1=f"{float(value):+.4f}")
+                for key, value in sorted(
+                    applied_hz.items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else 0
+                )
+            )
+            note = tr(
+                "inter-part field drift: corrected manually - {p0} (part 1 is the reference, "
+                "not shifted); each part's fid.com was rewritten (PS -rs) and re-converted",
+                p0=parts_text,
+            )
+            return [note, *notes], True, False
         note = {
             "direct-axis-unknown": tr(
                 "inter-part field drift: not checked (the direct-dimension SW/OBS is unknown)",
@@ -1194,14 +1361,18 @@ def _drift_report_lines(record: dict[str, Any] | None) -> tuple[list[str], bool,
                 "inter-part field drift: not checked (a part has no converted fid)",
             ),
             "manual-segment-shift": tr(
-                "inter-part field drift: not checked (per-part shifts were given manually via "
-                "segment_shift_hz)",
+                "inter-part field drift: you set per-part offsets but none of them could be "
+                "applied (no part reported a rewrite); check the conversion log for the reason - "
+                "the parts are as they were acquired"
+            ),
+            "manual-only": tr(
+                "inter-part field drift: not corrected (the automatic check was removed; set the "
+                'per-part offsets with the "Inter-part field drift" button in the Generate FID '
+                "step if you need one)",
             ),
         }.get(
             reason,
-            tr(
-                "inter-part field drift: the check did not complete; no shift was applied"
-            ),
+            tr("inter-part field drift: the check did not complete; no shift was applied"),
         )
         return [note, *notes], False, False
     rounds = [item for item in (record.get("rounds") or []) if isinstance(item, dict)]
@@ -1304,10 +1475,6 @@ def _drift_report_lines(record: dict[str, Any] | None) -> tuple[list[str], bool,
                 detail.append(f"{float(hz):+.2f} Hz")
             else:
                 detail.append(f"{float(hz):+.2f} Hz ({float(ppm):+.4f} ppm)")
-        # 2026-09-24 review B4: the "largest residual after re-checking" may only use
-        # **trusted** parts -- skipped parts leave noise-level numbers (the same basis as
-        # max_abs_hz_after in the record), otherwise the report would say "residual
-        # 151 Hz" right after "that 151 Hz estimate is not reproducible"
         trusted_parts = rounds[-1].get("trusted_parts") if rounds else None
         residual = 0.0
         for index, value in enumerate((rounds[-1].get("offsets_hz") if rounds else []) or []):
@@ -1379,9 +1546,7 @@ def _drift_report_lines(record: dict[str, Any] | None) -> tuple[list[str], bool,
             if 0 <= index < len(offsets) and offsets[index] is not None:
                 measured.append(abs(_as_float(offsets[index], 0.0)))
     else:
-        measured = [
-            abs(_as_float(value, 0.0)) for value in offsets if value is not None
-        ]
+        measured = [abs(_as_float(value, 0.0)) for value in offsets if value is not None]
     # Parts that passed the "measurable + reproducible" gate and **measured over the
     # criterion** (part numbers count from 1).
     # 2026-09-24 re-check: if such a part was not corrected (the fid.com rewrite failed /
@@ -1418,19 +1583,25 @@ def _drift_report_lines(record: dict[str, Any] | None) -> tuple[list[str], bool,
             for part in assessed_over
             if 0 <= part - 1 < len(offsets) and offsets[part - 1] is not None
         )
-        return [
-            tr(
-                "inter-part field drift: part(s) {p0} measured offsets over the {p1:.2f} Hz "
-                "criterion ({p2}) but the correction did not happen (the fid.com rewrite failed "
-                "or was rolled back); the merged data still carries those offsets",
-                p0=", ".join(str(part) for part in assessed_over),
-                p1=criterion,
-                p2=over_detail or "-",
-            ),
-            *merge_notes,
-            *notes,
-            *skipped,
-        ], False, False
+        return (
+            [
+                tr(
+                    "inter-part field drift: part(s) {p0} measured offsets over the {p1:.2f} "
+                    "Hz "
+                    "criterion ({p2}) but the correction did not happen (the fid.com rewrite "
+                    "failed "
+                    "or was rolled back); the merged data still carries those offsets",
+                    p0=", ".join(str(part) for part in assessed_over),
+                    p1=criterion,
+                    p2=over_detail or "-",
+                ),
+                *merge_notes,
+                *notes,
+                *skipped,
+            ],
+            False,
+            False,
+        )
     if linewidth_hz and basis != "points":
         within = tr(
             "inter-part field drift: largest offset {p0:.2f} Hz vs part {p1} is within the "
@@ -1568,9 +1739,7 @@ def format_fid_step_report(
     fixes: list[str] = []
     points = list(source_bad_points or [])
     if points:
-        shown = ", ".join(
-            "(" + ", ".join(str(v) for v in point) + ")" for point in points
-        )
+        shown = ", ".join("(" + ", ".join(str(v) for v in point) + ")" for point in points)
         if source_removed:
             fixes.append(
                 tr(
@@ -1598,37 +1767,21 @@ def format_fid_step_report(
         note = str(item.get("note") or "")
         if note:
             fixes.append(note)
-    # 2026-09-24: carrier (CAR) basis -- when AUTO's "water peak + gamma ratio" basis
-    # does not apply, or fid.com lacks the key, the backend rewrites it and these entries
-    # go into the corrections; when the AUTO basis is kept, only one note line is given.
+    #
+    #
     carrier = carrier or {}
-    for item in carrier.get("fix_lines") or []:
-        if str(item):
-            fixes.append(str(item))
     carrier_summary = str(carrier.get("summary") or "")
     carrier_notes = [str(item) for item in (carrier.get("notes") or []) if str(item)]
-    # 2026-09-24 (report design fixed by the user): overridden dimensions get a
-    # reference-basis block each (acquisition center / configured target CAR / delta /
-    # status).
-    carrier_blocks = [str(item) for item in (carrier.get("blocks") or []) if str(item)]
-    # 2026-09-24: the fid.com parameters changed during conversion (the ones printed
-    # line by line in the log) also go into the correction list, so the GUI report and the
-    # Generate-FID log carry the same text (user 2026-09-24).
+    correction_notes: list[str] = []
     for item in corrections or []:
         text = str(item)
-        if text:
+        if not text:
+            continue
+        if is_advisory_line(text):
+            correction_notes.append(text)
+        else:
             fixes.append(text)
-    # 2026-09-24 second revision: dimensions whose mode/symbol is unconfirmed (no FT -neg
-    # applied) each get a reminder for manual review -- the same text as the conversion
-    # log (mode_symbol_audit -> patch_fid_com warnings) and the import warning
-    # (pulse_pathways.review_lines).
-    mode_notes = [
-        str(item)
-        for item in ((mode_symbol or {}).get("lines") or [])
-        if str(item)
-    ]
-    # 2026-09-24 (user): a single dataset has no "merging" step and no inter-part field
-    # drift -- the report uses the wording of the stages that really happen
+    mode_notes = [str(item) for item in ((mode_symbol or {}).get("lines") or []) if str(item)]
     multi_part = parts is None or int(parts) >= 2
     if multi_part:
         drift_lines, drift_corrected, drift_all_clear = _drift_report_lines(field_drift)
@@ -1639,16 +1792,13 @@ def format_fid_step_report(
         drift_notes: list[str] = []
     else:
         drift_notes = list(drift_lines)
-    lines.append(
-        tr("◆ conversion and merging") if multi_part else tr("◆ conversion")
-    )
-    for index, item in enumerate(fixes, 1):
+    lines.append(tr("◆ conversion and merging"))
+    for index, item in enumerate(_unique_lines(fixes), 1):
         lines.append(f"   {index}. {item}")
     section_clean = not fixes and not history_line
-    if multi_part and field_drift is None:
-        # 2026-09-24 review B3: when multi-part data has **no field-drift record** (old
-        # working directory / a failed write / an old merged product reused without a
-        # record), say "not checked" instead of falling through to "nothing to correct"
+    if not multi_part:
+        pass
+    elif field_drift is None:
         drift_notes = [
             tr(
                 "inter-part field drift: this step has no check record (no field_drift.json), so "
@@ -1664,28 +1814,28 @@ def format_fid_step_report(
         lines.append(
             "   "
             + (
-                tr(
-                    "✓ source sampling points and inter-part field drift: nothing needed "
-                    "correcting"
-                )
+                tr("✓ source sampling points and inter-part field drift: nothing needed correcting")
                 if multi_part
                 else tr("✓ source sampling points: nothing needed correcting")
             )
         )
     if history_line:
         lines.append(f"   · {history_line}")
-    if carrier_summary:
-        lines.append(f"   · {carrier_summary}")
-    for item in carrier_notes:
+    for item in _unique_lines(
+        [
+            *([carrier_summary] if carrier_summary else []),
+            *carrier_notes,
+            *mode_notes,
+            *correction_notes,
+        ]
+    ):
         lines.append(f"   · {item}")
-    for item in mode_notes:
-        lines.append(f"   · {item}")
-    for block in carrier_blocks:
-        for block_line in block.splitlines():
-            lines.append(f"      {block_line}")
-    for item in drift_notes:
+    for item in _unique_lines(drift_notes):
         lines.append(f"   · {item}")
     lines.append(tr("◆ FID inspection (direct-dimension memory scan after conversion)"))
+    diagnostic_reports: list[str] = []
+    diagnostic_auto = 0
+    diagnostic_ran = diagnostics is not None and bool(diagnostics.ran)
     if diagnostics is None or not diagnostics.ran:
         lines.append("   " + tr("⚠ FID inspection did not run in this step"))
         for note in list(getattr(diagnostics, "reports", []) or []):
@@ -1699,20 +1849,61 @@ def format_fid_step_report(
             )
         )
     else:
-        reports = _normalized_diagnostic_reports(diagnostics)
-        auto = int(diagnostics.auto_handled) or (
-            int(bool(diagnostics.apply_poly_time))
-            + int(diagnostics.repaired_badpoints > 0)
+        diagnostic_reports = _normalized_diagnostic_reports(
+            diagnostics, segmented=parts is not None and parts >= 2
         )
-        if auto:
-            suffix = tr("(automatically processed: {p0})", p0=auto)
+        diagnostic_auto = int(diagnostics.auto_handled) or (
+            int(bool(diagnostics.apply_poly_time)) + int(diagnostics.repaired_badpoints > 0)
+        )
+        diagnostic_auto = min(diagnostic_auto, len(diagnostic_reports))
+        if diagnostic_auto:
+            suffix = tr("(automatically processed: {p0})", p0=diagnostic_auto)
         else:
             suffix = tr("(not processed automatically)")
-        lines.append(tr(" ⚠ {p0} issue(s) detected {p1}", p0=len(reports), p1=suffix))
-        for index, report in enumerate(reports, 1):
+        lines.append(
+            tr(
+                " ⚠ {p0} issue(s) detected {p1}",
+                p0=len(diagnostic_reports),
+                p1=suffix,
+            )
+        )
+        for index, report in enumerate(diagnostic_reports, 1):
             lines.append(f"      {index}. {report}")
         for note in list(diagnostics.notes):
             lines.append(f"      · {note}")
+    #
+    #
+    pending_count = max(0, len(diagnostic_reports) - diagnostic_auto)
+    if not diagnostic_ran:
+        pending_count += 1
+    if multi_part and (field_drift is None or not (drift_corrected or drift_all_clear)):
+        pending_count += 1
+    fix_count = len(_unique_lines(fixes))
+    if not diagnostic_ran:
+        fid_headline = tr("FID inspection did not run")
+    elif diagnostic_reports:
+        fid_headline = tr(
+            "FID inspection found {p0} issue(s), {p1} handled automatically",
+            p0=len(diagnostic_reports),
+            p1=diagnostic_auto,
+        )
+    else:
+        fid_headline = tr("FID inspection found no issues")
+    review_headline = (
+        tr("{p0} item(s) still need review", p0=pending_count)
+        if pending_count
+        else tr("no action needed")
+    )
+    lines.insert(
+        1,
+        "   "
+        + tr(
+            "summary: {p0}; {p1}; conversion settings changed in {p2} place(s)",
+            p0=fid_headline,
+            p1=review_headline,
+            p2=fix_count,
+        ),
+    )
     return lines
 
 
@@ -1761,10 +1952,58 @@ def read_carrier_audit(work_dir: Path | str) -> dict[str, Any]:
                 continue
             carrier = payload.get("carrier") if isinstance(payload, dict) else None
             if isinstance(carrier, dict) and carrier.get("dims"):
+                carrier = dict(carrier)
+                carrier["fix_lines"] = []
                 return carrier
     except OSError:
         return {}
     return {}
+
+
+def is_advisory_line(line: str) -> bool:
+    """Return whether a line is an advisory rather than a script correction.
+
+    ``patch_fid_com`` warnings mix actual changes (for example, ``ySW: fid.com=… →
+    acqus=… (corrected)``, ``xLAB: …``, or ``out: …``) with notices. CAR notices
+    describe the water-peak plus gyromagnetic-ratio convention, the CAR reference, or
+    a mismatch between CAR and spectrum center; CAR has not been written back since
+    2026-09-28. ``-neg`` notices report whether the mode is present; sign adjustment
+    is controlled by processing-time FT flags, not by conversion-time script edits.
+
+    These notices can enter the numbered correction list through
+    ``fid_com_corrections.json`` and also appear in ``carrier_notes`` or ``mode_notes``.
+    Classifying them as notes prevents duplicate messages and keeps the numbered list
+    limited to actual script changes.
+
+    Generated lines have stable wording but no common machine-readable marker.
+    ``(corrected)`` is definitive and is checked first; otherwise CAR, ``-neg``, or
+    explicit unchanged/no-geometry-check wording identifies a notice. This includes
+    NUS axes intentionally kept as-is without geometry checks, cases where sign
+    conversion is deferred to FT flags, and canonical ``-N`` modes retained as
+    written. Separating unchanged notices from corrections makes actual changes such
+    as ``xLAB`` or ``sampleCount`` easier to find.
+    """
+    text = str(line or "").strip()
+    if not text:
+        return False
+    if "已修正" in text or "(corrected)" in text:  # i18n: keep
+        return False
+    if is_neg_notice(text):
+        return True
+    if "CAR" in text or "口径" in text:  # i18n: keep
+        return True
+    return any(
+        marker in text
+        for marker in (
+            "kept as-is",
+            "kept as written",
+            "not at conversion",
+            "no geometry check",
+            "保留原值",  # i18n: keep
+            "未做几何核对",  # i18n: keep
+            "转换期不做",  # i18n: keep
+        )
+    )
 
 
 def read_mode_symbol_audit(work_dir: Path | str) -> dict[str, Any]:
@@ -1820,9 +2059,7 @@ def read_fid_com_corrections(work_dir: Path | str) -> list[str]:
     return []
 
 
-def detect_part_count(
-    work_dir: Path | str, raw_dirs: list[Path | str] | None = None
-) -> int | None:
+def detect_part_count(work_dir: Path | str, raw_dirs: list[Path | str] | None = None) -> int | None:
     """How many parts this data has (for the report wording): only multi-part data
     mentions "merging" and "inter-part field drift".
 
@@ -1850,9 +2087,7 @@ def detect_part_count(
         segments = dirs[0] / "segments"
         if segments.is_dir():
             try:
-                count = sum(
-                    1 for child in segments.iterdir() if (child / "acqus").is_file()
-                )
+                count = sum(1 for child in segments.iterdir() if (child / "acqus").is_file())
             except OSError:
                 return None
             if count:

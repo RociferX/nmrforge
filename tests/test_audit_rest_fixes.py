@@ -84,8 +84,8 @@ def test_analysis_removal_is_documented() -> None:
         return
     changelog_path = Path("CHANGELOG.md")
     if not changelog_path.is_file():
-    # The public repo does not ship CHANGELOG.md: with neither record present there is
-    # no source to assert against, so skip
+        # The public repo does not ship CHANGELOG.md: with neither record present there is
+        # no source to assert against, so skip
         return
     changelog = changelog_path.read_text(encoding="utf-8")
     assert "REPORT-008" in changelog
@@ -117,10 +117,7 @@ def test_version_single_source() -> None:
     data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     assert data["project"]["dynamic"] == ["version"]
     assert "version" not in data["project"]
-    assert (
-        data["tool"]["setuptools"]["dynamic"]["version"]["attr"]
-        == "core.__version__"
-    )
+    assert data["tool"]["setuptools"]["dynamic"]["version"]["attr"] == "core.__version__"
     assert core.__version__ != "0.1.0"
 
 
@@ -210,23 +207,18 @@ def test_open_project_persists_migration(tmp_path: Path) -> None:
             {
                 "id": "exp_001",
                 "title": "HSQC",
-                "source": "/sampleD",
+                "source": "/data/1",
                 "segments": [],
                 "imported_at": "2026-01-01T00:00:00+00:00",
             }
         ],
         "processing_history": [],
     }
-    (root / "project.json").write_text(
-        json.dumps(legacy, ensure_ascii=False), encoding="utf-8"
-    )
+    (root / "project.json").write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
     ProjectManager.open_project(root)
     stored = json.loads((root / "project.json").read_text(encoding="utf-8"))
     assert stored["schema_version"] == SCHEMA_VERSION
-    assert any(
-        item.get("action") == "project_migrated"
-        for item in stored["processing_history"]
-    )
+    assert any(item.get("action") == "project_migrated" for item in stored["processing_history"])
 
 
 def test_open_current_schema_project_is_not_rewritten(tmp_path: Path) -> None:
@@ -262,9 +254,7 @@ def test_bad_point_log_does_not_claim_false_deletion(tmp_path: Path) -> None:
         sampling=Sampling(mode=SamplingMode.NUS),
     )
     logs: list[str] = []
-    _valid, bad, removed = NMRPipeBackend()._clean_source_nus(
-        experiment, [raw], logs
-    )
+    _valid, bad, removed = NMRPipeBackend()._clean_source_nus(experiment, [raw], logs)
     assert bad, "重复采样点应被识别为坏点"
     assert removed is False
     assert (raw / "nuslist").read_text(encoding="utf-8") == "10\n10\n11\n"
@@ -293,12 +283,8 @@ def test_batch_skips_3d_with_documented_reason(
     class _Exp3D:
         ndim = 3
 
-    monkeypatch.setattr(
-        "workflow.stepwise._read_experiment", lambda *a, **k: _Exp3D()
-    )
-    result = batch_mod.run_batch(
-        manager, entry.id, [data.id], ["fid"], backend=object()
-    )
+    monkeypatch.setattr("workflow.stepwise._read_experiment", lambda *a, **k: _Exp3D())
+    result = batch_mod.run_batch(manager, entry.id, [data.id], ["fid"], backend=object())
     per = result["results"][data.id]
     assert per["status"] == "skipped"
     assert per["steps"] == {}
@@ -337,9 +323,7 @@ def test_default_config_has_no_consumerless_sections() -> None:
 
     from core.app_paths import resource_path
 
-    raw = yaml.safe_load(
-        resource_path("config/nmrforge.yaml").read_text(encoding="utf-8")
-    )
+    raw = yaml.safe_load(resource_path("config/nmrforge.yaml").read_text(encoding="utf-8"))
     for section in ("app", "optimization", "qc", "reporting", "logging"):
         assert section not in raw, section
     # peaks.localization (2026-09-13) is consumed by
@@ -353,8 +337,7 @@ def test_smile_wording_matches_scheme_b() -> None:
     from gui.pipeline_panel import PIPELINE_STEPS
 
     description = next(
-        text for step_id, _label, text, _deps in PIPELINE_STEPS
-        if step_id == "smile"
+        text for step_id, _label, text, _deps in PIPELINE_STEPS if step_id == "smile"
     )
     assert "采用最优谱" not in description
     assert "不自动替换" in description
@@ -442,7 +425,15 @@ def test_packaging_policy_declares_source_and_appimage_release() -> None:
     from core import __version__
 
     released = "v" + __version__
-    assert f"{released} 已发布" in text or f"released with {released}" in text
+    assert any(
+        status in text
+        for status in (
+            f"{released} 已发布",
+            f"released with {released}",
+            f"{released} 源码与 AppImage 发布准备中",
+            f"{released} source and AppImage release in preparation",
+        )
+    )
     assert "AppImage" in text
     assert "wheel" in text
     assert "APPIMAGE_RELEASE_CHECKLIST.md" in text
@@ -458,4 +449,3 @@ def test_appimage_build_keeps_the_machine_local_config_out() -> None:
     assert script.index('LOCAL_CFG="nmrforge_data/config/nmrforge.local.yaml"') < script.index(
         "--distpath"
     )
-

@@ -95,9 +95,7 @@ RECORD_SCHEMAS: dict[str, str] = {
     "resume_fingerprint": "nmrforge_api.resume.v2",
 }
 
-_SKIP_DIRS = frozenset(
-    {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
-)
+_SKIP_DIRS = frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
 _SKIP_SUFFIXES = frozenset({".pyc", ".pyo"})
 
 
@@ -192,9 +190,7 @@ def _dump_ast(tree: ast.AST) -> str:
     fingerprint.
     """
     if sys.version_info >= (3, 13):
-        return ast.dump(
-            tree, annotate_fields=True, include_attributes=False, show_empty=True
-        )
+        return ast.dump(tree, annotate_fields=True, include_attributes=False, show_empty=True)
     return ast.dump(tree, annotate_fields=True, include_attributes=False)
 
 
@@ -286,14 +282,7 @@ def record_stamp() -> dict[str, Any]:
 
 def default_snapshot() -> dict[str, Any]:
     """Built-in default snapshot (**independent of config**, identical on every machine)."""
-    from core.peaks.axis_units import EDGE_MARGIN_LINEWIDTH_FACTOR
-    from core.peaks.localize import (
-        DEFAULT_GAUSSIAN_MAX_NFEV,
-        DEFAULT_GAUSSIAN_ROI_F1_PPM,
-        DEFAULT_GAUSSIAN_ROI_F2_PPM,
-        DEFAULT_GAUSSIAN_ROI_MAX_POINTS,
-        DEFAULT_LOCALIZATION_METHOD,
-    )
+    from core.peaks.localize import DEFAULT_LOCALIZATION_METHOD
     from nmrforge_api.peaks import DEFAULT_DETECTION_SIGMA
 
     return {
@@ -305,20 +294,9 @@ def default_snapshot() -> dict[str, Any]:
         "zero_fill": {"default_multiple": 1},
         "localization": {
             "default_method": DEFAULT_LOCALIZATION_METHOD,
-            "gaussian_roi_f1_ppm": DEFAULT_GAUSSIAN_ROI_F1_PPM,
-            "gaussian_roi_f2_ppm": DEFAULT_GAUSSIAN_ROI_F2_PPM,
-            "gaussian_roi_max_points": DEFAULT_GAUSSIAN_ROI_MAX_POINTS,
-            "gaussian_max_nfev": DEFAULT_GAUSSIAN_MAX_NFEV,
-            # strategy when the target list is written per condition and a condition has no rows
             "targets_on_missing": "error",
         },
-        # mirror key of localization.*: downstream reads defaults.gaussian_roi from the spec
-        "gaussian_roi": {
-            "f1_ppm": DEFAULT_GAUSSIAN_ROI_F1_PPM,
-            "f2_ppm": DEFAULT_GAUSSIAN_ROI_F2_PPM,
-            "max_points": DEFAULT_GAUSSIAN_ROI_MAX_POINTS,
-        },
-        "edge_margin": f"{EDGE_MARGIN_LINEWIDTH_FACTOR:g}×linewidth",
+        "edge_margin": "acquisition-gated final-spectrum edge evidence; no blanket mask",
         "detection_sigma": float(DEFAULT_DETECTION_SIGMA),
         "threshold_semantics": "reference-locked",
     }
@@ -341,9 +319,7 @@ def contract_snapshot() -> dict[str, Any]:
     return {
         "peak_table_columns": list(PEAK_TABLE_COLUMNS),
         "records": dict(RECORD_SCHEMAS),
-        "error_codes": [
-            str(name) for name in getattr(errors_module, "__all__", [])
-        ],
+        "error_codes": [str(name) for name in getattr(errors_module, "__all__", [])],
         "warning_codes": sorted(warnings),
     }
 

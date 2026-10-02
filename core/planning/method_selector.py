@@ -46,9 +46,7 @@ def _fnmode_for(experiment: Experiment, axis: str) -> int:
         return 0
 
 
-def select_method(
-    experiment: Experiment, *, baseline: dict | None = None
-) -> ProcessingPlan:
+def select_method(experiment: Experiment, *, baseline: dict | None = None) -> ProcessingPlan:
     """Build the default processing plan: per dimension SP -> ZF -> FT -> PS -> POLY (baseline
     correction, auto on every dimension by default).
 

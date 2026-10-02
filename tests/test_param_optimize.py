@@ -32,9 +32,7 @@ def test_apply_post_params_phase() -> None:
     spec = _synthetic_spectrum()
     corrected = apply_post_params(spec, {"p0": 90.0, "p1": 0.0, "baseline_order": 0})
     # A 90° phase correction moves real-part energy into the imaginary part
-    assert np.abs(np.mean(np.abs(np.real(corrected)))) < np.abs(
-        np.mean(np.abs(np.real(spec)))
-    )
+    assert np.abs(np.mean(np.abs(np.real(corrected)))) < np.abs(np.mean(np.abs(np.real(spec))))
 
 
 def test_optimize_recovers_phase_error() -> None:

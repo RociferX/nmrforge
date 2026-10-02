@@ -86,9 +86,7 @@ def _make_3d(
             for k in range(4, n3 - 4):
                 for j in _trace_positions(n_per_trace, n1):
                     spec += _add(i, j, k, float(rng.uniform(40.0, 80.0)))
-    spec += rng.normal(0.0, 0.1, spec.shape) + 1j * rng.normal(
-        0.0, 0.1, spec.shape
-    )
+    spec += rng.normal(0.0, 0.1, spec.shape) + 1j * rng.normal(0.0, 0.1, spec.shape)
     return spec
 
 
@@ -143,9 +141,7 @@ def test_p0_sum_identifiable_when_all_phased() -> None:
 
 def test_noise_only_returns_none() -> None:
     rng = np.random.default_rng(3)
-    spec = rng.normal(0.0, 1.0, (16, 16, 32)) + 1j * rng.normal(
-        0.0, 1.0, (16, 16, 32)
-    )
+    spec = rng.normal(0.0, 1.0, (16, 16, 32)) + 1j * rng.normal(0.0, 1.0, (16, 16, 32))
     assert search_axis_phase_consensus(spec, axis=2) is None
 
 
@@ -157,12 +153,6 @@ def test_mixed_sign_mode_keeps_negative_peaks() -> None:
     est = search_axis_phase_consensus(spec, axis=2, sign_mode="mixed")
     assert est is not None
     assert _close(est[0], 40.0, 12.0), est
-
-
-
-
-
-
 
     assert est[2] > 50.0, est
 
@@ -196,9 +186,7 @@ def _exact_direct_spectrum(
         t2v = float(rng.uniform(*t2))
         shat = np.where(
             mask,
-            amp * np.exp(-t / t2v) * np.exp(
-                1j * (2 * np.pi * f0 * t / n_dir + np.deg2rad(psi0))
-            ),
+            amp * np.exp(-t / t2v) * np.exp(1j * (2 * np.pi * f0 * t / n_dir + np.deg2rad(psi0))),
             0.0,
         )
         idx = np.unravel_index(flat_idx, shape[:-1])
@@ -208,9 +196,7 @@ def _exact_direct_spectrum(
 
 def test_direct_phase_real_ht_projected_traces() -> None:
     """3D projection traces + HT (positive half, scipy convention) recover the direct p0."""
-    real = _exact_direct_spectrum(
-        (20, 16, 160), 40.0, seed=7, occ=0.15, t2=(4.0, 10.0)
-    )
+    real = _exact_direct_spectrum((20, 16, 160), 40.0, seed=7, occ=0.15, t2=(4.0, 10.0))
     est = search_direct_phase_real_ht(real, axis=-1)
     assert est is not None, "投影迹线应有干净峰"
     # 0.2.199-patch29p: the direct dimension returns a value folded to 0-180° (no forced sign)

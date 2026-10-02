@@ -5,7 +5,8 @@ recalculate the current fingerprint when refreshing the status, and inconsistenc
 (upstream rerun, external modification, script change). The status file is only GUI Used,
 located at the data directory base <exp>/<data>/.pipeline_state.json (cleared with data
 deletion, not part of the contract §9.2 product directory): { "version": 1, "steps": { "fid":
-{"input_hash":..., "script_hash":..., "output":..., "updated_at":...},... } }."""
+{"input_hash":..., "script_hash":..., "output":..., "updated_at":...},... } }.
+"""
 
 from __future__ import annotations
 
@@ -17,14 +18,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from core.data.raw_fingerprint import RAW_KEY_FILES, file_fingerprint
+from core.data.raw_fingerprint import file_fingerprint, raw_key_files
 from core.project.artifacts import find_primary_spectrum
-
-# Step -> Possible workflow ref (used to check recent runs/determine failures). 0.2.199-patch29hz:
-# Pipeline and project tree originally saved one copy each, unified here; Fix 24: Table body sinks
-# core/project/run_refs.py (workflow layer also needs to be used, and gui cannot be relied on in
-# reverse), here re-export the symbol of the same name.
-from core.project.run_refs import (  # noqa: F401  (Continue to use this name externally).
+from core.project.run_refs import (  # noqa: F401
     ALL_STEP_RUN_REFS,
     MANUAL_SPECTRUM_RUN_REFS,
     STEP_RUN_REFS,
@@ -32,9 +28,6 @@ from core.project.run_refs import (  # noqa: F401  (Continue to use this name ex
 
 STATE_VERSION = 1
 STATE_FILENAME = ".pipeline_state.json"
-
-# The file fingerprint comes from core (single source, 2026-09-22): byte-identical to
-# the previous implementation, and shared with the backend reuse check.
 
 
 def _sha256_text(text: str) -> str:
@@ -66,9 +59,7 @@ def save_pipeline_state(manager: Any, exp_id: str, data_id: str, state: dict) ->
     """Atomic write fingerprint state."""
     path = pipeline_state_path(manager, exp_id, data_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(
-        prefix=path.stem + "-", suffix=".tmp", dir=path.parent
-    )
+    fd, tmp = tempfile.mkstemp(prefix=path.stem + "-", suffix=".tmp", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(state, fh, ensure_ascii=False, indent=2)
@@ -81,22 +72,16 @@ def save_pipeline_state(manager: Any, exp_id: str, data_id: str, state: dict) ->
 
 def _raw_dir(manager: Any, exp_id: str, data_id: str) -> Path | None:
     """Parse the original data directory (prioritize the raw copy in the project, fallback to
-    source)."""
+    source).
+    """
     try:
         entry = manager.data(exp_id, data_id)
-    # Directory parsing failure will be handled as no original directory.
-    except Exception:  # noqa: BLE001 -
+    except Exception:  # noqa: BLE001
         return None
     raw = Path(entry.raw_dir) if getattr(entry, "raw_dir", "") else Path(entry.source)
     if not raw.is_absolute():
         raw = manager.root / raw
     return raw if raw.is_dir() else None
-
-
-# Raw data authoritative input file (consistent with sha256:<name> of import WorkflowRun.inputs);
-# processing in raw/ write down/mobile intermediates (fid/, mask/, ft/, etc.) does not count the
-# input fingerprint.
-_RAW_KEY_FILES = RAW_KEY_FILES  # single source: core/data/raw_fingerprint.py (2026-09-22)
 
 
 def raw_fingerprint(manager: Any, exp_id: str, data_id: str) -> str | None:
@@ -106,7 +91,8 @@ def raw_fingerprint(manager: Any, exp_id: str, data_id: str) -> str | None:
     individual files. If the full directory Scanning will cause the import/FID step misjudges
     OUTDATED after "generating spectrum", and each time the data is selected, the full hash of
     the directory will result UI Stuttering (measured 1537 file ~1s/Second-rate). Small files
-    still use content hashing (<= 8MiB) to avoid backend touch-assisted file mtime misjudgment."""
+    still use content hashing (<= 8MiB) to avoid backend touch-assisted file mtime misjudgment.
+    """
     digest = hashlib.sha256()
     meta = manager.data_metadata_path(exp_id, data_id)
     try:
@@ -117,11 +103,24 @@ def raw_fingerprint(manager: Any, exp_id: str, data_id: str) -> str | None:
     raw = _raw_dir(manager, exp_id, data_id)
     if raw is None:
         return digest.hexdigest()
-    for name in _RAW_KEY_FILES:
-        fp = file_fingerprint(raw / name)
-        if fp is None:
-            continue
-        digest.update(f"|{name}:{fp}".encode())
+    raw_dirs = [raw]
+    try:
+        entry = manager.data(exp_id, data_id)
+        for value in list(getattr(entry, "segments", []) or []):
+            segment = Path(value)
+            if not segment.is_absolute():
+                segment = manager.root / segment
+            if segment.is_dir() and segment not in raw_dirs:
+                raw_dirs.append(segment)
+    except Exception:  # noqa: BLE001
+        pass
+    for index, directory in enumerate(raw_dirs):
+        digest.update(f"|dir:{index}:{directory.name}".encode())
+        for name in raw_key_files(directory):
+            fp = file_fingerprint(directory / name)
+            if fp is None:
+                continue
+            digest.update(f"|{name}:{fp}".encode())
     return digest.hexdigest()
 
 
@@ -135,8 +134,7 @@ def _fid_file(manager: Any, exp_id: str, data_id: str) -> Path | None:
         path = Path(candidate)
         if not path.is_absolute():
             path = manager.root / path
-        # 0.2.108: The merge of segmented collection FID is process/merged/fid directory
-        # (incremental test%03d.fid), file or directory are regarded as products.
+
         if path.is_file() or path.is_dir():
             return path
     proc = manager.data_dir(exp_id, data_id, "process")
@@ -154,24 +152,21 @@ def _fid_file(manager: Any, exp_id: str, data_id: str) -> Path | None:
 
 def _spectrum_file(manager: Any, exp_id: str, data_id: str) -> Path | None:
     """Compatible with internal calls; main score search rules are uniformly provided by
-    core.project."""
+    core.project.
+    """
     return find_primary_spectrum(manager, exp_id, data_id)
 
 
 def _peaks_file(manager: Any, exp_id: str, data_id: str) -> Path | None:
     """Peak table file:.list takes priority (peak table is list), CSV is the bottom line."""
     for suffix in (".list", ".csv"):
-        path = manager.data_dir(exp_id, data_id, "peaks") / (
-            f"{exp_id}-{data_id}{suffix}"
-        )
+        path = manager.data_dir(exp_id, data_id, "peaks") / (f"{exp_id}-{data_id}{suffix}")
         if path.is_file():
             return path
     return None
 
 
-def input_fingerprint(
-    manager: Any, exp_id: str, data_id: str, step_id: str
-) -> str | None:
+def input_fingerprint(manager: Any, exp_id: str, data_id: str, step_id: str) -> str | None:
     """Enter your fingerprint in the current step (for status verification)."""
     if step_id in ("import", "fid"):
         return raw_fingerprint(manager, exp_id, data_id)
@@ -184,21 +179,16 @@ def input_fingerprint(
     return None
 
 
-def script_fingerprint(
-    manager: Any, exp_id: str, data_id: str, step_id: str
-) -> str | None:
+def script_fingerprint(manager: Any, exp_id: str, data_id: str, step_id: str) -> str | None:
     """Step script fingerprint (fid.com in process/, old data fallback raw/; spectrum script in
-    process/)."""
+    process/).
+    """
     if step_id == "fid":
         fid_com = manager.data_dir(exp_id, data_id, "process") / "fid.com"
         if not fid_com.is_file():
             raw = _raw_dir(manager, exp_id, data_id)
             fid_com = raw / "fid.com" if raw is not None else None
-        return (
-            file_fingerprint(fid_com)
-            if fid_com is not None and fid_com.is_file()
-            else None
-        )
+        return file_fingerprint(fid_com) if fid_com is not None and fid_com.is_file() else None
     if step_id == "spectrum":
         proc = manager.data_dir(exp_id, data_id, "process")
         try:
@@ -228,7 +218,8 @@ def record_step_success(
     params: dict[str, Any] | None = None,
 ) -> dict:
     """Register the fingerprint of a successful step (input/script/parameter hash) and return the
-    merged status."""
+    merged status.
+    """
     state = load_pipeline_state(manager, exp_id, data_id)
     steps = state.setdefault("steps", {})
     output = ""
@@ -264,4 +255,3 @@ __all__ = [
     "save_pipeline_state",
     "script_fingerprint",
 ]
-

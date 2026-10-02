@@ -8,7 +8,7 @@ Processing), the combination mode **must explicitly specify the reference**.
 ```python
 from nmrforge_api import run_reference_study, run_combination_study
 
-# 1) reference mode: import the data + auto-optimise the reference spectrum/script + two reference peak tables
+# 1) reference mode: import the data + auto-optimise the reference spectrum/script + reference peak table
 reference = run_reference_study(
     "~/studies/hsqc_params",              # study root (reusable / resumable)
     datasets={"A": "~/data/bmr12345/1"},  # condition A (raw Bruker directory)
@@ -23,14 +23,14 @@ result = run_combination_study(
         {"zero_fill": 2},
         {"zero_fill": 1, "window.F1.off": 0.45},
     ],
-    localization="both",                   # parabolic (default)/ gaussian / both
+    localization="parabolic",              # the only supported localisation method
 )
 
 print(result.summary["workflow_ids"])      # ['W0001', 'W0002', 'W0003']
 print(result.summary["reference_spec"])    # the explicitly given reference
 for run in result.runs:
     print(run.workflow_id, run.condition, run.status,
-          run.peak_table_path("parabolic"), run.peak_table_path("gaussian"))
+          run.peak_table_path("parabolic"))
 ```
 
 - The reference mode only builds a reference (1 script + 2 peak tables) and does not run any combination; the peak selection threshold is determined here
@@ -40,8 +40,7 @@ for run in result.runs:
 - **Independent peak selection for combinations** (2026-09-14): Each combination uses the reference locking threshold independently on its own candidate spectrum
   peak selection -> the combination’s own complete peak table; `reference_peak_id`/`assignment`
   stay blank and matching against the reference peak table is done downstream;
-- External specification of refinement method: `localization="parabolic"` (default)/ `"gaussian"` (2D only)/
-  `"both"`(Both peak tables are displayed);
+- Localisation uses three-point parabolic refinement. Requests for removed methods raise an error;
 - `run_parameter_study(...)` is still a one-click convenient entry (internal = reference mode + explicit with research root
   Call combination mode) for quick trial;
 - No external peak table required;`peaks=<external peak table>` There is a public library only on the research side/Used only when the peak table has been assigned;
@@ -67,8 +66,6 @@ study/workflows/W0001/A/peak_table_parabolic.csv      # the default refinement m
 study/workflows/W0001/B/peak_table_parabolic.csv
 ```
 
-(You need to explicitly write `localization="gaussian"` in the Gaussian table, or `"both"` at the same time.
-`peak_table_gaussian.csv`.)
 
 The peak table of the combination mode is the peak table of the spectrum of the combination: `peak_id` is the peak number of this spectrum.
 `reference_peak_id`/`assignment` stay blank -- matching peaks back to reference peak identities, and
@@ -85,10 +82,10 @@ from nmrforge_api import (
 session = open_study("~/studies/step_by_step")          # or a name
 add_dataset(session, "~/data/bmr12345/1", condition="A")
 reference = build_reference(session)                     # reference spectrum + reference script
-reference = ensure_reference_peaks(session, reference)   # peak identity + two reference peak tables
+reference = ensure_reference_peaks(session, reference)   # peak identity + parabolic reference table
 
 plan = plan_sweep(reference, combos=[{"zero_fill": 1}, {"zero_fill": 2}])
-runs = run_sweep(session, plan, reference=reference, localization="both")
+runs = run_sweep(session, plan, reference=reference, localization="parabolic")
 records = write_records(session, references={reference.dataset_key: reference},
                         plan=plan, runs=runs)
 print(records)
@@ -102,7 +99,7 @@ python -m nmrforge_api init      --study ~/studies/s1 --dataset ~/data/b --condi
 python -m nmrforge_api reference --study ~/studies/s1
 python -m nmrforge_api peaks     --study ~/studies/s1
 python -m nmrforge_api sweep     --study ~/studies/s1 --reference ~/studies/s1 \
-    --combos design.csv --localization both
+    --combos design.csv --localization parabolic
 python -m nmrforge_api status    --study ~/studies/s1
 python -m nmrforge_api report    --study ~/studies/s1
 ```

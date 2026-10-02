@@ -39,9 +39,7 @@ class _TempWorkspace:
 
     def list_projects(self):
         return sorted(
-            p
-            for p in self.root.iterdir()
-            if p.is_dir() and (p / "project.json").is_file()
+            p for p in self.root.iterdir() if p.is_dir() and (p / "project.json").is_file()
         )
 
     def create_project(self, name: str, **kwargs):
@@ -80,10 +78,7 @@ class _BatchController:
         if progress:
             progress(f"{group_id}: 1/2 完成")
         ids = list(self.member_ids)
-        results = {
-            d: {"data_id": d, "status": "success", "steps": {}, "error": ""}
-            for d in ids
-        }
+        results = {d: {"data_id": d, "status": "success", "steps": {}, "error": ""} for d in ids}
         results[ids[-1]] = {
             "data_id": ids[-1],
             "status": "failed",
@@ -153,9 +148,7 @@ def test_drag_drop_import(
     manager = ProjectManager.create_project(ws / "proj", "demo")
     entry = manager.create_experiment("HSQC")
     manager.save()
-    monkeypatch.setattr(
-        "gui.main_window.WorkspaceManager", lambda: _TempWorkspace(ws)
-    )
+    monkeypatch.setattr("gui.main_window.WorkspaceManager", lambda: _TempWorkspace(ws))
     monkeypatch.setattr(
         "core.workspace.WorkspaceManager",
         lambda *a, **k: _TempWorkspace(ws),
@@ -172,16 +165,22 @@ def test_drag_drop_import(
     window._handle_dropped_import_paths([bruker_dir / "hsqc_2d", bad])
     entry_now = manager.project.experiment(entry.id)
     assert len(entry_now.data) == 1
-    assert any(
-        "缺少 acqus" in text or "既不是 Bruker 数据集" in text
-        for text in shown
-    )
+    assert any("缺少 acqus" in text or "既不是 Bruker 数据集" in text for text in shown)
+
+    shown.clear()
+    container = tmp_path / "container"
+    container.mkdir()
+    for name in ("segA", "segB"):
+        (container / name).mkdir()
+        (container / name / "acqus").write_text("x", encoding="utf-8")
+    window._handle_dropped_import_paths([container])
+    assert len(manager.project.experiment(entry.id).data) == 1
+    assert shown, "多数据集容器应给出拒绝提示"
+    assert any("segA" in text and "segB" in text for text in shown)
     window.close()
 
 
-def test_settings_defaults_and_roundtrip(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_settings_defaults_and_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from gui import settings as settings_module
 
     cfg = tmp_path / "nmrforge.local.yaml"
@@ -199,17 +198,13 @@ def test_settings_defaults_and_roundtrip(
         "15N": 0.2,
         "13C": 0.2,
     }
-    settings_module.save_settings(
-        {"linewidth_hz": {"1H": 10}}
-    )
+    settings_module.save_settings({"linewidth_hz": {"1H": 10}})
     loaded2 = settings_module.load_settings()
     assert loaded2["linewidth_hz"]["1H"] == 10
     assert loaded2["linewidth_hz"]["15N"] == 15
     assert loaded2["linewidth_hz"]["13C"] == 20
     # overriding only the 1H tolerance keeps 15N/13C at their defaults
-    settings_module.save_settings(
-        {"alignment_tolerance_ppm": {"1H": 0.05}}
-    )
+    settings_module.save_settings({"alignment_tolerance_ppm": {"1H": 0.05}})
     loaded3 = settings_module.load_settings()
     assert loaded3["alignment_tolerance_ppm"]["1H"] == 0.05
     assert loaded3["alignment_tolerance_ppm"]["15N"] == 0.2
@@ -268,12 +263,7 @@ def test_settings_path_appimage_uses_user_config(
 
     monkeypatch.setattr(settings_module, "is_appimage", lambda: True)
     path = settings_module._settings_path()
-    assert path == (
-        Path.home()
-        / ".config"
-        / "NMRForge"
-        / settings_module.SETTINGS_FILENAME
-    )
+    assert path == (Path.home() / ".config" / "NMRForge" / settings_module.SETTINGS_FILENAME)
 
 
 def test_settings_dialog_hides_simple_mode_in_appimage(
@@ -284,17 +274,13 @@ def test_settings_dialog_hides_simple_mode_in_appimage(
     from gui.dialogs import SettingsDialog
 
     monkeypatch.setattr(settings_module, "is_appimage", lambda: True)
-    monkeypatch.setattr(
-        settings_module, "load_settings", lambda: dict(settings_module.DEFAULTS)
-    )
+    monkeypatch.setattr(settings_module, "load_settings", lambda: dict(settings_module.DEFAULTS))
     dialog = SettingsDialog()
     assert not dialog.simple_mode_check.isVisible()
     dialog.close()
 
 
-def test_data_root_path_fallback_to_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_data_root_path_fallback_to_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """0.2.199-patch29gg: an invalid/empty data_root falls back to the user home directory."""
     from pathlib import Path as _Path
 

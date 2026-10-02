@@ -75,16 +75,18 @@ def _write_ft2(path: Path) -> Path:
             "FDF1QUADFLAG": 1,
             "FDF2QUADFLAG": 1,
             "FDDIMORDER": [2, 1],
+            "FDDIMORDER1": 2,
+            "FDDIMORDER2": 1,
             "FDF1LABEL": "N15",
             "FDF2LABEL": "H1",
             "FDF1SW": str(N15_SW),
             "FDF1OBS": str(N15_OBS),
             "FDF1CAR": str(N15_CAR),
-            "FDF1ORIG": "0",
+            "FDF1ORIG": str(N15_CAR * N15_OBS - N15_SW / 2 + N15_SW / N15_SIZE),
             "FDF2SW": str(H1_SW),
             "FDF2OBS": str(H1_OBS),
             "FDF2CAR": str(H1_CAR),
-            "FDF2ORIG": "0",
+            "FDF2ORIG": str(H1_CAR * H1_OBS - H1_SW / 2 + H1_SW / H1_SIZE),
         }
     )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,7 +105,7 @@ class _DocBackend:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    def convert_to_fid(self, experiment, data_dir, progress=None, **_kwargs) -> dict:
+    def convert_to_fid(self, experiment, data_dir, progress=None, params=None, **_kwargs) -> dict:
         work = self._work()
         (work / "fid.com").write_text("#!/bin/csh\n", encoding="utf-8")
         fid = work / f"{experiment.dataset_id}.fid"
@@ -177,8 +179,7 @@ def _documented_summary_keys() -> list[tuple[str, str, bool]]:
     for path in targets:
         text = path.read_text(encoding="utf-8", errors="replace")
         rel = path.relative_to(ROOT).as_posix()
-        statistical = ("uncertainty_summary" in text
-                       or "position_uncertainty" in text)
+        statistical = "uncertainty_summary" in text or "position_uncertainty" in text
         for match in SUMMARY_ACCESS.finditer(text):
             found.append((rel, match.group(1), statistical))
         if statistical:
@@ -187,9 +188,7 @@ def _documented_summary_keys() -> list[tuple[str, str, bool]]:
     return found
 
 
-def _run_documented_python_example(
-    code: str, root: Path, dataset: Path
-) -> tuple[Any, set[str]]:
+def _run_documented_python_example(code: str, root: Path, dataset: Path) -> tuple[Any, set[str]]:
     """Execute a documentation code block (stand-in backend and temporary paths injected);
     returns (result, the summary fields the code block reads)."""
     import nmrforge_api
@@ -216,9 +215,7 @@ def _run_documented_python_example(
     return namespace.get("result"), used
 
 
-def test_readme_python_api_example_runs(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_readme_python_api_example_runs(tmp_path: Path, bruker_dir: Path) -> None:
     """The README Python API example runs verbatim, and the summary fields it reads really exist."""
     code = _readme_python_api_block()
     result, used = _run_documented_python_example(
@@ -233,9 +230,7 @@ def test_readme_python_api_example_runs(
     )
 
 
-def test_documented_summary_keys_come_from_the_real_api(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_documented_summary_keys_come_from_the_real_api(tmp_path: Path, bruker_dir: Path) -> None:
     """Every ``*.summary["field"]`` appearing in the documentation must be a really
     returned field."""
     result, _used = _run_documented_python_example(
@@ -308,10 +303,10 @@ def test_measure_only_example_runs(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     out = tmp_path / "tables"
-    assert module.main(["--spectrum", str(spectrum), "--peaks", str(peaks),
-                        "--out", str(out)]) == 0
-    for method in ("parabolic", "gaussian"):
-        assert (out / f"peak_table_{method}.csv").is_file()
+    assert module.main(["--spectrum", str(spectrum), "--peaks", str(peaks), "--out", str(out)]) == 0
+
+    assert (out / "peak_table_parabolic.csv").is_file()
+    assert not (out / "peak_table_gaussian.csv").exists()
 
 
 def test_study_example_scripts_run(tmp_path: Path, bruker_dir: Path) -> None:
@@ -330,11 +325,19 @@ def test_study_example_scripts_run(tmp_path: Path, bruker_dir: Path) -> None:
         return real_run(root, dataset, **kwargs)
 
     run_study.run_parameter_study = patched_run
-    assert run_study.main([
-        "--study", str(tmp_path / "s1"),
-        "--a", str(bruker_dir / "hsqc_2d"),
-        "--combos", str(combos),
-    ]) == 0
+    assert (
+        run_study.main(
+            [
+                "--study",
+                str(tmp_path / "s1"),
+                "--a",
+                str(bruker_dir / "hsqc_2d"),
+                "--combos",
+                str(combos),
+            ]
+        )
+        == 0
+    )
 
     step = _load_example("step_by_step")
     real_open = step.open_study
@@ -351,11 +354,19 @@ def test_study_example_scripts_run(tmp_path: Path, bruker_dir: Path) -> None:
 
     step.open_study = patched_open
     step.build_reference = patched_build
-    assert step.main([
-        "--study", str(tmp_path / "s2"),
-        "--dataset", str(bruker_dir / "hsqc_2d"),
-        "--combos", str(combos),
-    ]) == 0
+    assert (
+        step.main(
+            [
+                "--study",
+                str(tmp_path / "s2"),
+                "--dataset",
+                str(bruker_dir / "hsqc_2d"),
+                "--combos",
+                str(combos),
+            ]
+        )
+        == 0
+    )
 
 
 def test_example_scripts_parse_their_documented_flags() -> None:

@@ -66,7 +66,7 @@ def test_search_axis_memory_recovers_known_p0_axis0() -> None:
     """A constant -40° phase should be recovered as a correction of about +40° (coarse 30° grid).
 
     0.2.199-patch29dn: on a flat score surface the coarse-grid optimum is kept (no more
-    platform circular median — the median drifts on flat regions, e.g. the sampleI F1 coarse
+    platform circular median — the median drifts on flat regions, e.g. the data/8 F1 coarse
     grid value 90° was dragged to 80°); the recovery precision is therefore the coarse grid
     step (30°) and the tolerance is relaxed to ±15°.
     """
@@ -115,11 +115,7 @@ def test_window_nets_flattens_baseline_before_sign_split() -> None:
 
     base = _complex_axis_2d((64, 48), axis=0)
     real0 = np.real(base)
-    indices = [
-        i
-        for i in range(real0.shape[0])
-        if float(np.max(np.abs(real0[i, :]))) > 0
-    ]
+    indices = [i for i in range(real0.shape[0]) if float(np.max(np.abs(real0[i, :]))) > 0]
     positions = [int(np.argmax(np.abs(real0[i, :]))) for i in indices]
 
     nets_flat = _window_nets(real0, 0, indices, positions)
@@ -179,9 +175,7 @@ def test_joint_recheck_tie_keeps_fixed() -> None:
     arrays = {"F1": arr0, "F2": arr1}
     index = {"F1": 0, "F2": 1}
     traces = {"F1": est0.traces, "F2": est1.traces}
-    best, best_score, fixed_score, zero_score = joint_recheck_memory(
-        arrays, index, traces, fixed
-    )
+    best, best_score, fixed_score, zero_score = joint_recheck_memory(arrays, index, traces, fixed)
     # Flat p1: the joint optimum is not significantly better than sequential (or the gate updates)
     assert best_score - fixed_score < PHASE_SCORE_FLAT_MARGIN + 1e-9
     assert fixed_score >= zero_score - 1e-9
@@ -217,16 +211,18 @@ def test_joint_recheck_row_scoring_matches_full_array() -> None:
             idx, pos = traces[axis]
             vals.append(
                 score_axis_memory(
-                    arrays[axis], index[axis],
-                    ph[axis][0], ph[axis][1], idx, pos,
+                    arrays[axis],
+                    index[axis],
+                    ph[axis][0],
+                    ph[axis][1],
+                    idx,
+                    pos,
                 )
             )
         return float(np.mean(vals))
 
     best_ref = max(combos, key=ref_score)
-    best, best_score, fixed_score, zero_score = joint_recheck_memory(
-        arrays, index, traces, fixed
-    )
+    best, best_score, fixed_score, zero_score = joint_recheck_memory(arrays, index, traces, fixed)
     assert best == best_ref, (best, best_ref)
     assert abs(best_score - ref_score(best_ref)) < 1e-6
     assert abs(fixed_score - ref_score(fixed)) < 1e-6

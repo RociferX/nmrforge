@@ -366,299 +366,198 @@ class Spectrum3D:
   Automatically enter 2D/3D mode according to dimension number;
 - The 3D peak table columns (F1/F2/F3_shift) are mapped according to the current slice plane axis label, and the linkage is not affected
 
-## 11. External interface contract: `nmrforge_api` (v1.0 - first version; specification finalised 2026-09-13, released as the first version on 2026-09-22)
+## 11. External interface contract: `nmrforge_api` (API_VERSION = "1.0")
 
-Status: implemented. Source of specification: user 2026-09-13 "API specification update"; compliance ledger.
-API_CONTRACT.md;External documents `docs/external-api/`.
-
-Positioning: a **parameter-combination processing executor**. Input: raw NMR data + a user parameter
-combination table. Output: traceable peak tables and processing records. The software performs
-processing only and is **not** responsible for statistical inference or scientific conclusions.
+The public Python and CLI interface is versioned independently from the desktop UI. Its purpose is to
+run processing studies and archive provenance, not to perform downstream statistical inference or
+make scientific conclusions. Current public details are also summarized in the
+[external API guide](external-api/README.md).
 
 ### 11.1 Workflow semantics
 
 ```text
-Raw data(A/B…)
-    ↓  reference workflow (auto-optimised): 1 reference processing script + 2 reference peak tables
-Reference workflow
-    ↓  user parameter combination table: one workflow_id per row (W0001, W0002, ...)
-User-defined workflow ensemble
-    ↓  the reference script is the template: only the parameters named for that combination are replaced, then the processing runs automatically
-Processed spectra (per workflow × per condition)
-    ↓  every combination picks peaks independently on its own spectrum using the reference-locked threshold, then refines them with localization
-Parabolic / Gaussian peak tables
+Bruker datasets and conditions
     ↓
-Complete provenance + QC (three parameter layers, script/spectrum hashes, full logs, versions, status)
+Reference workflow: processed spectrum + executed script + peak identities
+    ↓
+User-defined parameter rows or axes (one workflow_id per combination)
+    ↓
+Candidate processing per workflow × condition
+    ↓
+Independent peak detection + three-point parabolic localization
+    ↓
+Unified peak table + records, hashes, versions, logs, status, and warnings
 ```
 
-- The reference is only used as a benchmark for subsequent parameter perturbations, and does not claim global optimality;
-- Sampling routing: **actually fully sampled** data (labelled NUS but `nuslist` covers the whole
-  grid, or a 2D `ser` covering the whole grid with no zero rows) is processed as **uniform**
-  (SMILE is not run), and the effective sampling plus its evidence go into the reference/run
-  records; real NUS goes through `reconstruct_nus`;
-- Two conditions of data: the same workflow uses the same copy of `parameters_requested` for A/B, and outputs each
-  Peak table(`A_raw -> W0037 -> A_peak_table`,`B_raw -> W0037 -> B_peak_table`);
-- **Independent peak selection for combinations** (2026-09-14): each combination picks peaks on **its
-  own candidate spectrum** with the reference-locked threshold, producing that combination's own
-  complete peak table with `reference_peak_id`/`assignment` left blank. Matching against the
-  reference peak table is done externally (downstream analysis); the threshold is determined in
-  reference mode only and locked throughout (writing a threshold key in a combination table raises
-  `SweepError`). The refinement method is chosen by `localization` (parabolic default / gaussian,
-  2D only / both); combination mode has no `max_peaks`;
-- Software final boundary: **do not add** statistical inference, significance testing or scientific
-  conclusions (those are done by downstream analysis from the unified peak table). The σ/Δδ
-  summary **does not enter the processing contract or the `records/` products**, but the code
-  (`nmrforge_api/uncertainty.py`) is kept as a **test/detection aid**: the processing chain
-  (study/sweep/records/CLI) does not call it.
+- Each condition has its own reference and effective parameter base. A workflow row is shared
+  across conditions; each condition is processed against its own reference.
+- The reference is a reproducible baseline for parameter perturbation, not a claim of global
+  optimality.
+- Each combination selects peaks independently on its candidate spectrum with the reference-locked
+  threshold. Combination-table `reference_peak_id` and `assignment` remain blank; matching is
+  downstream.
+- Statistical summaries, significance testing, assignment, and scientific conclusions are outside
+  this interface.
 
-### 11.2 Public (`nmrforge_api/__init__.py`, `API_VERSION = "1.0"`; defined once in `nmrforge_api.session`)
+Sampling is classified from supported metadata, grid coverage, and schedule order. Only a standard
+`nuslist` or a file explicitly named by `acqus.NUSLIST` is used. A complete schedule in standard
+order may take the uniform route; complete coverage in a different order still requires
+schedule-based placement. Explicit NUS with a missing or unrecoverable schedule is rejected at
+import. Trailing block padding is not an unsampled point. 2D NUS combinations use SMILE; 3D NUS
+currently supports reference construction only.
+
+### 11.2 Public entry points
 
 ```python
-# two modes (2026-09-14): reference mode builds the reference; combination mode must be given the reference explicitly
 run_reference_study(root, dataset=None, *, datasets=None, params=None,
-                    # params may carry reference_optimize(**testing/reproduction only**,
-                    # forbidden for real experiments; see external-api/05 §5.10)
-                    phase_route=None, peaks=None, sigma_multiplier=None,
-                    max_peaks=0, localization_method="parabolic",
-                    gaussian_roi_f1_ppm=None, gaussian_roi_f2_ppm=None,
+                    phase_route=None, peaks=None, direct_range=None,
+                    sigma_multiplier=None, max_peaks=0,
                     backend=None, write=True, progress=None) -> ReferenceResult
+
 run_combination_study(reference, *, combos=None, axes=None, max_runs=256,
-                      localization="parabolic", edge_margin_ppm=None,
-                      roi_f1_ppm=None, roi_f2_ppm=None, resume=True,
+                      localization="parabolic", localize_peaks=None,
+                      edge_margin_ppm=None, direct_range=None,
+                      allow_ext_override=False, resume=True,
                       backend=None, write=True, progress=None) -> StudyResult
-                      # window_pts/window_ppm/sign are kept but no longer used (compatibility)
-parse_reference_spec(spec) -> ReferenceHandle
-resolve_reference(spec, *, backend=None) -> (StudySession, DatasetRef, ReferenceSpectrum)
-write_reference_records(session, references) -> dict[str, str]
-# one-step convenience entry point (internally = reference mode + combination mode, passing the study root as the explicit reference)
-run_parameter_study(root, dataset=None, *, datasets=None, axes=None, combos=None,
-                    name="", params=None, phase_route=None, peaks=None,
-                    sigma_multiplier=None, max_peaks=0, max_runs=256,
-                    window_pts=None, window_ppm=None, sign="abs",
-                    roi_f1_ppm=None, roi_f2_ppm=None,
-                    localization="parabolic",        # combination-mode refinement method
-                    localization_method="parabolic",
-                    gaussian_roi_f1_ppm=None, gaussian_roi_f2_ppm=None,
-                    resume=True, backend=None, write=True, progress=None)
-open_study / add_dataset(session, source, condition="A") / dataset_info
-build_reference / load_reference / load_references / set_reference_peaks
-ensure_reference_peaks / build_reference_peak_tables /
-rebuild_reference_peak_tables / pick_reference_peaks
-measure_peak_positions / read_reference_peaks / window_points_by_axis
-detect_and_localize        # combination-mode independent peak picking (rows: peak_id = index in this spectrum, reference_peak_id="")
+
+run_parameter_study(root, dataset=None, *, datasets=None, combos=None, axes=None,
+                     name="", params=None, phase_route=None, peaks=None,
+                     sigma_multiplier=None, max_peaks=0, max_runs=256,
+                     localization="parabolic", localize_peaks=None,
+                     direct_range=None, allow_ext_override=False,
+                     resume=True, backend=None, write=True, progress=None)
+
+open_study / add_dataset / dataset_info
+build_reference / load_reference / load_references
+pick_reference_peaks / set_reference_peaks / ensure_reference_peaks
+build_reference_peak_tables / rebuild_reference_peak_tables
 plan_sweep / run_sweep / load_plan / load_runs / load_workflows
+detect_and_localize / measure_peak_positions / read_reference_peaks
+read_localization_targets / resolve_localization_targets
 write_records / write_peak_table / read_peak_table / peak_table_rows
 expand_grid / combos_from_rows / load_combo_table / write_combo_table
-design_diagnostics / infer_axes / merge_overrides / sanitize_sweep_params
-workflow_id_for / workflow_summary / reference_peak_id
+compat_manifest / compat_status / record_stamp / check_conformance
 ```
 
-CLI:`python -m nmrforge_api {init,reference,peaks,sweep(=workflows),report,status}`.
+The API version is `API_VERSION = "1.0"`. See the external API pages for exact signatures,
+arguments, return structures, and errors. The command line is `python -m nmrforge_api` with
+`init`, `reference`, `peaks`, `sweep`, `report`, `status`, and `compat` subcommands.
 
-### 11.3 Stable return structure
+### 11.3 Reference, combination, and targeting rules
 
-- `DatasetRef`(exp_id/data_id/**condition**/ndim/nuclei/sampling/source/raw_dir);
-- `ReferenceSpectrum`(condition, frozen spectrum and script path + SHA-256, valid parameter +
-  `direct_phase` (PS for each axis, **actual results** of automatic phase identification) +
-  `sampling_flags` (**derived read-only**: the FT sign/direction choice settled when the
-  reference was built, e.g. `{"ft_neg_f1": true}` (the alias `flip_f1` is synonymous; user,
-  2026-09-25: "building a reference through the API has to take `neg` in as well") -
-  combinations reuse the same set,
-  and it must not be used as a sweep axis) + reference peak identity table.
-  (`reference.list` + SHA-256 + peak number + source auto|external|shared:<condition>)+.
-  **Two reference peak tables** `reference_peak_table_parabolic.csv` /.
-  `reference_peak_table_gaussian.csv`(path + SHA-256 + Number of lines/detected count)+.
-  Positioning QC + version table); the reference records both ``software_version`` and
-  ``software_commit`` (the latter from ``NMRFORGE_GIT_COMMIT`` or `git rev-parse`);
-  ``direct_range`` = ``{ext_lo, ext_hi, unit, source}`` (``source`` in ``explicit`` / ``params`` / ``default``, P1-4, 2026-09-19; ``default`` = the caller gave no range and the backend/config default was used, with a ``warning``); ``rebuild_reference_peak_tables()`` restamps ``software_version``/``software_commit``/``tool_versions`` and refreshes the study-level aggregate ``records/reference.json`` (fixed 2026-09-19);
-- `SweepPlan`(axes/combos/base_overrides/grid_sha256 with reference hash/design/
-  diagnostics/`workflow_ids()`);
-- `SweepRun`(one workflow x one condition):`workflow_id`, `condition`
-  `parameters_requested`, `parameters_used`, `parameters_resolved`
-  (phase `phase_mode`/`actual_p0`/`actual_p1`, SMILE actual `nsigma`/`thresh`.
-  Spectral noise σ), `base_script`(reference script path + SHA-256), script /spectral path + SHA-256.
-  `peak_tables`(path selected for refinement + SHA-256 + number of lines), `peak_localization`.
-  `script_diff`(Refer to the difference between script vs this workflow script).
-  (detected/rollback/hit boundary count), `window`(axis-by-axis physical width ↔ points conversion), `log_path`.
-  (full log), `versions`(nmrforge/python/rely/NMRPipe/SMILE), `status`∈.
-  {`success`, `success_with_warning`, `failed`}, `warnings`(code + count + peak);
-- `StudyResult`(session/plan/references/runs/workflows/summary/records).
+- Reference generation selects an identity table (automatically or from an external peak table),
+  freezes its threshold, and writes one `reference_peak_table_parabolic.csv`.
+- `sigma_multiplier` is selected while building the reference (default 35). Once frozen, a
+  different threshold in a sweep is rejected; rebuild the reference to change it.
+- Combination mode requires an explicit reference and exactly one of `combos` or `axes`.
+  Rows execute in the supplied order; axes expand as a Cartesian product. The API does not invent
+  a parameter design.
+- `localization` accepts only `parabolic`. Removed Gaussian or mixed-method requests raise an
+  explicit error; they are never silently substituted.
+- `localize_peaks` or the method-independent `localization.targets` column can limit which
+  detected peaks receive localization. Detection, row count, and per-spectrum `peak_id` numbering
+  do not change. Unlisted peaks remain at their detection-stage coordinates and unrun localization
+  fields are `NaN`, not failures.
+- A target list may be a sequence of per-spectrum peak IDs or a CSV with `peak_id`. It can include
+  a `condition` column, or be provided per condition. By default, a condition with no target rows
+  fails before processing. `on_missing="all"` or `"none"` must be explicit to choose a different
+  policy. Missing files, empty lists, missing columns, unknown conditions, or unknown peak IDs do
+  not silently broaden the target set.
+- Axial screening has no unconditional edge band. It requires compatible experiment/acquisition
+  evidence and many narrow, aligned candidates at original spectrum edges. Internal peaks,
+  isolated edge peaks, and uncertain cases are retained. `edge_margin_ppm` is a manual override
+  distinct from automatic screening and is recorded separately.
+- Peak height, threshold, SNR, and reference measurements share the global-median background
+  convention. It does not modify the spectrum. Automatic sign selection follows experiment
+  templates; phase-sensitive COSY/NOESY/ROESY preserve both signs. Explicit sign requests take
+  precedence.
+- Reference alignment does not modify spectra. Low-quality or ambiguous alignment is reported;
+  it must not silently discard candidate peaks.
 
-### 11.4 Peak table field (the two algorithms have the same structure, now 29 columns)
+### 11.4 Stable records and peak-table schema
+
+The unified `PEAK_TABLE_COLUMNS` schema has 27 columns:
 
 ```text
 workflow_id, condition, dataset,
 peak_id, reference_peak_id, assignment,
-H_ppm, N_ppm, intensity,
-SNR, detected, localization_method,
-localization_requested, fallback, fallback_reason,
-fit_success, FWHM_H, FWHM_N,
-fit_rmse, boundary_hit, duplicate_localization,
-cell_low_H, cell_high_H, cell_low_N,
-cell_high_N, cell_edge, intensity_ratio_vs_picked,
+H_ppm, N_ppm, intensity, SNR, detected, localization_method,
+fallback, fallback_reason, fit_success, FWHM_H, FWHM_N,
+boundary_hit, duplicate_localization, cell_low_H, cell_high_H,
+cell_low_N, cell_high_N, cell_edge, intensity_ratio_vs_picked,
 shift_vs_picked_H, shift_vs_picked_N
 ```
 
-The eight new columns (P1-3, 2026-09-19) describe the **reference** table only,
-i.e. the result of relocating records from the peak identity table:
+- `peak_id` is local to a single spectrum. `reference_peak_id` (`R0001`...) belongs to the
+  reference identity table; combination tables leave reference identity and assignment blank.
+- Reference tables may retain identity rows with `detected=false`; combination tables contain
+  only detected peaks.
+- `localization_method` is `parabolic`, the only supported method.
+  `fit_success`, `FWHM_H`, `FWHM_N`, and `boundary_hit` describe parabolic localization.
+  `fallback` and `fallback_reason` are compatibility/QC fields and do not imply a switch to
+  another algorithm. There is no `fit_rmse` or `localization_requested` column.
+- `duplicate_localization` flags shared coordinates; it does not drop rows.
+- Reference-only cell and identity fields describe reference measurement. They are `NaN` in
+  combination tables, where detection and localization occur in one pass.
+- Intensity is signed relative to the documented global-median background; SNR is the absolute
+  height divided by robust noise. Missing or unrun localization metrics remain missing rather than
+  being fabricated.
 
-- `cell_low_*` / `cell_high_*` (int): the effective search interval (the 1.5x linewidth
-  window intersected with the exclusive cell), a **closed** interval in data-axis
-  integer indices; with `exclusive_windows=False` (the historical wording) they hold the
-  window bounds that wording actually used;
-- `cell_edge` (bool): the extremum sits on the **exclusive-cell** edge (the neighbour's
-  cell cut it short). It is orthogonal to `window_edge`, which tracks the physical window
-  edge; with the historical wording it is always `false`;
-- `intensity_ratio_vs_picked` (float): **|measured intensity| / |the identity
-  table's Height|** (both sides in magnitude - a negative-peak `.list` carries a
-  negative Height; fixed 2026-09-19); NaN when the Height is missing or zero. About 1
-  means the record
-  stopped on its own peak top, clearly above 1 means a shoulder of a stronger peak;
-- `shift_vs_picked_H` / `shift_vs_picked_N` (float, ppm, sign = measured - picked, same
-  axis and direction as `H_ppm`/`N_ppm`): the per-axis shift. The 15N ppm axis runs
-  opposite to the data index, so do not read the sign backwards;
-- **combination (workflow) tables write `NaN` in all eight columns**: the sweep path
-  picks and localizes in one step, so there is no identity-then-relocate step and
-  writing 1.0/0 would be fabricated information (the same rule as the gaussian-only
-  columns in parabolic tables);
-- `duplicate_localization` (bool, P2-5, 2026-09-19): true when the row shares its
-  coordinates with another row of the same table (ppm to 1e-6); every row of a
-  duplicated group is flagged and no row is dropped or removed from the peak set.
-  Both the reference and the combination tables carry the marker: after the
-  exclusive-cell fix the reference table can only collide when two records round to
-  the same grid point, while the combination table still collides when the peak
-  picker's sub-grid refinement pulls two neighbouring detections into one cell;
-- the frozen record `reference.json.peak_localization.<method>` also carries the
-  summaries `n_cell_edge`, `n_duplicate` (= rows minus unique coordinates) and the
-  `n`/`median`/`max` of `intensity_ratio_vs_picked`; every
-  `run.json.peak_localization.<method>` carries `n_duplicate` too, and a table with
-  shared coordinates adds a `duplicate_localization` entry (code plus row count) to
-  `run.json.warnings`.
+Each run records requested, used, and resolved parameters; reference and script/spectrum hashes;
+tool/software versions; logs; status; and warning codes. Records distinguish requested values from
+values actually applied. A failure or recommendation must not be reported as a completed
+correction.
 
-- Column order = code block below = `nmrforge_api.peak_tables.PEAK_TABLE_COLUMNS`(only source
-  `tests/test_api_docstrings.py` column-by-column comparison);
-- `peak_id` is the peak number of this spectrum (this workflow x this condition);
-- `localization_method` is the **actual** method, `localization_requested` is the **request** method;
-  If the two are different, a rollback occurs. For the reason, see `fallback`/`fallback_reason`;
-- `reference_peak_id`(R0001…) is established from the reference peak table (undetected peaks in the reference peak table are retained
-  `detected=false` row); the combination mode selects peaks independently from 2026-09-14, and this column of the combination peak table is the same as.
-  `assignment` left blank, and matching is done downstream;
-- **Since P3-7 (2026-09-19) a parabolic table carries real QC as well**: `fit_success` /
-  `FWHM_H` / `FWHM_N` / `boundary_hit` come from the three-point parabola (equivalent
-  linewidth `FWHM = 2.3548 * sigma` with `sigma^2 = H/(2|a|)`; a vertex offset on the
-  +/-0.5 point limit sets `boundary_hit`), so the two tables are directly comparable;
-  only `fit_rmse` stays Gaussian-only (the three-point parabola is an exact solve) and
-  is written as `NaN` in a parabolic table;
-- Fitting failures and fallbacks (`fallback` / `fallback_reason` / `fit_success`) must be
-  written peak by peak, never silently; a Gaussian failure or fallback writes
-  `fit_success=false`, and only a missing key leaves `NaN`.
-- Reference peak table coordinates are unique row by row: with the default
-  `measure_peak_positions(exclusive_windows=True)` each reference peak's search region is
-  truncated at the midpoints to its neighbours, so two reference records are never relocated
-  onto the same grid point (fixed 2026-09-19; `False` reproduces the previous wording);
-  records that round to the same grid point are the resolution limit and are recorded as-is.
-
-### 11.5 Product structure (relative research root)
+### 11.5 Product layout
 
 ```text
 study/
-  reference/<exp>_<data>/   reference.json, process.com, reference.list,
-                            reference_peak_table_{parabolic,gaussian}.csv
+  reference/<key>/
+    reference.json
+    process.com
+    reference.list
+    reference_peak_table_parabolic.csv
   workflows/W0001/
-      workflow.json         combination-level record (three parameter layers / status / warnings / per-condition products / versions)
-      log.txt               combination-level full log
-      <condition A|B>/      process.com, spectrum.ft2, peak_table_*.csv of the selected method,
-                            log.txt, run.json
-  records/                  manifest.json, sweep_plan.json, runs.json,
-                            workflows.json, measurement.json,
-                            peak_table_*.csv of the selected method (long table)
+    workflow.json
+    log.txt
+    <condition>/
+      process.com
+      spectrum.ft2 or spectrum.ft3
+      peak_table_parabolic.csv
+      run.json
+      log.txt
+  records/
+    manifest.json
+    sweep_plan.json
+    runs.json
+    workflows.json
+    measurement.json
+    peak_table_parabolic.csv
 ```
 
-### 11.6 Strong constraint (breaking it is considered breaking the contract)
+The exact set of files depends on the operation and dimensionality. See
+[Outputs and records](external-api/06-outputs-and-records.md) for field meanings and warning
+codes.
 
-1. Do not import Qt/gui; do not modify GUI status;
-2. Do not replace project activity spectrum: candidate spectrum write only `study/workflows/`;
-3. Within the same condition, fid is only converted once (refer to run); only the scanned parameters are allowed to be different between workflows.
-   (phase is locked at the reference value by default, and the deviation is `phase_delta.<axis>.p0|p1`);
-4. Use reference script as template: each condition is valid according to "its own reference parameter -> batch.
-   `base_overrides` -> Combining the explicit key "generates `parameters_used`; must not copy the basis of other conditions;
-5. Each workflow x and each condition must contain: complete script, unified peak table of the selected positioning method, complete log, parameter three layers.
-   Version, status (three values) and warning;
-6. Automatic parameter must record **actual result**(`actual_p0/actual_p1`, SMILE actual.
-   `nsigma`/`thresh` and spectral noise σ),Gaussian fail/Fallbacks must be explicitly documented;
-7. If a single condition fails, the entire round will not be interrupted: status `failed` + reason for placing the order;
-8. **Do not do** statistics/significance/conclusion; do not automatically generate parameter space.
-   (`combos=` is executed as is, `axes` is just a convenience entry);
-9. Parameter is illegal error/warning: lock key error, certainty/Unknown key write `notes`;
-10. Peak window/Gaussian ROI Defined by **physical width** (ppm), the number of points is converted according to the current spectral point distance during runtime.
-    The conversion results must be kept on file (`run.json.window`, `records/measurement.json`).
+A direct-dimension extraction range is given in ppm as `(high, low)`. In reference mode it is part
+of the reference definition. In combination mode, an override that differs from the frozen range
+is rejected unless `allow_ext_override=True`; accepted overrides are recorded as warnings.
+Records retain the effective range and its source.
 
-To change the contract, you need to follow the Proposal process in §7; to add a new parameter axis, you do not need to change the contract (the period key is common).
+### 11.6 Compatibility and contract changes
 
-## Targeted localization and the behaviour manifest (2026-09-19/20)
+`compat_manifest()` and `python -m nmrforge_api compat` report behaviour and contract fingerprints.
+Compatibility levels are:
 
-- **Targeted localization**: a combination table's `localization.targets` (= a CSV path;
-  relative paths resolve against the combination table's directory), the CLI
-  `--localize-peaks` / `--localize-peaks-gaussian` / `--localize-peaks-parabolic` and the API
-  `localize_peaks=` let only the listed peaks take that method's refinement. **Detection, row
-  count and `peak_id` numbering are unchanged**; unlisted peaks stay, positioned by the
-  detection-stage three-point parabola, with that method's QC columns as `NaN` (not fitted, not
-  a failure); a per-peak failure still records `fit_success=false` + `fallback_reason` and
-  **never** re-fits another candidate; an empty target list / a missing file / a missing
-  `peak_id` column / an unknown `peak_id` all raise (never a silent fallback to the whole
-  spectrum). Recorded in `parameters_resolved.detection.localization_targets`
-  (scope/source/path/sha256/n_targets/peak_ids) and in `peak_localization.<method>`'s
-  `n_targeted`/`n_skipped`/`localization_scope`; no targets = the whole spectrum (default
-  behaviour unchanged).
-- **Per method** (2026-09-20): `localize_peaks` / `localization.targets` accept a mapping --
-  `localize_peaks={"gaussian": csv}` or the key `localization.targets.gaussian` (method keys
-  beat the method-independent one; `all`/`*` give a shared default; relative paths still
-  resolve against the table directory). The record keeps the method-independent view at the top
-  level and adds `by_method` detail (`scope` is `mixed` when methods differ).
-- **Condition granularity** (2026-09-20): the target list may be written per (workflow,
-  condition). The CSV may carry a `condition` column, and each condition then reads only its
-  own rows with `peak_id` validated against **that condition's spectrum**; without the column
-  one list serves the batch (recorded as `by_condition: "all"`). A condition with no rows fails
-  **before processing** by default (`on_missing="all"|"none"` lets it through and is recorded),
-  an unknown condition name raises, and an empty file / missing `peak_id` column keeps the
-  existing errors. The mapping forms `{"A": "a.csv", "B": "b.csv"}`,
-  `{"default": ..., "by_condition": {...}}` and the combination-table cell
-  `"{A: a.csv, B: b.csv}"` are equivalent. The record gains `by_condition` (per-condition
-  `peak_ids`/`n_targets`/`line_ranges`/source path + SHA-256); detection and `peak_id`
-  numbering stay, and `n_targeted`/`n_skipped` stay per run.
-- **Behaviour fingerprint and change levels** (2026-09-20): `compat_manifest()` / the CLI
-  `python -m nmrforge_api compat [--out FILE] [--golden]` publish `nmrforge_api.compat.v1` --
-  `behavior_digest` (content SHA-256 over `core/`+`backend/`+`workflow/`+`nmrforge_api/` and
-  the shipped data `nmrforge_data/config/nmrforge.yaml` + `nmrforge_data/presets/`, computed over **line-ending-normalised
-  bytes** so one commit fingerprints identically on Windows and Linux), `token_digest` (AST
-  normalised, comments/docstrings stripped, comparable across editions), `compat_level`
-  (`same`/`additive`/`behavior_changed`/`contract_changed`, plus `unverified` when the working
-  tree and the declaration disagree), `affected` (the downstream steps a behaviour change
-  touches: `reference`/`processing`/`sweep_detection`/`localization`/`records`/
-  `api_surface`/`cli`/`qc`),
-  `contracts` (peak-table columns + record schema + error and warning codes), `defaults`
-  (built-in defaults, including the `gaussian_roi` mirror keys) and `golden` (the golden
-  vector). `run.json` / `records/reference.json` / `records/manifest.json` write
-  `behavior_digest`/`token_digest`/`compat_level`/`compat_affected`/`compat_verified` next to
-  `versions`. The declaration lives in `nmrforge_api/compat_declaration.py` (pure data,
-  excluded from the fingerprint) and `tests/test_compat.py` guards "fingerprint not updated /
-  level inconsistent with affected / `same` with changed tokens / golden vector not
-  reproducible"; this round is declared **additive** (downstream need not re-run).
+- `same`: no externally observable behaviour or contract change;
+- `additive`: a new optional entry point or field that does not require downstream recomputation;
+- `behavior_changed`: numerical or processing behaviour changed; name affected areas;
+- `contract_changed`: output fields, columns, error codes, or public call contracts changed.
 
-```python
-run_combination_study(reference, *, combos=None, axes=None, max_runs=256,
-                      localization="parabolic", localize_peaks=None,
-                      edge_margin_ppm=None,
-                      roi_f1_ppm=None, roi_f2_ppm=None, resume=True,
-                      backend=None, write=True, progress=None) -> StudyResult
+Do not claim `same` when behaviour or API tokens changed. Update the public documentation and
+compatibility declaration together. The optional golden vector checks deterministic behaviour; it
+is not a scientific validation benchmark.
 
-detect_and_localize(spectrum, *, sigma_multiplier=None, edge_margin_ppm=None,
-                    edge_margin_points=None, method="parabolic", roi_f1_ppm=None,
-                    roi_f2_ppm=None, sign_mode="dominant", axes=None,
-                    targets=None, allow_empty_targets=False)
-
-read_localization_targets / resolve_localization_targets / LocalizationTargets
-resolve_localization_targets_by_method / split_target_specs / combine_target_specs
-compat_manifest / compat_status / record_stamp / write_compat_manifest
-check_conformance / golden_hashes   # golden vector (behaviour self-proof)
-```
+To change this contract, update implementation, tests, API documentation, and compatibility
+metadata together. Keep Qt/UI dependencies out of `nmrforge_api`. Do not overwrite the active
+spectrum with a sweep candidate; candidates and records belong under the study's workflow tree.

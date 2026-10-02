@@ -143,7 +143,6 @@ def nmrpipe_fid_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return path
 
 
-
 @pytest.fixture
 def bruker_dir(tmp_path: Path) -> Path:
     """Bruker test dataset fixture directory (each test gets its own copy).

@@ -1,5 +1,6 @@
 """Project-management domain module: projects/experiments/samples/run records/audit history (the
-GUI foundation)."""
+GUI foundation).
+"""
 
 from core.project.manager import ProjectError, ProjectManager
 from core.project.models import (

@@ -64,6 +64,8 @@ class Sampling:
     schedule_type: str = ""
     confidence: float = 1.0
     evidence: list[str] = field(default_factory=list)
+    schedule_file: str = ""
+    schedule_source: str = ""
 
 
 @dataclass

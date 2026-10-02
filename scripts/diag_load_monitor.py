@@ -101,17 +101,36 @@ def main() -> None:
     t1, i1 = _stat()
     with open(args.csv, "w", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(["t", "uptime_s", "cpu_pct", "mem_used_gb", "mem_avail_gb",
-                    "swap_used_gb", "loadavg", "boot_changed"])
+        w.writerow(
+            [
+                "t",
+                "uptime_s",
+                "cpu_pct",
+                "mem_used_gb",
+                "mem_avail_gb",
+                "swap_used_gb",
+                "loadavg",
+                "boot_changed",
+            ]
+        )
         while time.time() - t0 < args.duration:
             time.sleep(args.interval)
             t2, i2 = _stat()
             dt = (t2 - t1) - (i2 - i1)
             busy = 100.0 * dt / max(1, (t2 - t1))
             m = _mem_gb()
-            w.writerow([round(time.time() - t0, 1), round(_uptime(), 1),
-                        f"{busy:.1f}", m["used_gb"], m["avail_gb"], m["swap_gb"],
-                        _loadavg(), _boot_time() != start_boot])
+            w.writerow(
+                [
+                    round(time.time() - t0, 1),
+                    round(_uptime(), 1),
+                    f"{busy:.1f}",
+                    m["used_gb"],
+                    m["avail_gb"],
+                    m["swap_gb"],
+                    _loadavg(),
+                    _boot_time() != start_boot,
+                ]
+            )
             fh.flush()
             t1, i1 = t2, i2
 
@@ -120,9 +139,20 @@ def main() -> None:
         p.terminate()
     for p in procs:
         p.join(timeout=2)
-    print("done wrote=" + args.csv + " load=" + args.load + " threads=" + str(args.threads) +
-          " mem=" + str(args.mem_gb) + "G dur=" + str(args.duration) +
-          "s boot_changed=" + str(_boot_time() != start_boot))
+    print(
+        "done wrote="
+        + args.csv
+        + " load="
+        + args.load
+        + " threads="
+        + str(args.threads)
+        + " mem="
+        + str(args.mem_gb)
+        + "G dur="
+        + str(args.duration)
+        + "s boot_changed="
+        + str(_boot_time() != start_boot)
+    )
 
 
 if __name__ == "__main__":

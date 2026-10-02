@@ -5,9 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def test_csh_runtime_on_line_forwards_lines(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_csh_runtime_on_line_forwards_lines(tmp_path: Path, monkeypatch) -> None:
     """CshRuntime.run(on_line) forwards stdout line by line (stage logs visible in real time)."""
     from backend import runtime as rt
 
@@ -41,7 +39,7 @@ class _ProgressBackend:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"x")
 
-    def convert_to_fid(self, experiment, data_dir, progress=None) -> dict:
+    def convert_to_fid(self, experiment, data_dir, progress=None, params=None) -> dict:
         if progress:
             progress("开始转换 fid")
         fid_path = Path(self.work_dir) / f"{experiment.dataset_id}.fid"
@@ -85,9 +83,7 @@ class _ProgressBackend:
         }
 
 
-def test_stepwise_generate_fid_forwards_progress(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_stepwise_generate_fid_forwards_progress(tmp_path: Path, bruker_dir: Path) -> None:
     from core.project import ProjectManager
     from workflow.stepwise import generate_fid
 
@@ -100,9 +96,7 @@ def test_stepwise_generate_fid_forwards_progress(
     assert "开始转换 fid" in messages
 
 
-def test_stepwise_generate_spectrum_forwards_progress(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_stepwise_generate_spectrum_forwards_progress(tmp_path: Path, bruker_dir: Path) -> None:
     from core.project import ProjectManager
     from workflow.stepwise import generate_fid, generate_spectrum
 

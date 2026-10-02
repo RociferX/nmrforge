@@ -117,6 +117,7 @@ def check_raw_quality(project, exp_id: str, data_id: str) -> dict:
     else:
         ndim = 1 + (raw / "acqu2s").is_file() + (raw / "acqu3s").is_file()
         info[tr("Dimensions")] = f"{ndim}D"
+
         def _nuc(file: Path, key: str) -> str:
             return _param(file, key) if file.is_file() else ""
 
@@ -152,9 +153,8 @@ def check_raw_quality(project, exp_id: str, data_id: str) -> dict:
         if size < 1024:
             issues.append(
                 tr(
-                "The time domain data file is too small (<1KB), and the collection may "
-                "fail",
-            )
+                    "The time domain data file is too small (<1KB), and the collection may fail",
+                )
             )
         if size < 64 * 1024 * 1024:
             snr = _estimate_snr(raw)

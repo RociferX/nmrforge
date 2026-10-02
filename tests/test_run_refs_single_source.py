@@ -16,9 +16,7 @@ def _project(tmp_path: Path, name: str):
 
 def _record(manager, exp_id, data_id, ref, params=None, status="success") -> None:
     inputs = {"data_id": data_id} if data_id else {}
-    run = manager.start_run(
-        exp_id, workflow_ref=ref, inputs=inputs, params=dict(params or {})
-    )
+    run = manager.start_run(exp_id, workflow_ref=ref, inputs=inputs, params=dict(params or {}))
     manager.finish_run(run.run_id, status, message="test")
 
 
@@ -30,9 +28,7 @@ def test_step_run_refs_lives_in_core() -> None:
 
     assert pipeline_state.STEP_RUN_REFS is run_refs.STEP_RUN_REFS
     assert pipeline_state.ALL_STEP_RUN_REFS is run_refs.ALL_STEP_RUN_REFS
-    assert set(run_refs.MANUAL_SPECTRUM_RUN_REFS) <= set(
-        run_refs.STEP_RUN_REFS["spectrum"]
-    )
+    assert set(run_refs.MANUAL_SPECTRUM_RUN_REFS) <= set(run_refs.STEP_RUN_REFS["spectrum"])
     assert "phase_optimize_unified" in run_refs.STEP_RUN_REFS["spectrum"]
 
 

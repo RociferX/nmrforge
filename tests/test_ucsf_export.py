@@ -20,9 +20,7 @@ def test_stepwise_export_ucsf_skips_1d_ft1(monkeypatch) -> None:
         return "boom", "boom"
 
     monkeypatch.setattr(stepwise, "export_ucsf", _boom)
-    path, message = stepwise._export_ucsf(
-        manager, "exp_001", "d_001", "d_001.ft1"
-    )
+    path, message = stepwise._export_ucsf(manager, "exp_001", "d_001", "d_001.ft1")
     assert path is None
     assert "1D" in message
     assert not called  # pipe2ucsf was never really executed
@@ -83,16 +81,12 @@ def test_export_ucsf_exception_removes_stale_target(tmp_path: Path) -> None:
 
 def test_export_ucsf_missing_source_skips(tmp_path: Path) -> None:
     """Source spectrum does not exist: skip, do not call the tool."""
-    path, message = export_ucsf(
-        tmp_path / "missing.ft2", tmp_path / "missing.ucsf"
-    )
+    path, message = export_ucsf(tmp_path / "missing.ft2", tmp_path / "missing.ucsf")
     assert path is None
     assert "源谱不存在" in message
 
 
-def test_export_ucsf_missing_tool_degrades_gracefully(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_export_ucsf_missing_tool_degrades_gracefully(tmp_path: Path, monkeypatch) -> None:
     """No csh/pipe2ucsf here (e.g. a Windows dev box): degrade to None, no exception."""
     source = tmp_path / "d_001.ft2"
     source.write_bytes(b"pipe")

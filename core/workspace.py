@@ -41,11 +41,7 @@ class WorkspaceManager:
     """Workspace: a container of project directories (Shared, contract §9.1)."""
 
     def __init__(self, root: Path | str | None = None) -> None:
-        self.root = (
-            Path(root).resolve()
-            if root is not None
-            else default_workspace_path().resolve()
-        )
+        self.root = Path(root).resolve() if root is not None else default_workspace_path().resolve()
 
     def ensure(self) -> Path:
         """Make sure the workspace directory exists (idempotent) and return the root path."""
@@ -54,18 +50,18 @@ class WorkspaceManager:
 
     def list_projects(self) -> list[Path]:
         """List the project directories inside the workspace (those holding project.json;
-        other directories and files are ignored)."""
+        other directories and files are ignored).
+        """
         if not self.root.is_dir():
             return []
         return sorted(
-            p
-            for p in self.root.iterdir()
-            if p.is_dir() and (p / "project.json").is_file()
+            p for p in self.root.iterdir() if p.is_dir() and (p / "project.json").is_file()
         )
 
     def create_project(self, name: str, **kwargs: object) -> ProjectManager:
         """Create a project directory under the workspace (workspace/<name>/), return a
-        ProjectManager."""
+        ProjectManager.
+        """
         name = _validate_name(name)
         self.ensure()
         root = self.root / name
@@ -106,19 +102,15 @@ class WorkspaceManager:
 
     def rename_project(self, old_name: str, new_name: str) -> Path:
         """Rename a project: validate the new name and check for clashes, move the directory
-        and keep the name in project.json in sync."""
+        and keep the name in project.json in sync.
+        """
         new_name = _validate_name(new_name)
         old_path = (self.root / old_name).resolve()
-        if (
-            not old_path.is_relative_to(self.root)
-            or not (old_path / "project.json").is_file()
-        ):
+        if not old_path.is_relative_to(self.root) or not (old_path / "project.json").is_file():
             raise WorkspaceError(tr("project does not exist: {p0}", p0=old_name))
         new_path = self.root / new_name
         if new_path.exists():
-            raise WorkspaceError(
-                tr("the workspace already has a project: {p0}", p0=new_name)
-            )
+            raise WorkspaceError(tr("the workspace already has a project: {p0}", p0=new_name))
         shutil.move(str(old_path), str(new_path))
         manager = ProjectManager.open_project(new_path)
         manager.project.name = new_name

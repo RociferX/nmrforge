@@ -168,9 +168,7 @@ def main(argv: list[str] | None = None) -> int:
 
     direct = _direct_dependencies()
     rows: list[dict[str, object]] = []
-    for dist in sorted(
-        metadata.distributions(), key=lambda d: (d.metadata["Name"] or "").lower()
-    ):
+    for dist in sorted(metadata.distributions(), key=lambda d: (d.metadata["Name"] or "").lower()):
         name = dist.metadata["Name"] or "?"
         expression, source = _licence_of(dist)
         best, chosen = _best_option(expression)
@@ -209,8 +207,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"audited {len(rows)} installed distributions")
     print(
-        "  permissive                 : "
-        f"{sum(1 for r in rows if r['best_option'] == 'permissive')}"
+        f"  permissive                 : {sum(1 for r in rows if r['best_option'] == 'permissive')}"
     )
     print(
         f"  weak copyleft (LGPL/MPL/..): {len(weak)}"

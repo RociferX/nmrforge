@@ -120,7 +120,6 @@ def golden_hashes(workdir: Path | str | None = None) -> dict[str, Any]:
     spectrum = build_golden_spectrum(base / "conformance.ft2")
     rows, _meta = detect_and_localize(
         spectrum,
-        method="parabolic",
         sigma_multiplier=GOLDEN_SIGMA_MULTIPLIER,
         edge_margin_ppm=GOLDEN_EDGE_MARGIN_PPM,
     )

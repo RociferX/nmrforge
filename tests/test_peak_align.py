@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from workflow.peak_align import (
     MIN_ACCEPTABLE_RATIO,
     TOLERANCE_PPM,
@@ -15,13 +17,22 @@ from workflow.peak_align import (
 )
 
 
-def _hsqc_rows(
-    h_ppm: list[float], n_ppm: list[float]
-) -> list[dict]:
+def _hsqc_rows(h_ppm: list[float], n_ppm: list[float]) -> list[dict]:
     return [
-        {"label": "", "H_shift": h, "N_shift": n, "Intensity": 1.0}
-        for h, n in zip(h_ppm, n_ppm)
+        {"label": "", "H_shift": h, "N_shift": n, "Intensity": 1.0} for h, n in zip(h_ppm, n_ppm)
     ]
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_invalid_reference_coordinate_stops_filtering(value: float) -> None:
+    with pytest.raises(ValueError):
+        filter_by_reference([{"H_shift": 8.0}], [{"H_shift": value}], {})
+
+
+@pytest.mark.parametrize("tolerance", [0.0, -0.01, float("nan"), float("inf")])
+def test_small_reference_filter_rejects_invalid_tolerance(tolerance: float) -> None:
+    with pytest.raises(ValueError):
+        filter_by_reference([{"H_shift": 8.0}], [{"H_shift": 8.0}], {}, tol_ppm={"1H": tolerance})
 
 
 def test_row_coords_2d_and_3d() -> None:
@@ -36,8 +47,7 @@ def test_row_coords_2d_and_3d() -> None:
 
 
 def test_common_nuclei_2d_3d() -> None:
-    cur = [row_coords({"F1_shift": 118.0, "F2_shift": 8.0, "F3_shift": 40.0},
-                      ["15N", "1H", "13C"])]
+    cur = [row_coords({"F1_shift": 118.0, "F2_shift": 8.0, "F3_shift": 40.0}, ["15N", "1H", "13C"])]
     ref = [row_coords({"H_shift": 8.0, "N_shift": 118.0})]
     assert common_nuclei(cur, ref) == ["1H", "15N"]
 
@@ -88,9 +98,7 @@ def test_align_2d_cur_3d_ref_uses_common_nuclei() -> None:
         [30.0, 45.0, 52.0, 40.0],
     ):
         ref.append({"F1_shift": ni, "F2_shift": hi, "F3_shift": ci})
-    result = align_peak_files(
-        cur, ref, ref_nuclei=["15N", "1H", "13C"]
-    )
+    result = align_peak_files(cur, ref, ref_nuclei=["15N", "1H", "13C"])
     assert result["nuclei"] == ["1H", "15N"]
     assert result["status"] == "ok"
     assert result["ratio"] >= 0.9
@@ -116,9 +124,7 @@ def test_shifted_rows_and_filter() -> None:
     assert shifted[0]["N_shift"] == 115.2
     # reference contains only the second peak (after shift)
     ref = _hsqc_rows([8.55, 9.9], [118.2, 130.0])
-    kept, stats = filter_by_reference(
-        rows, ref, shift, tol_ppm={"1H": 0.1, "15N": 0.5}
-    )
+    kept, stats = filter_by_reference(rows, ref, shift, tol_ppm={"1H": 0.1, "15N": 0.5})
     assert len(kept) == 1
     assert kept[0]["H_shift"] == 8.5
     assert stats["removed"] == 1
@@ -126,8 +132,7 @@ def test_shifted_rows_and_filter() -> None:
 
 def test_ratio_denominator_is_smaller_list() -> None:
     """Denominator = min(current count, reference count)."""
-    cur = _hsqc_rows([7.0, 7.5, 8.0, 8.4, 8.8], [110.0, 113.0, 116.0,
-                                                 119.0, 122.0])
+    cur = _hsqc_rows([7.0, 7.5, 8.0, 8.4, 8.8], [110.0, 113.0, 116.0, 119.0, 122.0])
     ref = _hsqc_rows([7.0, 7.5, 8.0], [110.0, 113.0, 116.0])
     result = align_peak_files(cur, ref)
     assert result["total_min"] == 3
@@ -162,11 +167,12 @@ def test_alignment_figure_writes_png(tmp_path: Path) -> None:
     assert written == out
     assert out.is_file()
     assert out.stat().st_size > 1000
-    # 0.2.199-patch29fy: an editable SVG is written alongside the same path
+
     svg = out.with_suffix(".svg")
     assert svg.is_file()
     assert svg.stat().st_size > 100
     assert "<svg" in svg.read_text(encoding="utf-8", errors="ignore")[:2000]
+
 
 def test_constants() -> None:
     """0.2.199-patch29fx: alignment tolerances use Poky kr defaults (1H ±0.02, others ±0.2)."""
@@ -178,11 +184,12 @@ def test_constants() -> None:
 
 def test_matched_pairs_uses_original_row_indices() -> None:
     """0.2.199-patch29fx: when the matrix skips a row without a common nucleus, pairing must
-    return the original row index (otherwise the check plot connects the wrong peaks)."""
+    return the original row index (otherwise the check plot connects the wrong peaks).
+    """
     from workflow.peak_align import matched_pairs
 
     cur = [
-        {"1H": 7.2},  # no 15N: cannot match on common nuclei, so the matrix skips it
+        {"1H": 7.2},
         {"1H": 8.0, "15N": 118.0},
     ]
     ref = [{"1H": 8.0, "15N": 118.0}]

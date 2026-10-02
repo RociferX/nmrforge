@@ -36,8 +36,7 @@ def _auto_2d_nus_fid_com(out_line: str) -> str:
         "  -xN 2048 -yN 254 -xT 1024 -yT 127" + _CONT + "\n"
         f"  {out_line}\n"
         "\n"
-        "nusExpand.tcl -mask -noexpand -mode pipe -sampleCount 32 -avg -off 0"
-        + _CONT + "\n"
+        "nusExpand.tcl -mask -noexpand -mode pipe -sampleCount 32 -avg -off 0" + _CONT + "\n"
         " -in ./test.fid -out ./mask.fid -sample ./nuslist\n"
     )
 
@@ -48,9 +47,7 @@ def test_2d_nus_auto_single_file_out_renamed_to_dataset() -> None:
     exp = read_dataset(BRUKER / "nus_2d")
     assert exp.ndim == 2
 
-    patched, warnings = patch_fid_com(
-        _auto_2d_nus_fid_com("-out ./test.fid -ov"), exp
-    )
+    patched, warnings = patch_fid_com(_auto_2d_nus_fid_com("-out ./test.fid -ov"), exp)
 
     assert f"-out ./{exp.dataset_id}.fid -ov" in patched
     assert any("out:" in w and "test.fid" in w for w in warnings)
@@ -60,9 +57,7 @@ def test_2d_nus_auto_slice_out_left_untouched() -> None:
     """If -AUTO emits slice-style output, no 2D-specific rewriting is done (always follow -AUTO)."""
     exp = read_dataset(BRUKER / "nus_2d")
 
-    patched, _warnings = patch_fid_com(
-        _auto_2d_nus_fid_com("-out ./fid/test%03d.fid -ov"), exp
-    )
+    patched, _warnings = patch_fid_com(_auto_2d_nus_fid_com("-out ./fid/test%03d.fid -ov"), exp)
 
     assert "-out ./fid/test%03d.fid -ov" in patched
 
@@ -102,9 +97,7 @@ def test_build_2d_direct_only_script_trims_before_smile() -> None:
     )
 
     exp = read_dataset(BRUKER / "nus_2d")
-    script = generate_2d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2"
-    )
+    script = generate_2d_nus_script(exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2")
     direct = build_2d_direct_only_script(script)
 
     assert direct.endswith("| pipe2xyz -out nus2d/direct.ft1 -x -ov\n")
@@ -121,6 +114,7 @@ def test_build_2d_direct_only_script_rejects_unknown_shape() -> None:
     from backend.script_generator import build_2d_direct_only_script
 
     assert build_2d_direct_only_script("#!/bin/csh\necho hi\n") == ""
+
 
 def _make_2d_nus_dataset(
     root: Path,
@@ -141,8 +135,7 @@ def _make_2d_nus_dataset(
     ds = root / f"ds_{rows}_{len(keep)}_{dtype_code}"
     ds.mkdir(parents=True, exist_ok=True)
     (ds / "acqus").write_text(
-        f"##$TD= {x_n}\n##$FnMODE= 0\n##$NusAMOUNT= 25\n##$NusTD= 0\n"
-        f"##$DTYPE= {dtype_code}\n",
+        f"##$TD= {x_n}\n##$FnMODE= 0\n##$NusAMOUNT= 25\n##$NusTD= 0\n##$DTYPE= {dtype_code}\n",
         encoding="utf-8",
     )
     (ds / "acqu2s").write_text(
@@ -164,8 +157,7 @@ def _recover(ds: Path) -> tuple[list[int] | None, list[str]]:
     from backend.nmrpipe_backend import NMRPipeBackend
 
     exp = read_dataset(ds)
-    # fully sampled data is already downgraded to uniform when read (2026-09-14); the recovery
-    # function can still be called directly
+
     assert exp.sampling.mode.value in ("nus", "uniform"), exp.sampling.mode
     logs: list[str] = []
     points = NMRPipeBackend(nmrpipe_bin="")._recover_dense_2d_nus(ds, exp, logs)
@@ -206,8 +198,8 @@ def test_recover_dense_2d_nus_sparse_is_refused(tmp_path: Path) -> None:
 
 
 def test_recover_dense_2d_nus_metadata_mismatch_is_refused(tmp_path: Path) -> None:
-    """Rows > declared grid: metadata and the file disagree → returns None."""
-    ds = _make_2d_nus_dataset(tmp_path, rows=512, keep=[0, 1, 2])
+    "Rows > declared grid: metadata and the file disagree → returns None."
+    ds = _make_2d_nus_dataset(tmp_path, rows=512, keep=[0, 1, 2, 200])
 
     points, logs = _recover(ds)
 
@@ -215,38 +207,31 @@ def test_recover_dense_2d_nus_metadata_mismatch_is_refused(tmp_path: Path) -> No
     assert any("不一致" in line for line in logs)
 
 
-def test_recover_dense_2d_nus_all_nonzero(tmp_path: Path) -> None:
-    """No zero rows anywhere on the grid (NusAMOUNT says NUS but the data is fully sampled)
-    → judged uniform on read.
-
-    2026-09-14 (user: "full sampling should go through uniform"): the downgrade happens at
-    the data-reading stage; the recovery function remains directly callable as a defensive
-    entry point and still logs "full sampling".
-    """
+def test_recover_dense_2d_nus_all_nonzero_without_schedule_is_ambiguous(
+    tmp_path: Path,
+) -> None:
+    "Regression coverage: test recover dense 2d nus all nonzero without schedule is ambiguous."
     ds = _make_2d_nus_dataset(tmp_path, rows=256, keep=list(range(128)))
     exp = read_dataset(ds)
-    assert exp.sampling.mode.value == "uniform", exp.sampling.mode
-    assert exp.sampling.schedule_type == "full_sampling"
-    assert exp.sampling.sampling_fraction == pytest.approx(1.0)
-    assert any("满采样" in line for line in exp.sampling.evidence)
+    assert exp.sampling.mode.value == "nus", exp.sampling.mode
+    assert exp.sampling.schedule_type == "params"
 
     points, logs = _recover(ds)
 
-    assert points == list(range(128))
-    assert any("满采样" in line for line in logs)
+    assert points is None
+    assert any("无法区分" in line or "impossible to distinguish" in line for line in logs)
 
 
 def test_full_nuslist_is_uniform(tmp_path: Path) -> None:
     """The nuslist covers the whole grid → effectively full sampling → uniform (no SMILE)."""
     ds = _make_2d_nus_dataset(tmp_path, rows=256, keep=list(range(128)))
-    (ds / "nuslist").write_text(
-        "\n".join(str(k) for k in range(128)) + "\n", encoding="utf-8"
-    )
+    (ds / "nuslist").write_text("\n".join(str(k) for k in range(128)) + "\n", encoding="utf-8")
     exp = read_dataset(ds)
     assert exp.sampling.mode.value == "uniform"
     assert exp.sampling.schedule_type == "full_sampling"
     assert exp.sampling.sampling_fraction == pytest.approx(1.0)
-    assert any("nuslist 覆盖全部 128" in line for line in exp.sampling.evidence)
+    assert exp.sampling.schedule_file == "nuslist"
+    assert exp.sampling.evidence
 
 
 def test_partial_nuslist_stays_nus(tmp_path: Path) -> None:
@@ -264,9 +249,7 @@ def test_partial_nuslist_stays_nus(tmp_path: Path) -> None:
     [list(range(127)) + [0], list(range(127)) + [999]],
     ids=["duplicate_missing", "out_of_range_missing"],
 )
-def test_malformed_full_length_nuslist_stays_nus(
-    tmp_path: Path, coordinates: list[int]
-) -> None:
+def test_malformed_full_length_nuslist_stays_nus(tmp_path: Path, coordinates: list[int]) -> None:
     """Reaching the grid row count with duplicate or out-of-range coordinates does not count
     as full coverage; the NUS path must still be taken."""
     ds = _make_2d_nus_dataset(tmp_path, rows=256, keep=list(range(128)))
@@ -283,9 +266,7 @@ def _finalize(raw: Path, work: Path, ndim: int) -> tuple[bool, list[str]]:
     from backend.nmrpipe_backend import NMRPipeBackend
 
     logs: list[str] = []
-    ok = NMRPipeBackend(nmrpipe_bin="")._finalize_converted_fid(
-        raw, work, "d_001", logs, ndim=ndim
-    )
+    ok = NMRPipeBackend(nmrpipe_bin="")._finalize_converted_fid(raw, work, "d_001", logs, ndim=ndim)
     return ok, logs
 
 
@@ -339,6 +320,7 @@ def test_finalize_2d_multi_slice_falls_back_to_stream(tmp_path: Path) -> None:
     assert (work / "fid").is_dir()
     assert any("切片式 fid" in line for line in logs)
 
+
 def test_recover_dense_2d_nus_float64(tmp_path: Path) -> None:
     """DTYPE=1 (float64): the row count is computed from 8 bytes per sample and read
     correctly (a hard-coded int32 used to misjudge the row count)."""
@@ -370,6 +352,7 @@ def test_recover_dense_2d_nus_unknown_dtype_refused(tmp_path: Path) -> None:
 
     assert points is None
     assert any("DTYPE" in line for line in logs)
+
 
 def test_smile_scan_runs_chosen_mode_once(tmp_path: Path, monkeypatch) -> None:
     """Pick the run mode from the ranking criterion: true-peak-only → full sampling;
@@ -421,8 +404,11 @@ def test_smile_scan_runs_chosen_mode_once(tmp_path: Path, monkeypatch) -> None:
     ran_full: list[str] = []
     _install(monkeypatch, ran_full)
     scan_full = nb.NMRPipeBackend(nmrpipe_bin="").smile_scan(
-        exp, {}, [{"nsigma": 3.0, "thresh": 0.9}],
-        work_dir=tmp_path / "scan_full", holdout_ratio=0.0,
+        exp,
+        {},
+        [{"nsigma": 3.0, "thresh": 0.9}],
+        work_dir=tmp_path / "scan_full",
+        holdout_ratio=0.0,
     )
     smile_full = [s for s in ran_full if "-fn SMILE" in s]
     assert len(smile_full) == 1  # once per candidate
@@ -432,8 +418,11 @@ def test_smile_scan_runs_chosen_mode_once(tmp_path: Path, monkeypatch) -> None:
     ran_ho: list[str] = []
     _install(monkeypatch, ran_ho)
     scan_ho = nb.NMRPipeBackend(nmrpipe_bin="").smile_scan(
-        exp, {}, [{"nsigma": 3.0, "thresh": 0.9}],
-        work_dir=tmp_path / "scan_ho", holdout_ratio=0.5,
+        exp,
+        {},
+        [{"nsigma": 3.0, "thresh": 0.9}],
+        work_dir=tmp_path / "scan_ho",
+        holdout_ratio=0.5,
     )
     smile_ho = [s for s in ran_ho if "-fn SMILE" in s]
     assert len(smile_ho) == 1  # once per candidate
@@ -444,26 +433,19 @@ def test_smile_scan_runs_chosen_mode_once(tmp_path: Path, monkeypatch) -> None:
         assert "nuslist_train" not in scan["candidates"][0]["script"]
 
 
-# ---------------------------------------- Phase 12: sampling detection (metadata vs actual)
-def test_metadata_nus_full_cartesian_degrades_to_uniform(
+def test_metadata_nus_full_cartesian_without_schedule_stays_nus(
     tmp_path: Path,
 ) -> None:
-    """Metadata claims NUS, but the data is complete Cartesian → downgraded to uniform.
-
-    With identical Bruker metadata (NusAMOUNT=25 / NusTD), only whether ``ser`` is non-zero
-    across the whole grid changes: the full grid → judged fully sampled and sent through
-    uniform; one complex point fewer → still NUS ("having data" must not be treated as full
-    sampling -- the boundary the user ruled on 2026-09-14).
-    """
+    "Regression coverage: test metadata nus full cartesian without schedule stays nus."
     complete = _make_2d_nus_dataset(tmp_path, rows=256, keep=list(range(128)))
     exp_dense = read_dataset(complete)
-    assert exp_dense.sampling.mode.value == "uniform"
-    assert exp_dense.sampling.schedule_type == "full_sampling"
-    assert exp_dense.sampling.sampling_fraction == pytest.approx(1.0)
-    assert any("满采样" in line for line in exp_dense.sampling.evidence)
+    assert exp_dense.sampling.mode.value == "nus"
+    assert exp_dense.sampling.schedule_type == "params"
+    assert not any("满采样" in line for line in exp_dense.sampling.evidence)
 
     incomplete = _make_2d_nus_dataset(tmp_path, rows=256, keep=list(range(127)))
     exp_sparse = read_dataset(incomplete)
     assert exp_sparse.sampling.mode.value == "nus"
-    assert exp_sparse.sampling.schedule_type == "params"
+
+    assert exp_sparse.sampling.schedule_type == "zero_trace"
     assert not any("满采样" in line for line in exp_sparse.sampling.evidence)

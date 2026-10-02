@@ -12,11 +12,12 @@
    后续所有 workflow 的模板;
 3. 参考峰位:软件在参考谱上自动选峰(阈值 `sigma_multiplier` 在**生成参考时**
    可由外部指定,缺省 35σ;API `sigma_multiplier=` / CLI `peaks --sigma`),
-   轴峰按物理边距剔除,或使用外部峰表;峰按行序获得稳定身份 `R0001…`;
+   轴峰按采集先验与原始边缘证据保守筛查（显式边距为人工覆盖），或使用外部峰表；
+   峰按行序获得稳定身份 `R0001…`;
    **阈值随参考一起冻结**:后续所有 workflow 只能沿用参考的阈值,给不同阈值
    会报错(要换阈值须重建参考);
-4. 在同一条参考谱上分别用 **parabolic** 与 **2D gaussian** 定位,写两张
-   参考峰表;
+4. 在同一条参考谱上做**三点抛物线**亚像素定位(唯一方法,2026-09-26 起),
+   写一张参考峰表 `reference_peak_table_parabolic.csv`;
 5. 参考只作参数扰动的基准,**不声称全局最优**。
 
 ## 7.2 参数扰动(workflow)
@@ -31,62 +32,44 @@
 
 ## 7.2b 采样路由(满采样 → uniform)
 
-读数据阶段判定有效采样:标注 NUS 但 `nuslist` 覆盖全格,或 2D `ser` 是「全格+
-零填充」且**无零行** → 判为**实际满采样**,`sampling="uniform"`,
-`sampling_schedule="full_sampling"`,并记录证据;处理走 `process()` 常规 FT,
-**不跑 SMILE**。真 NUS(采样表只覆盖子集、或稀疏文件无采样表)仍走
-`reconstruct_nus()`;3D NUS 维持原状(只支持建参考)。
+读数据阶段区分覆盖率与顺序：合法 `nuslist` 满覆盖且为标准栅格顺序，可记录
+`sampling="uniform"` / `sampling_schedule="full_sampling"`，走常规 FT、不跑 SMILE。
+满覆盖但乱序仍按表展开归位；`NusAMOUNT=100` 不等于可以无表处理。
+传统采集的有效网格填满后，尾部全零 padding 不算缺采点。
+明确 NUS 却缺表、位置无法还原时导入拒绝，不将失败数据送入 SMILE。
+2D NUS 支持组合运行；3D NUS 的研究组合边界仍为仅建参考（桌面处理支持 3D NUS）。
 
-## 7.3 两种峰定位
+## 7.3 峰定位:三点抛物线(唯一方法)
 
 | 方法 | 做法 | 适用范围 |
 | --- | --- | --- |
-| `parabolic`(参考方法) | 在参考峰位附近的窗口内取 \|强度\| 极值,再对每个参与轴做 ±1 点三点抛物线亚像素 refine | 任意维 |
-| `gaussian` | 以抛物线的整数格结果为中心,对**同一 candidate** 做 2D 高斯最小二乘拟合(不旋转、轴向可分离,含局部常数基线),给出中心/FWHM/幅度/rmse | **仅 2D** |
+| `parabolic` | 在候选峰附近的窗口内取 \|强度\| 极值,再对每个参与轴做 ±1 点三点抛物线亚像素 refine | 任意维 |
 
-两者对**完全相同的 candidate** 独立运行,结果可直接比较(峰位差即算法差异)。
+**算法选择已取消**(2026-09-26,用户需求⑦):二维高斯最小二乘拟合
+(`core.peaks.gaussian_fit`)与它的 API/CLI/GUI 表面整体删除,峰定位只剩这一种
+方法。`localization` 只接受 `"parabolic"`;请求 `"gaussian"` / `"both"` 抛
+`SweepError` / `LocalizationError` / `MeasurementError`,不静默降级。
 
-- **参考模式**:对参考峰表里的每个峰分别做两种定位,两张参考峰表用同一批
-  `reference_peak_id`;
+- **参考模式**:对参考峰表里的每个峰做抛物线定位,写一张
+  `reference_peak_table_parabolic.csv`;
 - **组合模式**(2026-09-14):每个组合在**自己的候选谱**上先用参考锁定阈值
-  独立选峰,再按 `localization` 精修(parabolic 默认 / gaussian / both),
-  峰表里 `reference_peak_id` 留空——两种方法、不同组合之间的峰匹配由使用者完成。
-
-高斯失败(ROI 太小/不收敛/撞边界/病态)时:回退抛物线位置,并在峰表
-`fallback`/`fallback_reason`/`fit_success` 与 `run.json.peak_localization`
-中逐峰记录原因,workflow 状态升为 `success_with_warning`——**不允许静默**。
-
-### 拟合成本与结果口径(2026-09-14)
-
-逐峰 2D 高斯的成本 = 迭代数 × ROI 点数;三项约束让成本不随填零线性膨胀:
-
-| 机制 | 默认 | 对结果的影响 |
-| --- | --- | --- |
-| 解析式雅可比 | 开启 | **无**:同一模型、同一目标函数与收敛判据;实测峰位差 ≤3e-05 ppm(15N)/3e-06 ppm(1H),方法零翻转、回退计数不变 |
-| 拟合窗口每轴半宽上限(`peaks.localization.gaussian_roi_max_points`) | **0 = 不限制(默认)** | 默认完全不截断 → 结果与旧版一致;设正值(如 48)可限制细网格拟合规模换取速度,**会改结果**:真机 4× 最大 0.39 ppm(3 个峰翻转)、两维 2× 最大 0.71 ppm(1 个翻转);触发逐峰留档 `roi_capped`,截断后拟合失败会自动用完整 ROI 重试(`fit_retry_uncapped`/`retry_n_iter`) |
-| 单峰求值上限(`peaks.localization.gaussian_max_nfev`) | 200 | 只影响原本要跑更多求值的难收敛峰;数值差分时期 1 迭代 ≈7 次求值,解析雅可比下 1 迭代 = 1 次求值,因此 200 求值 ≈ 200 迭代(比原来 ~57 迭代更宽松),只是把“最坏成本”减半 |
-
-真机对照(248 峰跟踪、同参考峰表;默认配置 = 不限制上限):
-
-| 网格 | 旧版 | 新版(默认) | 提速 | 峰位差(15N/1H)/方法翻转 |
-| --- | --- | --- | --- | --- |
-| F1 1× | 2.02 s | 1.46 s | 1.38× | 3e-05 / 3e-06 ppm,0 |
-| F1 2× | 3.67 s | 2.24 s | 1.64× | 7e-06 / 3e-06 ppm,0 |
-| F1 4× | 6.43 s | 3.89 s | 1.65× | 1e-06 / 0 ppm,**0** |
-| F1 2× + F2 2× | 4.98 s | 3.13 s | 1.59× | 0 / 0 ppm,**0** |
-
-若把 `gaussian_roi_max_points` 设为 48(可选):4× 1.73×、两维 2× 1.84×,但代价是
-上面列出的峰位改变(留档可审计)。
+  独立选峰,再做抛物线定位,峰表里 `reference_peak_id` 留空——不同组合之间的
+  峰匹配由使用者完成;
+- **定位 QC 仍逐峰落表**:`fit_success`/`FWHM_H`/`FWHM_N`/`boundary_hit` 由抛物线
+  给出实数(等效线宽 `FWHM = 2.3548σ`,`σ² = H/(2|a|)`;顶点偏移贴 ±0.5 点 =
+  `boundary_hit`);`fallback`/`fallback_reason` 保留在 schema 里
+  (抛物线是确定性闭式解,正常不失败,字段留档是为了记录结构稳定)。
 
 ## 7.4 选峰阈值与边距(物理宽度口径)
 
 - 选峰阈值 = **噪声 σ 倍数**(`sigma_multiplier`,内部同时作为 `min_snr`):
   参考模式确定(缺省 35σ),组合模式**锁定沿用**,逐 workflow 留档
   `parameters_resolved.detection`(`source="reference(locked)"`);
-- 边缘轴峰排除边距默认 = **3×该轴核素线宽(Hz)折算 ppm**
-  (`core.peaks.axis_units`);`edge_margin_ppm` 可显式给物理宽度;
-  运行时按**当前候选谱的点距**换算点数:零填零 k 倍只改点距,不改变边距覆盖
-  的 ppm 宽度;
+- 自动轴峰筛查先核对实验/采集参数与原始边缘位置，再检查大量窄而对齐的边缘候选峰。
+  少量孤立峰、参数冲突和边界未知时保留，不删除最终谱的内部载频峰。
+  `edge_margin_ppm` 是显式人工边距覆盖，运行时按当前谱点距换算；不再默认 3×线宽遮罩。
+- 自动判据与排除计数保存在 `parameters_resolved.detection.axial_screening`；独立低层
+  `detect_and_localize` 缺少 Experiment 时不自动删除边缘峰。
 - 换算结果逐组合留档:`run.json.window`(points/ppm/effective_ppm/
   ppm_per_point/source)与 `records/measurement.json`;
 - 组合模式**没有** `max_peaks`,也没有「参考峰位搜索窗口」(不跟踪参考峰表);
@@ -98,9 +81,18 @@
   参考峰表出现只有 `reference_peak_id` 不同的同坐标重复行(2026-09-19 修;实机上一套
   真实 2D HSQC 的 parabolic 表 253 行只有 184 个唯一坐标)。`exclusive_windows
   =False` 可复现旧口径;
-- 高斯 ROI 同样按物理宽度(ppm)定义(`peaks.localization.gaussian_roi_f1_ppm`
-  / `_f2_ppm`,或函数/CLI 参数),按点距换算点数;
+- 高斯 ROI 与拟合预算(`gaussian_roi_*` / `gaussian_max_nfev`)已随高斯拟合删除
+  (2026-09-26):三点抛物线只需要局部 3 点,没有 ROI 与迭代预算这回事;
 - 结构性点数(局部极大 3 点邻域、抛物线 ±1 点)不换算——它们与分辨率无关。
+
+### 峰高、背景与符号口径
+
+检出峰高、阈值、S/N 和参考测量强度相对全局中位数背景；记录
+`baseline_offset` / `height_reference="global_median_baseline"`，不修改源谱。
+这不是空间变化基线校正，旧表的原始幅度不能与新相对峰高直接算比值。
+自动符号模式依据实验模板，未知/低置信度类型可用强双符号证据兜底；
+相敏 COSY/NOESY/ROESY 保留正负候选，显式 `positive/negative/both/dominant` 请求优先。
+轴坐标按 FDDIMORDER，重复核保留逻辑 F 轴身份；零 ORIG 是有效原点，不能当缺失值。
 
 ### 基线校正口径(2026-09-16 修正)
 
@@ -124,10 +116,9 @@
 | --- | --- |
 | `detected` | 该谱上是否检到该峰(组合模式:表里只有检出的峰 → 恒 true;参考峰表
 跟踪模式下未测到的参考峰会保留行且 `detected=false`) |
-| `intensity` / `SNR` | 极值处的峰强与 `|峰强|/σ`(σ = 该谱 robust MAD 噪声) |
-| `fit_success` / `FWHM_H` / `FWHM_N` / `boundary_hit` | 该行**实际用的定位方法**的 QC(高斯拟合 / 三点抛物线);P3-7(2026-09-19)起 parabolic 也写实数,抛物线给**等效线宽**(`FWHM = 2.3548σ`,`σ² = H/(2|a|)`) |
-| `fit_rmse` | 高斯拟合残差 RMS;**仅高斯有**,parabolic 表写 NaN(三点抛物线是精确解) |
-| `duplicate_localization` | 该行与同表另一行同坐标(ppm 精确到 1e-6,P2-5):重复组每行都标 true、不删行;`peak_localization.<method>.n_duplicate` 记多出来的行数,`run.json.warnings` 另留 `duplicate_localization` 码 |
+| `intensity` / `SNR` | 极值处相对全局中位基线的带符号峰高与 `|峰高|/σ`(σ = 该谱 robust MAD 噪声) |
+| `fit_success` / `FWHM_H` / `FWHM_N` / `boundary_hit` | 三点抛物线的定位 QC:抛物线给**等效线宽**(`FWHM = 2.3548σ`,`σ² = H/(2|a|)`,`boundary_hit` = 顶点偏移贴 ±0.5 点);P3-7(2026-09-19)起写实数 |
+| `duplicate_localization` | 该行与同表另一行同坐标(ppm 精确到 1e-6,P2-5):重复组每行都标 true、不删行;`peak_localization.parabolic.n_duplicate` 记多出来的行数,`run.json.warnings` 另留 `duplicate_localization` 码 |
 | `fallback` / `fallback_reason` | 是否回退与原因 |
 | `cell_low_*` / `cell_high_*` / `cell_edge` / `intensity_ratio_vs_picked` / `shift_vs_picked_*` | 参考表的逐峰**格/身份 QC**(P1-3):最终搜索区间(闭区间,数据轴格点)、极值是否被邻居的格截断、**|测得强度| ÷ |身份表 `Height`|**、measured − picked(ppm);**组合表一律写 NaN**(sweep 是「选峰即定位」,没有这一步) |
 
@@ -138,7 +129,7 @@
 边界)、`boundary`(贴谱边界)、`out_of_range`(参考位置在谱范围外)与 `deltas`
 (相对参考峰位),汇总进 `run.json.peak_localization` 与
 `records/measurement.json`;组合模式改用本谱检出的峰 → 逐峰 QC 为
-`fit_success`/`fit_rmse`/`FWHM_*`/`boundary_hit`/`fallback`。
+`fit_success`/`FWHM_*`/`boundary_hit`/`fallback`。
 
 ## 7.6 测试/检测辅助(不属于处理契约)
 
@@ -147,7 +138,7 @@
 处理链,也不会出现在 `records/` 里;用途是:
 
 - **回归检测**:σ/Δδ 全 0 说明被扫参数被静默忽略(真机历史上出现过该缺陷);
-- **算法对比**:同一批 candidate 下 parabolic 与 gaussian 的峰位差;
+- **跨组合一致性**:同一批 candidate 在不同参数组合间的峰位差;
 - **使用者参考实现**:分析侧可直接复用或照此实现。
 
 ```python

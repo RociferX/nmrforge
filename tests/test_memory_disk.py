@@ -68,22 +68,27 @@ def test_estimate_intermediate_peak_ext_window_params(
     _patch_plan(monkeypatch, {"F1": 512, "F2": 4096})
     exp = _experiment(nus=True)
     # Narrow window 8.5-7.5 (1 ppm of 8 ppm → 1/8): 512→64
-    assert memory_disk.estimate_intermediate_peak(
-        exp, {"final_ext_lo": "8.5", "final_ext_hi": "7.5"}
-    ) == 64 * 4096 * 8 * 2
+    assert (
+        memory_disk.estimate_intermediate_peak(exp, {"final_ext_lo": "8.5", "final_ext_hi": "7.5"})
+        == 64 * 4096 * 8 * 2
+    )
     # "Apply range to optimization" off: intermediates keep the wide default (conservative)
-    assert memory_disk.estimate_intermediate_peak(
-        exp,
-        {
-            "final_ext_lo": "8.5",
-            "final_ext_hi": "7.5",
-            "apply_ext_to_opt": "0",
-        },
-    ) == 256 * 4096 * 8 * 2
+    assert (
+        memory_disk.estimate_intermediate_peak(
+            exp,
+            {
+                "final_ext_lo": "8.5",
+                "final_ext_hi": "7.5",
+                "apply_ext_to_opt": "0",
+            },
+        )
+        == 256 * 4096 * 8 * 2
+    )
     # Explicit ext_lo/ext_hi take precedence
-    assert memory_disk.estimate_intermediate_peak(
-        exp, {"ext_lo": "8.5", "ext_hi": "7.5"}
-    ) == 64 * 4096 * 8 * 2
+    assert (
+        memory_disk.estimate_intermediate_peak(exp, {"ext_lo": "8.5", "ext_hi": "7.5"})
+        == 64 * 4096 * 8 * 2
+    )
 
 
 def test_select_memory_dir_policy_and_conditions(
@@ -98,9 +103,7 @@ def test_select_memory_dir_policy_and_conditions(
     assert memory_disk.select_memory_dir(_experiment(), cfg_off) is None
 
     _patch_plan(monkeypatch, {"F1": 1024, "F2": 8192})  # peak 128MB (×2)
-    monkeypatch.setattr(
-        memory_disk, "system_available_bytes", lambda: 1024 * 1024 * 1024
-    )
+    monkeypatch.setattr(memory_disk, "system_available_bytes", lambda: 1024 * 1024 * 1024)
     mem = memory_disk.select_memory_dir(_experiment(), _big_memory_cfg(tmp_path))
     assert mem is not None and mem.is_dir()
     assert mem.parent == tmp_path
@@ -110,12 +113,8 @@ def test_select_memory_dir_policy_and_conditions(
     assert memory_disk.select_memory_dir(_experiment(), _big_memory_cfg(tmp_path)) is None
 
     # Not enough free space on the memory disk → fall back
-    monkeypatch.setattr(
-        memory_disk, "system_available_bytes", lambda: 1024 * 1024 * 1024
-    )
-    monkeypatch.setattr(
-        memory_disk.shutil, "disk_usage", lambda p: SimpleNamespace(free=1)
-    )
+    monkeypatch.setattr(memory_disk, "system_available_bytes", lambda: 1024 * 1024 * 1024)
+    monkeypatch.setattr(memory_disk.shutil, "disk_usage", lambda p: SimpleNamespace(free=1))
     assert memory_disk.select_memory_dir(_experiment(), _big_memory_cfg(tmp_path)) is None
 
 
@@ -124,17 +123,13 @@ def test_selection_reason_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     cfg_off = {"processing": {"intermediate_memory": "off"}}
     assert "off" in memory_disk.selection_reason(_experiment(), cfg_off)
     _patch_plan(monkeypatch, {"F1": 1024, "F2": 8192})
-    monkeypatch.setattr(
-        memory_disk, "system_available_bytes", lambda: 1024 * 1024 * 1024
-    )
+    monkeypatch.setattr(memory_disk, "system_available_bytes", lambda: 1024 * 1024 * 1024)
     monkeypatch.setattr(
         memory_disk.shutil,
         "disk_usage",
         lambda p: SimpleNamespace(free=1024 * 1024 * 1024),
     )
-    assert memory_disk.selection_reason(
-        _experiment(), _big_memory_cfg(tmp_path)
-    ) == ""
+    assert memory_disk.selection_reason(_experiment(), _big_memory_cfg(tmp_path)) == ""
 
 
 def test_prepare_teardown_disk_mode(tmp_path: Path) -> None:
@@ -150,9 +145,7 @@ def test_prepare_teardown_disk_mode(tmp_path: Path) -> None:
     assert not root.exists()
 
 
-def test_prepare_teardown_memory_mode(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_prepare_teardown_memory_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Enough memory: work/_intermediate is symlinked to the memory directory and teardown
     removes both.
 
@@ -162,12 +155,8 @@ def test_prepare_teardown_memory_mode(
     work = tmp_path / "process"
     work.mkdir(parents=True, exist_ok=True)
     _patch_plan(monkeypatch, {"F1": 1024, "F2": 8192})
-    monkeypatch.setattr(
-        memory_disk, "system_available_bytes", lambda: 1024 * 1024 * 1024
-    )
-    root, mem = memory_disk.prepare_intermediate(
-        work, _experiment(), _big_memory_cfg(tmp_path)
-    )
+    monkeypatch.setattr(memory_disk, "system_available_bytes", lambda: 1024 * 1024 * 1024)
+    root, mem = memory_disk.prepare_intermediate(work, _experiment(), _big_memory_cfg(tmp_path))
     if os.name == "nt" and not root.is_symlink():
         # No Windows symlink permission → real-directory fallback (memory dir already reclaimed)
         assert mem is None
@@ -193,7 +182,7 @@ def test_generate_spectrum_intermediate_subdir_disk(
 
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment()
-    data = manager.import_data(entry.id, "/sampleD")
+    data = manager.import_data(entry.id, "/data/1")
 
     monkeypatch.setattr(
         stepwise,
@@ -214,9 +203,7 @@ def test_generate_spectrum_intermediate_subdir_disk(
 
     monkeypatch.setattr(stepwise, "_generate_spectrum_impl", fake_impl)
     backend = SimpleNamespace(work_dir="")
-    stepwise.generate_spectrum(
-        manager, entry.id, data.id, backend, params={"phase_route": "none"}
-    )
+    stepwise.generate_spectrum(manager, entry.id, data.id, backend, params={"phase_route": "none"})
     expected = manager.data_dir(entry.id, data.id, "process")
     assert calls["work"] == expected
     assert not (expected / memory_disk.INTERMEDIATE_SUBDIR).exists()
@@ -232,7 +219,7 @@ def test_generate_spectrum_intermediate_memory(
 
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment()
-    data = manager.import_data(entry.id, "/sampleD")
+    data = manager.import_data(entry.id, "/data/1")
     work = manager.data_dir(entry.id, data.id, "process")
     work.mkdir(parents=True, exist_ok=True)
     mem = tmp_path / "mem"
@@ -260,8 +247,6 @@ def test_generate_spectrum_intermediate_memory(
 
     monkeypatch.setattr(stepwise, "_generate_spectrum_impl", fake_impl)
     backend = SimpleNamespace(work_dir="")
-    stepwise.generate_spectrum(
-        manager, entry.id, data.id, backend, params={"phase_route": "none"}
-    )
+    stepwise.generate_spectrum(manager, entry.id, data.id, backend, params={"phase_route": "none"})
     assert not (work / memory_disk.INTERMEDIATE_SUBDIR).exists()
     assert not mem.exists()

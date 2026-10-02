@@ -27,6 +27,7 @@ __all__ = ["CATEGORIES", "CATEGORY_MARKERS", "category_of"]
 
 #: filename → category (single source of truth)
 CATEGORIES: dict[str, str] = {
+    "test_peak_pick_audit.py": "regression",
     "test_1d_phase_td.py": "integration",
     "test_1d_processing.py": "unit",
     "test_2d_holdout_skip_log.py": "regression",
@@ -35,6 +36,7 @@ CATEGORIES: dict[str, str] = {
     "test_api_docstrings.py": "regression",
     "test_audit_rest_fixes.py": "regression",
     "test_axis_layout_audit.py": "integration",
+    "test_axial_peaks.py": "regression",
     "test_baseline_optimize.py": "integration",
     "test_baseline_stripe.py": "integration",
     "test_batch.py": "integration",
@@ -50,6 +52,7 @@ CATEGORIES: dict[str, str] = {
     "test_docs_examples.py": "integration",
     "test_direct_diagnostics.py": "integration",
     "test_effective_params.py": "integration",
+    "test_environment_probe.py": "regression",
     "test_final_ext_params.py": "regression",
     "test_field_drift.py": "integration",
     "test_full_paths.py": "integration",
@@ -94,6 +97,8 @@ CATEGORIES: dict[str, str] = {
     "test_nmrpipe_backend.py": "integration",
     "test_nmrpipe_finder.py": "integration",
     "test_nmrpipe_scripts.py": "integration",
+    "test_nus_schedule_discovery.py": "regression",
+    "test_optimization_report.py": "unit",
     "test_ownership.py": "regression",
     "test_param_optimize.py": "unit",
     "test_peak_align.py": "integration",

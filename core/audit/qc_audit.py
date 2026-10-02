@@ -1,14 +1,18 @@
 """Structured, machine-readable audit record for automatic data changes.
 
-Why this exists (Phase 10 of the public-release task): the processing path may repair a bad point,
-zero a corrupted sample, shrink a sampling grid or delete a source block. Every one of those is a
-change to raw or intermediate data, and a log line is not enough evidence - the task requires the
+Why this exists (Phase 10 of the public-release task): the processing path may repair a bad
+point,
+zero a corrupted sample, shrink a sampling grid or delete a source block. Every one of those is
+a
+change to raw or intermediate data, and a log line is not enough evidence - the task requires
+the
 fields
 
     issue_detected / location / detection_rule / action_taken / before_state / after_state /
     timestamp / software_version
 
-so that a reader can see *what* was changed, *where*, *under which rule*, and *what the value was
+so that a reader can see *what* was changed, *where*, *under which rule*, and *what the value
+was
 before and after*. The rule this module implements is:
 
     detect -> flag -> log -> optional correction      (never a silent correction)
@@ -18,8 +22,10 @@ Design notes:
 - One JSONL file per processing work directory (``qc_audit.jsonl``), appended to and flushed per
   record, so a crashed or killed run still leaves the records of what it had already changed.
 - Records are frozen dataclasses; ``before_state``/``after_state`` hold the concrete values, not
-  prose, and ``extra`` carries anything a specific site needs (row/column, axis, dataset id, ...).
-- The timestamp and ``software_version`` (plus the git commit when it is discoverable) are stamped
+  prose, and ``extra`` carries anything a specific site needs (row/column, axis, dataset id,
+  ...).
+- The timestamp and ``software_version`` (plus the git commit when it is discoverable) are
+stamped
   by the log at write time, so a call site cannot forget the provenance.
 - Reading back is part of the API (``read_audit``): tests and the QC report both use it, and a
   reviewer can verify that "no record" means "no change".
@@ -41,6 +47,8 @@ from ui_support.i18n import tr
 __all__ = [
     "AUDIT_FILENAME",
     "SCHEMA_VERSION",
+    "SOURCE_CLEAN_ACTION",
+    "audit_action_label",
     "QcAction",
     "QcAuditLog",
     "audit_path",
@@ -49,6 +57,22 @@ __all__ = [
 
 #: File name inside a processing work directory.
 AUDIT_FILENAME = "qc_audit.jsonl"
+
+# Stable machine-readable action code. Never translate values written to JSONL; render them only
+# when presenting the audit summary. Older builds translated this field before persistence, which
+# made the history reader locale-dependent and hid source bad-point cleanup from the middle panel.
+SOURCE_CLEAN_ACTION = "removed_from_source_ser_and_nuslist"
+REPORTED_ONLY_ACTION = "reported_only"
+
+
+def audit_action_label(action: str) -> str:
+    """Render stable persisted action codes without making ``tr()`` dynamic."""
+    if action == SOURCE_CLEAN_ACTION:
+        return tr("removed_from_source_ser_and_nuslist")
+    if action == REPORTED_ONLY_ACTION:
+        return tr("reported_only")
+    return action
+
 
 #: Bumped when the record layout changes in a way a reader must know about.
 SCHEMA_VERSION = 1
@@ -93,7 +117,8 @@ class QcAction:
     """One automatic change to raw or intermediate data.
 
     ``before_state`` / ``after_state`` should contain the values that changed (for example
-    ``{"point": 123.5}`` -> ``{"point": 0.0}``); ``extra`` is for context that does not belong in
+    ``{"point": 123.5}`` -> ``{"point": 0.0}``); ``extra`` is for context that does not belong
+    in
     the "before/after" pair, such as the row and column of a repaired sample.
     """
 
@@ -151,7 +176,8 @@ def audit_path(work_dir: Path | str) -> Path:
 def read_audit(work_dir: Path | str) -> list[QcAction]:
     """Read the records for one work directory (empty list when nothing was recorded).
 
-    A malformed line is skipped rather than raising: an audit file that cannot be fully parsed must
+    A malformed line is skipped rather than raising: an audit file that cannot be fully parsed
+    must
     not make a finished run unreadable, and the remaining records are still evidence.
 
     Parameters
@@ -198,8 +224,10 @@ def read_audit(work_dir: Path | str) -> list[QcAction]:
 class QcAuditLog:
     """Append-only writer for :data:`AUDIT_FILENAME` inside one work directory.
 
-    Use :meth:`record` for each change. ``enabled=False`` produces a log that accepts records and
-    discards them (used where a caller has no work directory yet); it never raises, so a call site
+    Use :meth:`record` for each change. ``enabled=False`` produces a log that accepts records
+    and
+    discards them (used where a caller has no work directory yet); it never raises, so a call
+    site
     does not need a branch.
     """
 
@@ -261,15 +289,15 @@ class QcAuditLog:
     def summary(self) -> str:
         """One-line summary for the run log: only the records written through **this**
         instance (count and breakdown share the same scope); empty when nothing was
-        recorded."""
+        recorded.
+        """
         if not self._enabled or not self._count:
             return ""
         # 2026-09-23: count and breakdown both come from this instance's records
         actions = Counter(self._actions)
-        detail = ", ".join(f"{name} {n}" for name, n in sorted(actions.items()))
+        detail = "、".join(f"{audit_action_label(name)} {n}" for name, n in sorted(actions.items()))
         return tr(
-            "QC audit records: {p0} entries ({p1}) → "
-            "{p2}",
+            "QC audit records: {p0} entries ({p1}) → {p2}",
             p0=self._count,
             p1=detail,
             p2=self._path,

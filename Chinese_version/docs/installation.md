@@ -5,11 +5,14 @@
 两条路都可以:**Linux AppImage**(自带 Python 与 Qt,不需要系统环境,界面中英随系统区域切换;见
 [Releases](https://github.com/RociferX/nmrforge/releases)),或者从仓库做可编辑安装:
 
+当前源码以 Linux 为目标平台。发布 AppImage 是固定构建快照；后续源码功能不会自动进入旧产物，
+请核对发布说明与 `BUILD_INFO.txt`。文档更新不表示重新构建了 AppImage。
+
 ```bash
 git clone https://github.com/RociferX/nmrforge.git
 cd nmrforge
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 python -m pip install -e ".[test]"
 python main.py
 ```
@@ -40,7 +43,7 @@ chmod +x NMRForge-1.0.1-x86_64.AppImage
 git clone <this repository>
 cd nmrForge
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
@@ -53,7 +56,7 @@ pip install -e ".[docs]"    # 文档工具链
 ```
 
 `python main.py` 会在首次运行时创建本地 `nmrforge/` 虚拟环境,之后复用。
-将来的 AppImage 会包住同一个入口点。
+AppImage 使用随构建固定的内置入口。
 
 可编辑安装会暴露一个命令行脚本:
 
@@ -61,8 +64,8 @@ pip install -e ".[docs]"    # 文档工具链
 | --- | --- |
 | `nmrforge-viewer` | 独立谱图查看器(`python -m viewer` 也可以) |
 
-主 GUI 刻意不发布成命令行脚本,因为它依赖仓库根目录的资源(决定 PACK-015)。
-在可编辑检出里请用 `python main.py`。
+主 GUI 在源码检出里用 `python main.py`；独立查看器也提供上面的命令行入口。
+运行资源由 `nmrforge_data` 随包分发，不再要求只能可编辑安装（旧 PACK-015 限制已解除）。
 
 处理命令行在 `nmrforge_api` 包里:
 
@@ -83,7 +86,7 @@ python examples/quickstart.py example_data/hsqc_2d
 GUI 测试需要显示器,或者 offscreen 的 Qt 平台:
 
 ```bash
-QT_QPA_PLATFORM=offscreen python -m pytest -q      # Windows: set QT_QPA_PLATFORM=offscreen
+QT_QPA_PLATFORM=offscreen python -m pytest -q
 ```
 
 ## 升级与卸载

@@ -39,7 +39,8 @@ def _require_data(manager: ProjectManager, exp_id: str, data_id: str) -> Any:
 
 def _read_experiment(manager: ProjectManager, exp_id: str, data_id: str) -> Experiment:
     """Read the Experiment from the data entry (prioritize the raw copy in the project; use each
-    segment directory for single data segment collection)."""
+    segment directory for single data segment collection).
+    """
     data_entry = _require_data(manager, exp_id, data_id)
     if data_entry.segments:
         # Segmented collection: source is the container directory (without acqus), and each segment
@@ -91,7 +92,7 @@ def _apply_gui_type_override(
         import json
 
         payload = json.loads(path.read_text(encoding="utf-8"))
-        et = ((payload.get("dataset") or {}).get("experiment_type") or {})
+        et = (payload.get("dataset") or {}).get("experiment_type") or {}
         if not et:
             return
         evidence = [str(e) for e in (et.get("evidence") or [])]
@@ -100,9 +101,7 @@ def _apply_gui_type_override(
         name = str(et.get("name", "") or "")
         if not name:
             return
-        experiment.experiment_type = ExperimentType(
-            name=name, confidence=1.0, evidence=evidence
-        )
+        experiment.experiment_type = ExperimentType(name=name, confidence=1.0, evidence=evidence)
     except Exception:
         return
 
@@ -148,9 +147,7 @@ def _rewrite_duplicate_nucleus_labels(
         # Re-review index priority: direct dimension > acqu2 > acqu3 (2D:F2 direct dimension,
         # F1=acqu2;3D:F3 direct dimension, F2=acqu2, F1=acqu3).
         priority = ["F2", "F1"] if ndim == 2 else ["F3", "F2", "F1"]
-        labels = [
-            str(dic.get(f"{_fdf(i)}LABEL", "") or "") for i in range(ndim)
-        ]
+        labels = [str(dic.get(f"{_fdf(i)}LABEL", "") or "") for i in range(ndim)]
         counts: dict[str, int] = {}
         for lbl in labels:
             counts[lbl] = counts.get(lbl, 0) + 1
@@ -181,7 +178,8 @@ def _register_spectrum(
     spectrum_path: str,
 ) -> str:
     """Return the final spectrum produced by the backend to <exp_id>/<data_id>/spectra/ (move,
-    process does not leave a copy) and register it."""
+    process does not leave a copy) and register it.
+    """
     source = Path(spectrum_path)
     spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
     spectra_dir.mkdir(parents=True, exist_ok=True)
@@ -221,7 +219,8 @@ def _export_ucsf(
 
 def _ensure_work_dir(backend: Any, work: Path) -> None:
     """Pin the backend working directory to the data-level directory (when backend.work_dir is
-    writable)."""
+    writable).
+    """
     if hasattr(backend, "work_dir"):
         backend.work_dir = str(work)
 
@@ -254,6 +253,7 @@ def generate_fid(
     *,
     work_dir: Path | str | None = None,
     progress: Callable[[str], None] | None = None,
+    params: dict[str, Any] | None = None,
 ) -> str:
     """Step 2: Convert Bruker raw data to NMRPipe fid (independent phase)."""
     experiment = _read_experiment(manager, exp_id, data_id)
@@ -263,7 +263,9 @@ def generate_fid(
         data_dir = manager.root / data_dir
     work = Path(work_dir) if work_dir else _work_dir(manager, exp_id, data_id)
     _ensure_work_dir(backend, work)
-    resp = backend.convert_to_fid(experiment, data_dir, progress=progress)
+    resp = backend.convert_to_fid(
+        experiment, data_dir, params=dict(params or {}), progress=progress
+    )
     logs = list(resp.get("logs", []))
     if not resp.get("success"):
         raise StepwiseError(
@@ -289,10 +291,10 @@ def generate_fid(
     return fid_path
 
 
-
 def _apply_note_overrides(manager, exp_id: str, data_id: str, experiment) -> None:
     """Override the automatic classification and presets with the data note (experiment type /
-    peak sign), 0.2.199-patch29hc."""
+    peak sign), 0.2.199-patch29hc.
+    """
     try:
         project = getattr(manager, "project", None)
         if project is None:
@@ -306,12 +308,14 @@ def _apply_note_overrides(manager, exp_id: str, data_id: str, experiment) -> Non
         tname = str(note.get("experiment_type", "") or "").strip()
         if tname:
             from gui.notes import experiment_type_options
+
             if tname in experiment_type_options(experiment.ndim):
                 # 0.2.199-patch29hc: Fill in the type name string, and an ExperimentType object
                 # (.name/.confidence/.evidence) must be constructed, otherwise the downstream
                 # select_method/ import_workflow will report an AttributeError when
                 # accessing.confidence.
                 from core.data.internal_data_model import ExperimentType
+
                 experiment.experiment_type = ExperimentType(
                     name=tname, confidence=1.0, evidence=["data_note"]
                 )
@@ -324,7 +328,8 @@ def _apply_note_overrides(manager, exp_id: str, data_id: str, experiment) -> Non
 
 def _default_phase_route(experiment) -> str:
     """Pick the default phase_route by dimensionality: 1D has no indirect dimension, so it goes
-    straight to process (patch29gj)."""
+    straight to process (patch29gj).
+    """
     return "none" if int(getattr(experiment, "ndim", 2) or 2) == 1 else "unified"
 
 
@@ -349,7 +354,8 @@ def generate_spectrum(
       (escape hatch).
 
     0.2.199-patch29ey: when work_dir is not given explicitly, the intermediate spectrum working
-    directory is placed on the RAM disk adaptively via processing.intermediate_memory (when there
+    directory is placed on the RAM disk adaptively via processing.intermediate_memory (when
+    there
     is enough free memory) and removed as a whole afterwards.
     """
     experiment = _read_experiment(manager, exp_id, data_id)
@@ -360,7 +366,8 @@ def generate_spectrum(
         """Sweep leftover unified intermediates of this dataset (0.2.199-patch29gi).
 
         Runs once before and once after: the first pass clears what the previous hard interrupt
-        (SIGKILL / power loss) left behind, the second (including on exception) clears this run's
+        (SIGKILL / power loss) left behind, the second (including on exception) clears this
+        run's
         leftovers; only intermediates are deleted, the final spectrum / final script / fid stay.
         """
         from workflow.phase_routes import _cleanup_unified_intermediates
@@ -383,11 +390,12 @@ def generate_spectrum(
             work, experiment, params=params
         )
         if memory_dir is not None and progress is not None:
-            progress(tr(
-                "Intermediate spectrum working directory using ramdisk (adaptive): "
-                "{p0}",
-                p0=_intermediate_root,
-            ))
+            progress(
+                tr(
+                    "Intermediate spectrum working directory using ramdisk (adaptive): {p0}",
+                    p0=_intermediate_root,
+                )
+            )
         elif progress is not None:
             _reason = memory_disk.selection_reason(experiment, params=params)
             progress(
@@ -423,7 +431,8 @@ def _generate_spectrum_impl(
     progress: Callable[[str], None] | None = None,
 ) -> str:
     """Original generate_spectrum principal (working directory has been determined by the outer
-    layer)."""
+    layer).
+    """
     experiment = _read_experiment(manager, exp_id, data_id)
     params = dict(params or {})
     route = str(params.pop("phase_route", _default_phase_route(experiment)))
@@ -443,16 +452,20 @@ def _generate_spectrum_impl(
             resp = backend.reconstruct_nus(experiment, params, progress=progress)
         else:
             workflow_ref = "process"
-            resp = backend.process(
-                experiment, plan, params=params, progress=progress
-            )
+            resp = backend.process(experiment, plan, params=params, progress=progress)
         logs = list(resp.get("logs", []))
         if not resp.get("success"):
             raise StepwiseError(
-                str(resp.get("message", tr(
-                    "Spectrum generation "
-                    "failed",
-                ))) + " | " + " | ".join(logs)
+                str(
+                    resp.get(
+                        "message",
+                        tr(
+                            "Spectrum generation failed",
+                        ),
+                    )
+                )
+                + " | "
+                + " | ".join(logs)
             )
         # 0.2.199-patch29gu: Successfully also forwards the backend detailed log progress.
         if progress is not None:
@@ -461,9 +474,7 @@ def _generate_spectrum_impl(
         spectrum_path = _register_spectrum(
             manager, exp_id, data_id, str(resp.get("spectrum_path", ""))
         )
-        ucsf_path, ucsf_msg = _export_ucsf(
-            manager, exp_id, data_id, spectrum_path
-        )
+        ucsf_path, ucsf_msg = _export_ucsf(manager, exp_id, data_id, spectrum_path)
         if progress is not None:
             progress(ucsf_msg)
         merged_params = dict(resp.get("effective_params") or {})
@@ -508,11 +519,12 @@ def _generate_spectrum_impl(
         if tr("Replica preview") not in msg and tr("NMRPipe processing failed") not in msg:
             raise
         if progress is not None:
-            progress(tr(
-                "Unified replication preview failed ({p0}); fallback "
-                "phase_route=none",
-                p0=msg,
-            ))
+            progress(
+                tr(
+                    "Unified replication preview failed ({p0}); fallback phase_route=none",
+                    p0=msg,
+                )
+            )
         fb_params = dict(params)
         fb_params["phase_route"] = "none"
         return _generate_spectrum_impl(
@@ -528,9 +540,7 @@ def _generate_spectrum_impl(
 
     if not result.get("spectrum_path"):
         raise StepwiseError(tr("phase optimisation does not produce spectrum"))
-    spectrum_path = _register_spectrum(
-        manager, exp_id, data_id, str(result.get("spectrum_path"))
-    )
+    spectrum_path = _register_spectrum(manager, exp_id, data_id, str(result.get("spectrum_path")))
     ucsf_path, ucsf_msg = _export_ucsf(manager, exp_id, data_id, spectrum_path)
     if progress is not None:
         progress(ucsf_msg)
@@ -561,49 +571,12 @@ def _generate_spectrum_impl(
         message=tr("generate spectrum"),
         params=merged_params,
     )
-    # Task E(0.2.133): 3D final spectrum uses NMRPipe proj3D.tcl to generate three projections,
-    # falling into spectra/<id>_<core A>-<core B>.ft2 (the file name contains the actual two plane
-    # cores, GUI uses <data_id>_*.ft2 wildcard scanning, the old *_proj_*.ft2 is also compatible).
     if experiment.ndim >= 3 and getattr(backend, "project_3d", None):
-        try:
-            spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
-            proj = backend.project_3d(
-                spectrum_path,
-                spectra_dir,
-                prefix=f"{data_id}_proj",
-            )
-            labels = proj.get("labels", {})
-            nuclei = proj.get("nuclei", {})
-            for tag, path in proj.get("paths", {}).items():
-                if proj.get("numpy_fallback"):
-                    # 0.2.199-patch29w:HNN Equal weight review tag -- The core name projection will
-                    # conflict (two 15N-1H planes), use fixed logical axis naming
-                    # {data_id}_proj_F{n}, GUI _proj_F{n} for compatible parsing; the backend has
-                    # been written out with the same name, no need to rename.
-                    logical = str(tag)
-                    target = spectra_dir / f"{data_id}_proj_{logical}.ft2"
-                else:
-                    fixed_nucleus = str(labels.get(tag, "") or "")
-                    logical = next(
-                        (
-                            dim.logical_axis
-                            for dim in experiment.dimensions
-                            if dim.nucleus == fixed_nucleus
-                        ),
-                        "",
-                    )
-                    target = spectra_dir / projection_filename(
-                        data_id, nuclei.get(tag), logical, tag
-                    )
-                if Path(path) != target:
-                    if target.exists():
-                        target.unlink()
-                    Path(path).replace(str(target))
-                merged_params.setdefault("projections", {})[logical or tag] = str(
-                    target
-                )
-        except Exception as exc:  # noqa: BLE001 - Spectrum is not blocked if projection fails.
-            merged_params.setdefault("projections", {})["error"] = str(exc)
+        projections = generate_3d_projections(
+            manager, exp_id, data_id, experiment, spectrum_path, backend
+        )
+        if projections:
+            merged_params.setdefault("projections", {}).update(projections)
         _run = manager.project.run(run_id)
         if _run is not None and "projections" in merged_params:
             # 0.2.133: Projection registration writeback run parameter (for GUI/Report reading).
@@ -635,6 +608,69 @@ def _generate_spectrum_impl(
     return spectrum_path
 
 
+def generate_3d_projections(
+    manager: ProjectManager,
+    exp_id: str,
+    data_id: str,
+    experiment: Any,
+    spectrum_path: Path,
+    backend: Any,
+    *,
+    progress: Callable[[str], None] | None = None,
+) -> dict[str, str]:
+    """Generate three 2D projections from a final 3D spectrum.
+
+    The NMRPipe ``proj3D.tcl`` script is used when nucleus labels are distinct;
+    repeated labels use a NumPy fallback. See :func:`projection_filename` for output
+    names (``{data_id}_{nucleus_a}-{nucleus_b}.ft2`` and the legacy
+    ``{data_id}_proj_*.ft2`` form; repeated nuclei use ``{data_id}_proj_F{n}.ft2``).
+    Returns a mapping from logical axis or tag to path. Errors are returned as
+    ``{"error": ...}`` rather than raised, so a projection failure does not block
+    spectrum generation.
+
+    Called by ``_generate_spectrum_impl`` after spectrum generation and by the GUI's
+    rerun-final-script action. Flipping an indirect dimension changes the final
+    spectrum, so projections must be regenerated to avoid showing stale pre-flip data.
+    """
+    if not getattr(backend, "project_3d", None):
+        return {}
+    out: dict[str, str] = {}
+    try:
+        spectra_dir = manager.data_dir(exp_id, data_id, "spectra")
+        if progress is not None:
+            progress(tr("generate 3D projections from the final spectrum"))
+        proj = backend.project_3d(
+            spectrum_path,
+            spectra_dir,
+            prefix=f"{data_id}_proj",
+        )
+        labels = proj.get("labels", {})
+        nuclei = proj.get("nuclei", {})
+        for tag, path in proj.get("paths", {}).items():
+            if proj.get("numpy_fallback"):
+                logical = str(tag)
+                target = spectra_dir / f"{data_id}_proj_{logical}.ft2"
+            else:
+                fixed_nucleus = str(labels.get(tag, "") or "")
+                logical = next(
+                    (
+                        dim.logical_axis
+                        for dim in experiment.dimensions
+                        if dim.nucleus == fixed_nucleus
+                    ),
+                    "",
+                )
+                target = spectra_dir / projection_filename(data_id, nuclei.get(tag), logical, tag)
+            if Path(path) != target:
+                if target.exists():
+                    target.unlink()
+                Path(path).replace(str(target))
+            out[logical or tag] = str(target)
+    except Exception as exc:
+        out["error"] = str(exc)
+    return out
+
+
 def projection_filename(
     data_id: str,
     nuclei: list[str] | None,
@@ -649,17 +685,10 @@ def projection_filename(
     wildcard scans, so historical files stay compatible).
     """
     if nuclei and len(nuclei) >= 2:
-        safe = [
-            re.sub(r"[^A-Za-z0-9]", "", str(nuc or ""))
-            for nuc in nuclei[:2]
-        ]
+        safe = [re.sub(r"[^A-Za-z0-9]", "", str(nuc or "")) for nuc in nuclei[:2]]
         if all(safe):
             return f"{data_id}_{safe[0]}-{safe[1]}.ft2"
     return f"{data_id}_proj_{logical or tag}.ft2"
-
-
-
-
 
 
 def read_experiment(manager: ProjectManager, exp_id: str, data_id: str) -> Any:

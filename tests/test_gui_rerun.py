@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -12,7 +13,8 @@ from qtcompat.QtWidgets import QApplication
 
 from core.project import ProjectManager
 from gui.log_panel import LogPanel
-from gui.pipeline_panel import PipelinePanel
+from gui.pipeline_panel import PipelinePanel, PipelineStepRow
+from ui_support.i18n import tr
 
 
 @pytest.fixture(scope="module")
@@ -45,9 +47,7 @@ class _FakeController:
         self.calls.append("generate_spectrum")
         return "/tmp/x.ft2"
 
-    def pick_peaks(
-        self, data, exp_id=None, data_id=None, sigma_multiplier=None
-    ) -> dict:
+    def pick_peaks(self, data, exp_id=None, data_id=None, sigma_multiplier=None) -> dict:
         self.calls.append("pick_peaks")
         return {"status": "success", "peak_count": 1}
 
@@ -83,15 +83,13 @@ def _manager_with_artifacts(tmp_path: Path):
     return manager, exp_id, data_id
 
 
-def test_success_steps_show_reprocess_button(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_success_steps_show_reprocess_button(tmp_path: Path, qapp: QApplication) -> None:
     """A SUCCESS step shows the reprocess entrance."""
     manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
     panel = PipelinePanel(manager, _FakeController())
     panel.set_selection("data", exp_id, data_id)
     for step_id in ("fid", "peaks"):
-        assert panel._rows[step_id].run_button.text() == "重新处理"
+        assert panel._rows[step_id].run_button.text() == "再次运行"
         assert not panel._rows[step_id].run_button.isHidden()
     # 0.2.163-patch5: spectrum splits into "re-optimisation" + "Re-run the final script"
     spectrum_row = panel._rows["spectrum"]
@@ -115,30 +113,22 @@ def test_run_logs_go_to_data_scope(tmp_path: Path, qapp: QApplication) -> None:
         panel.set_selection("data", exp_id, data_id)
 
         scoped: list[tuple[str, str]] = []
-        panel.log_scoped.connect(
-            lambda msg, scope: scoped.append((msg, scope))
-        )
+        panel.log_scoped.connect(lambda msg, scope: scoped.append((msg, scope)))
         panel._on_run_requested("spectrum")
         assert scoped, "应有作用域日志"
         expected_scope = f"data:{exp_id}:{data_id}"
         for _msg, scope in scoped:
             assert scope == expected_scope, (scope, expected_scope)
         # group-scope helper
-        assert (
-            panel._run_log_scope(exp_id, data_id) == expected_scope
-        )
-        assert (
-            panel._run_log_scope(exp_id, "", "g1") == f"group:{exp_id}:g1"
-        )
+        assert panel._run_log_scope(exp_id, data_id) == expected_scope
+        assert panel._run_log_scope(exp_id, "", "g1") == f"group:{exp_id}:g1"
         panel.close()
         log.close()
     finally:
         monkeypatch.undo()
 
 
-def test_run_worker_thread_refreshes_via_queued_signal(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_run_worker_thread_refreshes_via_queued_signal(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.199-patch29c: a real thread finishes and refreshes on the main thread through a queued
     signal (widgets are no longer touched across threads).
 
@@ -172,8 +162,8 @@ def test_run_worker_thread_refreshes_via_queued_signal(
     QTimer.singleShot(2000, loop.quit)
     while not done:
         loop.exec()
-    # queued signal handled: the main thread has refreshed, the status is no longer RUNNING
-    assert panel._run_active is False
+
+    assert not panel._running_targets
     assert panel._rows["spectrum"].status_label.text().startswith("✓")
     panel.close()
     log.close()
@@ -191,14 +181,81 @@ def test_reprocess_spectrum_invokes_controller(
     panel.log_message.connect(log.append)
     panel.set_selection("data", exp_id, data_id)
     assert panel._rows["spectrum"].run_button.text() == "重新优化"
+    changed: list[tuple[str, str]] = []
+    panel.spectrum_results_changed.connect(
+        lambda changed_exp, changed_data: changed.append((changed_exp, changed_data))
+    )
     panel._on_run_requested("spectrum")
     assert controller.calls == ["generate_spectrum"]
-    # after the rerun the step is still SUCCESS (the fake controller writes no artefacts, so the
-    # fingerprint state does not change)
+    assert changed == [(exp_id, data_id)]
+
     assert panel._rows["spectrum"].status_label.text().startswith("✓")
     assert panel._rows["spectrum"].run_button.text() == "重新优化"
     panel.close()
     log.close()
+
+
+def test_spectrum_result_signal_keeps_the_started_data_target(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression coverage: test spectrum result signal keeps the started data target."""
+    monkeypatch.setattr("threading.Thread", SyncThread)
+    manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
+    other = manager.import_data(exp_id, "/fake/2")
+
+    class _SwitchingController(_FakeController):
+        panel: PipelinePanel
+
+        def generate_spectrum(self, data, exp_id=None, data_id=None) -> str:
+            self.calls.append("generate_spectrum")
+            self.panel.set_selection("data", exp_id, other.id)
+            return "/tmp/x.ft2"
+
+    controller = _SwitchingController()
+    panel = PipelinePanel(manager, controller)
+    controller.panel = panel
+    panel.set_selection("data", exp_id, data_id)
+    changed: list[tuple[str, str]] = []
+    panel.spectrum_results_changed.connect(
+        lambda changed_exp, changed_data: changed.append((changed_exp, changed_data))
+    )
+
+    panel._on_run_requested("spectrum")
+
+    assert changed == [(exp_id, data_id)]
+    assert (panel._current_exp_id, panel._current_data_id) == (exp_id, other.id)
+    panel.close()
+
+
+def test_failed_spectrum_operations_do_not_emit_results_changed(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression coverage: test failed spectrum operations do not emit results changed."""
+    monkeypatch.setattr("threading.Thread", SyncThread)
+    manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
+    _write_final_script(manager, exp_id, data_id, _SCRIPT_2D_UNIFORM)
+
+    class _FailingController(_CaptureController):
+        def generate_spectrum(self, data, exp_id=None, data_id=None) -> str:
+            raise RuntimeError("generation failed")
+
+        def run_manual_spectrum(
+            self, data, scripts, exp_id=None, data_id=None, progress=None
+        ) -> str:
+            raise RuntimeError("rerun failed")
+
+    panel = PipelinePanel(manager, _FailingController(ndim=2))
+    panel.set_selection("data", exp_id, data_id)
+    changed: list[tuple[str, str]] = []
+    panel.spectrum_results_changed.connect(
+        lambda changed_exp, changed_data: changed.append((changed_exp, changed_data))
+    )
+
+    panel._on_run_requested("spectrum")
+    panel._on_rerun_final_requested("spectrum")
+
+    assert changed == []
+    panel.close()
 
 
 def test_reprocess_peaks_and_fid_available(
@@ -267,10 +324,7 @@ def test_rerun_final_applies_latest_ext(
     panel.close()
 
 
-
-def test_reprocess_downstream_becomes_outdated(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_reprocess_downstream_becomes_outdated(tmp_path: Path, qapp: QApplication) -> None:
     """Reprocessing the spectrum and recording its fingerprint marks the downstream peak picking
     step OUTDATED.
     """
@@ -395,17 +449,13 @@ class _CaptureController(_FakeController):
     def data_facts(self, exp_id: str = "", data_id: str = "") -> dict:
         return {"ndim": self.ndim, "is_nus": self.ndim >= 3}
 
-    def run_manual_spectrum(
-        self, data, scripts, exp_id=None, data_id=None, progress=None
-    ) -> str:
+    def run_manual_spectrum(self, data, scripts, exp_id=None, data_id=None, progress=None) -> str:
         self.calls.append("run_manual_spectrum")
         self.ran_scripts.update(scripts)
         return "/tmp/x.ft2"
 
 
-def _write_final_script(
-    manager, exp_id: str, data_id: str, content: str, name: str = ""
-) -> Path:
+def _write_final_script(manager, exp_id: str, data_id: str, content: str, name: str = "") -> Path:
     """Write the given final script into process/ (default name matches the backend uniform one)."""
     process = manager.data_dir(exp_id, data_id, "process")
     process.mkdir(parents=True, exist_ok=True)
@@ -419,11 +469,10 @@ def _ft_lines(script: str) -> list[str]:
     return [line for line in script.splitlines() if "-fn FT" in line]
 
 
-def test_2d_spectrum_row_shows_flip_checkbox(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_2d_spectrum_row_shows_flip_checkbox(tmp_path: Path, qapp: QApplication) -> None:
     """The 2D spectrum step offers the "Indirect flip" checkbox (not the 3D drop-down); other step
-    rows have neither."""
+    rows have neither.
+    """
     manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
     panel = PipelinePanel(manager, _CaptureController(ndim=2))
     panel.set_selection("data", exp_id, data_id)
@@ -439,12 +488,11 @@ def test_2d_flip_only_touches_the_indirect_ft_line(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """2D: checking the flip puts -neg on the indirect-dimension (F1) FT line only; unchecking
-    removes it."""
+    removes it.
+    """
     monkeypatch.setattr("threading.Thread", SyncThread)
     manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
-    script_path = _write_final_script(
-        manager, exp_id, data_id, _SCRIPT_2D_UNIFORM
-    )
+    script_path = _write_final_script(manager, exp_id, data_id, _SCRIPT_2D_UNIFORM)
     manager.save()
     controller = _CaptureController(ndim=2)
     panel = PipelinePanel(manager, controller)
@@ -464,9 +512,11 @@ def test_2d_flip_only_touches_the_indirect_ft_line(
     assert ran.count("-neg") == 1
     assert "-x1 8.0ppm -xn 6.0ppm" in ran  # EXT is still updated to the latest range
     assert "-x1 10.5ppm -xn 6.5ppm" not in ran
-    assert "PS -p0 10 -p1 1.5 -di" in ran  # direct-dimension phase untouched
-    assert "PS -p0 5 -p1 -10 -di" in ran  # indirect-dimension phase untouched
-    assert "SP -off 0.5 -end 0.95" in ran  # window function untouched
+    assert "PS -p0 10 -p1 1.5 -di" in ran
+
+    assert "PS -p0 355 -p1 10 -di" in ran
+    assert "PS -p0 5 -p1 -10 -di" not in ran
+    assert "SP -off 0.5 -end 0.95" in ran
     assert "ZF -size 512" in ran
     assert "POLY -auto" in ran  # baseline untouched
     # the flip is recorded in the final script on disk; after a refresh the checkbox stays
@@ -478,11 +528,14 @@ def test_2d_flip_only_touches_the_indirect_ft_line(
     # dropped by a plain rerun)
     row.rerun_final_button.click()
     assert controller.ran_scripts[f"{data_id}_process.com"].count("-neg") == 1
-    # unchecking removes -neg on the next rerun
+
     row.flip_indirect_check.setChecked(False)
     row.rerun_final_button.click()
     ran_again = controller.ran_scripts[f"{data_id}_process.com"]
     assert "-neg" not in ran_again
+    assert "PS -p0 5 -p1 -10 -di" in ran_again
+    assert "PS -p0 355 -p1 10 -di" not in ran_again
+    assert "PS -p0 10 -p1 1.5 -di" in ran_again
     assert "-neg" not in script_path.read_text(encoding="utf-8")
     panel.close()
 
@@ -492,6 +545,7 @@ def test_3d_flip_combo_only_touches_the_chosen_indirect_dimension(
 ) -> None:
     """3D three-entry drop-down: F2 / F1 / F1 and F2 each edit only their own indirect FT line."""
     monkeypatch.setattr("threading.Thread", SyncThread)
+
     cases = (
         (0, {"F2": True, "F1": False}),  # indirect dimension (F2)
         (1, {"F2": False, "F1": True}),  # indirect dimension (F1)
@@ -528,10 +582,9 @@ def test_3d_flip_combo_choosing_the_same_entry_again_cancels(
 ) -> None:
     """Choosing the same 3D drop-down entry again cancels the flip (user decision, 2026-09-25)."""
     monkeypatch.setattr("threading.Thread", SyncThread)
+
     manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
-    script_path = _write_final_script(
-        manager, exp_id, data_id, _SCRIPT_3D_UNIFORM
-    )
+    script_path = _write_final_script(manager, exp_id, data_id, _SCRIPT_3D_UNIFORM)
     manager.save()
     controller = _CaptureController(ndim=3)
     panel = PipelinePanel(manager, controller)
@@ -553,20 +606,24 @@ def test_3d_nus_flip_reruns_only_the_indirect_section(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """3D NUS: nus3d_rc is retained, so a flip runs the indirect-dimension section only (no SMILE
-    and no direct dimension)."""
+    and no direct dimension).
+    """
     monkeypatch.setattr("threading.Thread", SyncThread)
+
     manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
-    _write_final_script(
-        manager, exp_id, data_id, _SCRIPT_3D_NUS, name=f"{data_id}_nus.com"
-    )
+    _write_final_script(manager, exp_id, data_id, _SCRIPT_3D_NUS, name=f"{data_id}_nus.com")
     process = manager.data_dir(exp_id, data_id, "process")
     planes = process / "nus3d_rc"
     planes.mkdir(parents=True, exist_ok=True)
     (planes / "test0001.ft1").write_bytes(b"ft1")
     manager.save()
-    controller = _CaptureController(ndim=3)
+    controller = _ProjectionController(ndim=3)
     panel = PipelinePanel(manager, controller)
     panel.set_selection("data", exp_id, data_id)
+    changed: list[tuple[str, str]] = []
+    panel.spectrum_results_changed.connect(
+        lambda changed_exp, changed_data: changed.append((changed_exp, changed_data))
+    )
     row = panel._rows["spectrum"]
     # the user also changed the direct dimension range: this path does not run the direct
     # dimension, so it must not pretend to have applied it
@@ -592,12 +649,115 @@ def test_3d_nus_flip_reruns_only_the_indirect_section(
     assert "-x1 10.5ppm -xn 6.5ppm" in full
     assert _ft_lines(full)[1].rstrip().endswith("-neg \\")  # F2
     assert "-neg" not in _ft_lines(full)[2]  # F1
+
+    assert controller.projection_calls == [(exp_id, data_id)]
+    assert changed == [(exp_id, data_id)]
     panel.close()
+
+
+def test_neg_flip_compensates_the_phase_by_conjugation() -> None:
+    """Regression coverage: test neg flip compensates the phase by conjugation."""
+    from gui.pipeline_panel import flip_indirect_ft_lines
+
+    script = (
+        "bruk2pipe -in ./fid -yMODE States-TPPI -out t.fid \\\n"
+        "| nmrPipe -fn FT -auto \\\n"
+        "| nmrPipe -fn PS -p0 0 -p1 0 -di \\\n"
+        "| nmrPipe -fn TP \\\n"
+        "| nmrPipe -fn FT -auto \\\n"
+        "| nmrPipe -fn PS -p0 90 -p1 12 -di \\\n"
+        "| nmrPipe -fn TP \\\n"
+        "-out t.ft2\n"
+    )
+    flipped, applied = flip_indirect_ft_lines(script, ndim=2, flips={"F1": True})
+    assert applied == {"F1": True}
+    assert "FT -auto -neg" in flipped
+
+    assert "| nmrPipe -fn PS -p0 270 -p1 -12 -di \\" in flipped
+
+    assert "| nmrPipe -fn PS -p0 0 -p1 0 -di \\" in flipped
+
+    restored, applied_back = flip_indirect_ft_lines(flipped, ndim=2, flips={"F1": False})
+    assert applied_back == {"F1": False}
+    assert restored == script
+
+
+def test_conjugate_phase_matches_the_users_formula() -> None:
+    """Regression coverage: test conjugate phase matches the users formula."""
+    from gui.pipeline_panel import _PS_P0_TOKEN, _PS_P1_TOKEN, _conjugate_ps_line
+
+    def phases(text: str) -> tuple[float, float]:
+        return (
+            float(_PS_P0_TOKEN.search(text).group(2)),
+            float(_PS_P1_TOKEN.search(text).group(2)),
+        )
+
+    for p0, p1, want0, want1 in (
+        (0.0, 0.0, "0", "0"),
+        (180.0, 0.0, "180", "0"),
+        (90.0, 10.0, "270", "-10"),
+        (270.0, -10.0, "90", "10"),
+        (30.0, 5.0, "330", "-5"),
+        (-90.0, 0.0, "90", "0"),  # 450 mod 360 = 90
+        (360.0, 0.0, "0", "0"),
+    ):
+        line = f"| nmrPipe -fn PS -p0 {p0:g} -p1 {p1:g} -di \\"
+        want = f"| nmrPipe -fn PS -p0 {want0} -p1 {want1} -di \\"
+        assert _conjugate_ps_line(line) == want, (p0, p1)
+
+        got0, got1 = phases(_conjugate_ps_line(_conjugate_ps_line(line)))
+        assert (got0 - p0) % 360.0 == 0, (p0, p1, got0)
+        assert got1 == -(-p1), (p0, p1, got1)
+
+    assert _conjugate_ps_line("| nmrPipe -fn PS -di \\") is None
+
+
+def test_neg_flip_only_compensates_the_axis_being_flipped() -> None:
+    """Regression coverage: test neg flip only compensates the axis being flipped."""
+    from gui.pipeline_panel import flip_indirect_ft_lines
+
+    script = (
+        "bruk2pipe -in ./fid -yMODE States-TPPI -zMODE States-TPPI -out t.fid \\\n"
+        "| nmrPipe -fn FT -auto \\\n"
+        "| nmrPipe -fn PS -p0 0 -p1 0 -di \\\n"
+        "| nmrPipe -fn TP \\\n"
+        "| nmrPipe -fn FT -auto \\\n"
+        "| nmrPipe -fn PS -p0 10 -p1 1 -di \\\n"
+        "| nmrPipe -fn TP \\\n"
+        "| nmrPipe -fn FT -auto \\\n"
+        "| nmrPipe -fn PS -p0 20 -p1 2 -di \\\n"
+        "| nmrPipe -fn TP \\\n"
+        "-out t.ft3\n"
+    )
+    flipped, applied = flip_indirect_ft_lines(script, ndim=3, flips={"F1": True})
+    assert applied == {"F1": True}
+    assert "| nmrPipe -fn PS -p0 10 -p1 1 -di \\" in flipped
+    assert "| nmrPipe -fn PS -p0 340 -p1 -2 -di \\" in flipped  # F1: 360-20=340
+    assert "| nmrPipe -fn PS -p0 0 -p1 0 -di \\" in flipped
+
+
+def test_neg_flip_without_a_ps_line_still_works_and_invents_nothing() -> None:
+    """Regression coverage: test neg flip without a ps line still works and invents nothing."""
+    from gui.pipeline_panel import flip_indirect_ft_lines
+
+    script = (
+        "bruk2pipe -in ./fid -yMODE States-TPPI -out t.fid \\\n"
+        "| nmrPipe -fn FT -auto \\\n"
+        "| nmrPipe -fn TP \\\n"
+        "| nmrPipe -fn FT -auto \\\n"
+        "| nmrPipe -fn TP \\\n"
+        "-out t.ft2\n"
+    )
+    flipped, applied = flip_indirect_ft_lines(script, ndim=2, flips={"F1": True})
+    assert applied == {"F1": True}
+    assert "-neg" in flipped
+    assert "PS" not in flipped
 
 
 def test_flip_indirect_ft_lines_leaves_unknown_layout_alone() -> None:
     """When the layout cannot be recognised (the indirect FT line count does not match), do not
-    guess: return the script unchanged with an empty state."""
+    guess: return the script unchanged with an empty state.
+    """
     from gui.pipeline_panel import flip_indirect_ft_lines, indirect_neg_state
 
     script = (
@@ -645,12 +805,11 @@ def test_row_emits_the_primary_neg_keys_and_accepts_the_alias(
 ) -> None:
     """The sampling the control emits uses the **official names** ``ft_neg_f1``/``ft_neg_f2``
     (they decide directly whether -neg is added; ``flip_*`` are legacy aliases the worker still
-    accepts)."""
+    accepts).
+    """
     monkeypatch.setattr("threading.Thread", SyncThread)
     manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
-    script_path = _write_final_script(
-        manager, exp_id, data_id, _SCRIPT_2D_UNIFORM
-    )
+    script_path = _write_final_script(manager, exp_id, data_id, _SCRIPT_2D_UNIFORM)
     controller = _CaptureController(ndim=2)
     panel = PipelinePanel(manager, controller)
     panel.set_selection("data", exp_id, data_id)
@@ -672,4 +831,287 @@ def test_row_emits_the_primary_neg_keys_and_accepts_the_alias(
     panel._on_rerun_final_requested("spectrum", {"flip_f1": True})
     assert "-neg" in controller.ran_scripts[f"{data_id}_process.com"]
     assert "-neg" in script_path.read_text(encoding="utf-8")
+    panel.close()
+
+
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+
+
+def test_rerun_keeps_running_state_and_streams_progress(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression coverage: test rerun keeps running state and streams progress."""
+    monkeypatch.setattr("threading.Thread", SyncThread)
+    manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
+    _write_final_script(manager, exp_id, data_id, _SCRIPT_2D_UNIFORM)
+    manager.save()
+
+    events: list[tuple[str, str]] = []
+    seen_status: list[tuple[str, str]] = []
+
+    class _StreamingRunner(_CaptureController):
+        """Regression coverage: test rerun keeps running state and streams progress.
+        StreamingRunner.
+        """
+
+        panel: PipelinePanel
+
+        def run_manual_spectrum(
+            self, data, scripts, exp_id=None, data_id=None, progress=None
+        ) -> str:
+            self.panel.refresh()
+            events.append(("refresh", ""))
+            text = self.panel._rows["spectrum"].status_label.text()
+            assert "运行中" in text and "已过期" not in text, text
+            assert progress is not None
+
+            progress("stage-1")
+            events.append(("progress", "stage-1"))
+            self.calls.append("run_manual_spectrum")
+            self.ran_scripts.update(scripts)
+            return "/tmp/x.ft2"
+
+    controller = _StreamingRunner(ndim=2)
+    panel = PipelinePanel(manager, controller)
+    controller.panel = panel
+    panel.set_selection("data", exp_id, data_id)
+    row = panel._rows["spectrum"]
+
+    original_set_status = PipelineStepRow.set_status
+
+    def _spy_set_status(self, status: str, reason: str = "") -> None:
+        seen_status.append((self.step_id, status))
+        original_set_status(self, status, reason)
+
+    monkeypatch.setattr(PipelineStepRow, "set_status", _spy_set_status)
+    panel.log_scoped.connect(lambda msg, scope: events.append(("log", msg)))
+    panel.run_finished.connect(lambda: events.append(("finished", "")))
+
+    row.flip_indirect_check.setChecked(True)
+    row.rerun_final_button.click()
+
+    assert ("spectrum", "OUTDATED") not in seen_status, seen_status
+    assert ("spectrum", "RUNNING") in seen_status, seen_status
+
+    log_at = next(
+        index for index, (kind, msg) in enumerate(events) if kind == "log" and "stage-1" in msg
+    )
+    finished_at = next(index for index, (kind, _msg) in enumerate(events) if kind == "finished")
+    assert log_at < finished_at, events
+    assert any(kind == "refresh" for kind, _msg in events)
+
+    assert row.status_label.text().startswith("✓"), row.status_label.text()
+    panel.close()
+
+
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+
+
+def _write_metadata(manager, exp_id: str, data_id: str, dims: list[tuple[str, str, float]]) -> None:
+    """Regression coverage:  write metadata."""
+    path = manager.data_metadata_path(exp_id, data_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "dataset": {
+                    "dimensions": [
+                        {"logical_axis": axis, "nucleus": nucleus, "sf": sf}
+                        for axis, nucleus, sf in dims
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+def test_flip_labels_use_the_row_nuclei_when_given(
+    qapp: QApplication,
+) -> None:
+    """Regression coverage: test flip labels use the row nuclei when given."""
+    row = PipelineStepRow("spectrum", "spectrum", "x")
+    row.set_indirect_dimension(3)
+    row.set_indirect_nuclei({"F1": "13C", "F2": "15N", "F3": "1H"})
+    labels = [row.flip_indirect_combo.itemText(i) for i in range(row.flip_indirect_combo.count())]
+    assert "15N" in labels[0] and "F2" not in labels[0], labels
+    assert "13C" in labels[1] and "F1" not in labels[1], labels
+    assert "13C" in labels[2] and "15N" in labels[2], labels
+
+    assert row.flip_indirect_combo.itemData(0) == {"ft_neg_f2": True}
+    assert row.flip_indirect_combo.itemData(1) == {"ft_neg_f1": True}
+    assert row.flip_indirect_combo.itemData(2) == {
+        "ft_neg_f1": True,
+        "ft_neg_f2": True,
+    }
+
+    row.set_indirect_dimension(2)
+    assert "13C" in row.flip_indirect_check.text()
+
+    row.set_indirect_nuclei({})
+    row.set_indirect_dimension(3)
+    assert [
+        row.flip_indirect_combo.itemText(i) for i in range(row.flip_indirect_combo.count())
+    ] == [tr("Indirect (F2)"), tr("Indirect (F1)"), tr("F1 and F2")]
+    row.set_indirect_dimension(2)
+    assert row.flip_indirect_check.text() == tr("Indirect (F1)")
+    row.close()
+
+
+def test_flip_labels_come_from_the_data_metadata(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression coverage: test flip labels come from the data metadata."""
+
+    manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
+    _write_final_script(manager, exp_id, data_id, _SCRIPT_3D_UNIFORM)
+    _write_metadata(
+        manager,
+        exp_id,
+        data_id,
+        [("F3", "1H", 600.13), ("F2", "15N", 60.8), ("F1", "13C", 150.9)],
+    )
+    manager.save()
+    panel = PipelinePanel(manager, _CaptureController(ndim=3))
+    panel.set_selection("data", exp_id, data_id)
+    assert panel._data_axis_nuclei(exp_id, data_id) == {
+        "F1": "13C",
+        "F2": "15N",
+        "F3": "1H",
+    }
+    row = panel._rows["spectrum"]
+    labels = [row.flip_indirect_combo.itemText(i) for i in range(row.flip_indirect_combo.count())]
+    assert "15N" in labels[0] and "F2" not in labels[0], labels
+    assert "13C" in labels[1] and "F1" not in labels[1], labels
+    panel.close()
+
+
+def test_flip_labels_fall_back_without_metadata(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression coverage: test flip labels fall back without metadata."""
+
+    manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
+    _write_final_script(manager, exp_id, data_id, _SCRIPT_3D_UNIFORM)
+    manager.save()
+    panel = PipelinePanel(manager, _CaptureController(ndim=3))
+    panel.set_selection("data", exp_id, data_id)
+    assert panel._data_axis_nuclei(exp_id, data_id) == {}
+    row = panel._rows["spectrum"]
+
+    assert row.flip_indirect_combo.count() == 3
+    assert row.flip_indirect_combo.itemText(0) == tr("Indirect (F2)")
+    assert row.flip_indirect_combo.itemText(1) == tr("Indirect (F1)")
+    assert row.flip_indirect_combo.itemText(2) == tr("F1 and F2")
+    panel.close()
+
+
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+
+
+class _ProjectionController(_CaptureController):
+    """Regression coverage:  ProjectionController."""
+
+    def __init__(self, ndim: int = 3, error: str = "") -> None:
+        super().__init__(ndim=ndim)
+        self.projection_calls: list[tuple[str, str]] = []
+        self.projection_progress: list[str] = []
+        self.error = error
+
+    def regenerate_3d_projections(
+        self, exp_id: str, data_id: str, *, progress=None
+    ) -> dict[str, str]:
+        self.projection_calls.append((exp_id, data_id))
+        if progress is not None:
+            progress("reprojecting")
+            self.projection_progress.append("reprojecting")
+        if self.error:
+            return {"error": self.error}
+        return {"F2": f"/tmp/{data_id}_13C-15N.ft2"}
+
+
+def test_3d_flip_rerun_regenerates_projections_once(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression coverage: test 3d flip rerun regenerates projections once."""
+
+    monkeypatch.setattr("threading.Thread", SyncThread)
+    manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
+    _write_final_script(manager, exp_id, data_id, _SCRIPT_3D_UNIFORM)
+    manager.save()
+    controller = _ProjectionController(ndim=3)
+    panel = PipelinePanel(manager, controller)
+    panel.set_selection("data", exp_id, data_id)
+    logs: list[str] = []
+    panel.log_scoped.connect(lambda msg, scope: logs.append(msg))
+    changed: list[tuple[str, str]] = []
+    panel.spectrum_results_changed.connect(
+        lambda changed_exp, changed_data: changed.append((changed_exp, changed_data))
+    )
+
+    row = panel._rows["spectrum"]
+    row.flip_indirect_combo.setCurrentIndex(0)
+    row.rerun_final_button.click()
+
+    assert controller.projection_calls == [(exp_id, data_id)]
+    assert "reprojecting" in logs
+    assert any("13C-15N.ft2" in line for line in logs), logs
+    assert changed == [(exp_id, data_id)]
+    assert row.status_label.text().startswith("✓"), row.status_label.text()
+    panel.close()
+
+
+def test_2d_flip_rerun_never_regenerates_projections(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression coverage: test 2d flip rerun never regenerates projections."""
+    monkeypatch.setattr("threading.Thread", SyncThread)
+    manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
+    _write_final_script(manager, exp_id, data_id, _SCRIPT_2D_UNIFORM)
+    controller = _ProjectionController(ndim=2)
+    panel = PipelinePanel(manager, controller)
+    panel.set_selection("data", exp_id, data_id)
+    changed: list[tuple[str, str]] = []
+    panel.spectrum_results_changed.connect(
+        lambda changed_exp, changed_data: changed.append((changed_exp, changed_data))
+    )
+
+    row = panel._rows["spectrum"]
+    row.flip_indirect_check.setChecked(True)
+    row.rerun_final_button.click()
+
+    assert controller.projection_calls == []
+    assert changed == [(exp_id, data_id)]
+    assert row.status_label.text().startswith("✓"), row.status_label.text()
+    panel.close()
+
+
+def test_3d_projection_failure_does_not_fail_the_rerun(
+    tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression coverage: test 3d projection failure does not fail the rerun."""
+
+    monkeypatch.setattr("threading.Thread", SyncThread)
+    manager, exp_id, data_id = _manager_with_artifacts(tmp_path)
+    _write_final_script(manager, exp_id, data_id, _SCRIPT_3D_UNIFORM)
+    controller = _ProjectionController(ndim=3, error="boom")
+    panel = PipelinePanel(manager, controller)
+    panel.set_selection("data", exp_id, data_id)
+    logs: list[str] = []
+    panel.log_scoped.connect(lambda msg, scope: logs.append(msg))
+
+    row = panel._rows["spectrum"]
+    row.flip_indirect_combo.setCurrentIndex(0)
+    row.rerun_final_button.click()
+
+    assert controller.projection_calls == [(exp_id, data_id)]
+    assert any("boom" in line for line in logs), logs
+    assert row.status_label.text().startswith("✓"), row.status_label.text()
     panel.close()

@@ -9,7 +9,8 @@ combination sorting table (CSV/JSON) + top three scripts; the script used in "Re
 always **full sampling** script. Operation mode and sorting caliber (revision 23): Net true peak
 priority -> full sampling reconstruction (number of peaks = final spectrum) caliber);
 consistency priority -> set aside (train) reconstruction (save points do not participate in
-reconstruction, residuals are used as the basis); each candidate is only run once."""
+reconstruction, residuals are used as the basis); each candidate is only run once.
+"""
 
 from __future__ import annotations
 
@@ -32,7 +33,8 @@ from ui_support.i18n import tr
 @dataclass
 class SmileParameterResult:
     """A parameter group (SMILE parameter combination)stability/Score and retain peaks across
-    combinations."""
+    combinations.
+    """
 
     params: dict[str, Any]
     repeats: int = 1
@@ -80,7 +82,8 @@ def smile_scan_sign_mode(experiment: Any) -> str:
     selection step (presets peak_sign). For mixed experiments (HNCACB/ CBCANCO and other
     positive and negative coexistences) use both, uniform/unknown use dominant (only the peaks
     with the majority of symbols are retained, and the positive and negative are not concerned)
-    to avoid missing the reversed-phase true peaks as noise."""
+    to avoid missing the reversed-phase true peaks as noise.
+    """
     from core.experiments.registry import get as get_template
 
     etype = getattr(experiment, "experiment_type", None)
@@ -102,7 +105,8 @@ def smile_scan_edge_margin(
     caliber as peak selection**). 2026-09-13 (user plan A): The margin is the physical width
     (default 3 ``axis_ppm``/``nucleus``/``obs_mhz``; This correctly overrides EXT cropping, zero
     filling and axis rearrangement. Use ``experiment`` + ``n_points`` only if there is no actual
-    spectral axis; if it fails then it falls back to the old point constant."""
+    spectral axis; if it fails then it falls back to the old point constant.
+    """
     from workflow.pick_peaks import PICK_EDGE_MARGIN
 
     try:
@@ -140,8 +144,8 @@ def smile_scan_edge_margin(
                 break
         if estimated_obs <= 0 or sw_hz <= 0:
             return int(PICK_EDGE_MARGIN)
-        estimated_axis = sw_hz / (int(n_points) * estimated_obs) * (
-            int(n_points) / 2 - np.arange(int(n_points))
+        estimated_axis = (
+            sw_hz / (int(n_points) * estimated_obs) * (int(n_points) / 2 - np.arange(int(n_points)))
         )
         width_ppm = axis_units.edge_margin_ppm(
             estimated_nucleus,
@@ -161,16 +165,14 @@ def evaluate_candidate_peaks(
     + exclusion of axial peaks. user 2026-09-11: "SMILE This step is to reconstruct as many true
     peaks as possible" -- so a low threshold (3σ) is deliberately used here to try not to leak
     true peaks. The difference between candidates is reflected by "stable peaks − spurious
-    peaks"."""
+    peaks".
+    """
     params = peak_detection.PeakDetectionParams(
         sigma_multiplier=SMILE_SCAN_SIGMA,
         min_snr=SMILE_SCAN_SIGMA,
         sign_mode=sign_mode,
-        edge_margin=(
-            int(edge_margin)
-            if edge_margin is not None
-            else smile_scan_edge_margin()
-        ),
+        # With no acquisition context there is no evidence for blanket masking.
+        edge_margin=int(edge_margin) if edge_margin is not None else 0,
     )
     return peak_detection.detect(np.asarray(arr), params)
 
@@ -188,20 +190,18 @@ def _subsample(values: tuple[float, ...], count: int) -> tuple[float, ...]:
 def smile_grid(size: int = SMILE_GRID_DEFAULT) -> list[dict[str, Any]]:
     """Generate n x n grids according to the degree of optimisation (2x2..5x5, default 4x4=16
     groups). 2x2 is the fastest (4 groups), 5x5 is the finest (25 groups); the time consumption
-    is roughly proportional to the number of groups."""
+    is roughly proportional to the number of groups.
+    """
     count = max(SMILE_GRID_MIN, min(SMILE_GRID_MAX, int(size or SMILE_GRID_DEFAULT)))
-    return default_smile_grid(
-        _subsample(_NSIGMA_FULL, count), _subsample(_THRESH_FULL, count)
-    )
+    return default_smile_grid(_subsample(_NSIGMA_FULL, count), _subsample(_THRESH_FULL, count))
 
 
-def estimate_scan_seconds(
-    experiment: Experiment, n_combos: int
-) -> tuple[float, float]:
+def estimate_scan_seconds(experiment: Experiment, n_combos: int) -> tuple[float, float]:
     """Roughly estimate each group based on data size/Total time spent(seconds); The first group is
     covered by measured after running. Empirical model (2026-09-10, sampleC 3D NUS 250
     points/direct dimension TD 2048 measured 86s/Group): each group ≈ 85s x (sampling point
-    number/250) x (direct dimension TD/2048); 2D then x 0.3."""
+    number/250) x (direct dimension TD/2048); 2D then x 0.3.
+    """
     sampling = getattr(experiment, "sampling", None)
     nus_points = len(getattr(sampling, "nus_list", None) or []) or 250
     direct_td = 2048.0
@@ -218,17 +218,17 @@ def estimate_scan_seconds(
     per_group = max(5.0, per_group)
     return per_group, per_group * max(1, int(n_combos))
 
+
 def default_smile_grid(
     nsigma_values: tuple[float, ...] = (3.0, 4.0, 5.0, 6.0, 7.0),
     thresh_values: tuple[float, ...] = (0.90, 0.93, 0.95, 0.97, 0.99),
 ) -> list[dict[str, Any]]:
     """Default parameter grid: nSigma × thresh (since 0.2.162 only the SMILE
     parameters are optimised; the 0.2.162 patch densified it to 5×5=25 combinations for
-    finer tuning)."""
+    finer tuning).
+    """
     return [
-        {"nsigma": nsigma, "thresh": thresh}
-        for nsigma in nsigma_values
-        for thresh in thresh_values
+        {"nsigma": nsigma, "thresh": thresh} for nsigma in nsigma_values for thresh in thresh_values
     ]
 
 
@@ -238,7 +238,8 @@ def _snap_key(position: tuple[float, ...], tol_pts: float) -> tuple[float, ...]:
     sub-pixel correction causes the position to jitter within +/-0.5px. If not rounded first,
     the jitter will cause the peak to flip when it is exactly at the tol grid boundary (such as
     10pt/4pt bucket), and cross-combination matching will break (stable peaks will be misjudged
-    as spurious peaks)."""
+    as spurious peaks).
+    """
     ipos = tuple(round(float(v)) for v in position)
     if tol_pts > 0:
         return tuple(round(float(v) / tol_pts) * tol_pts for v in ipos)
@@ -268,14 +269,12 @@ def scan_smile_parameters(
     combinations (>= cross_min group appears), average stable peak S/N, spectrum comprehensive
     quality score; sorted by (number of stable peaks, average S/N, quality score). Return
     {success, message, logs, rows (by ranking), scripts({ranking: script text}), scan_dir,
-    n_combos}."""
+    n_combos}.
+    """
     combos = list(grid) if grid is not None else smile_grid(grid_size)
     base = dict(base_params or {})
     sign_mode = smile_scan_sign_mode(experiment)
-    # The margin is converted according to **actual candidate spectrum points** (the physical width
-    # remains unchanged); each actual value is collected for summary log/recording use
-    # (smile_scan_edge_margin falls back to the point constant when the context cannot be obtained).
-    edge_margin_seen: list[int] = []
+    axial_seen: list[dict[str, Any]] = []
     mode = str(rank_mode or "true_peaks").lower()
     # Repair 23 (user): Select the running mode according to the required sorting method (only run
     # once per candidate) -- Net true peak priority -> full sampling run (Number of peaks/Quality
@@ -283,9 +282,7 @@ def scan_smile_parameters(
     # points will not participate in reconstruction, residuals are used as the basis for sorting).
     holdout_ratio = 0.0
     if mode == "consistency":
-        holdout_ratio = float(
-            base.get("holdout_ratio", SMILE_HOLDOUT_RATIO) or 0.0
-        )
+        holdout_ratio = float(base.get("holdout_ratio", SMILE_HOLDOUT_RATIO) or 0.0)
     est_group, est_total = estimate_scan_seconds(experiment, len(combos))
     started = time.time()
     _first_done: list[float] = []
@@ -315,8 +312,7 @@ def scan_smile_parameters(
                 index,
                 total,
                 tr(
-                    "{p0} | Measured approx. {p1:.0f}s per set, {p2:.1f} minutes "
-                    "remaining",
+                    "{p0} | Measured approx. {p1:.0f}s per set, {p2:.1f} minutes remaining",
                     p0=message,
                     p1=measured,
                     p2=remain / 60.0,
@@ -327,31 +323,38 @@ def scan_smile_parameters(
 
     def _evaluate(path: str) -> dict[str, Any]:
         """Candidate spectrum evaluation: peak + quality score (the spectrum is still there at this
-        moment, and will be deleted after the evaluation)."""
+        moment, and will be deleted after the evaluation).
+        """
+        from core.peaks.axial import filter_axial_peaks
         from workflow.pick_peaks import read_spectrum_axes
 
         spectrum = read_spectrum_axes(path)
         arr = spectrum.data
-        # Low threshold + homologous sign mode + exclude axial peaks (0.2.199-patch29hz-modify 16);
-        # does not follow the threshold of the "peak selection" step (default 35σ) -- that step is
-        # to generate a peak table, not to evaluate candidates.
-        edge_margin_points = smile_scan_edge_margin(
+        # Filter before dominant-sign selection, exactly as in final picking.
+        peaks = evaluate_candidate_peaks(arr, sign_mode="both", edge_margin=0)
+        from backend.config import load_processing_defaults
+
+        peaks, axial = filter_axial_peaks(
+            arr,
+            peaks,
             experiment,
-            int(arr.shape[0]),
-            axis_ppm=spectrum.ppm[0],
-            nucleus=(spectrum.nuclei[0] if spectrum.nuclei else ""),
-            obs_mhz=(spectrum.obs[0] if spectrum.obs else 0.0),
+            dic=spectrum.dic,
+            axes_ppm=spectrum.ppm,
+            linewidth_hz_by_nucleus=load_processing_defaults().get("linewidth_hz") or {},
         )
-        edge_margin_seen.append(int(edge_margin_points))
-        peaks = evaluate_candidate_peaks(
-            arr, sign_mode=sign_mode, edge_margin=edge_margin_points
-        )
+        axial_seen.append(axial)
+        if sign_mode == "dominant":
+            peaks = peak_detection.keep_dominant(peaks)
+        elif sign_mode in ("positive", "negative"):
+            sign = 1 if sign_mode == "positive" else -1
+            peaks = [p for p in peaks if p.sign == sign]
         quality = spectrum_quality.evaluate(arr, sign_mode=sign_mode)
         # 0.2.199-patch29hz-Repair 4: The overall score is on QualityResult.score.overall,
         # QualityResult itself has no overall (the previous value was always 0).
         _qscore = getattr(quality, "score", None)
         return {
             "peak_count": len(peaks),
+            "axial_screening": axial,
             "quality": float(getattr(_qscore, "overall", 0.0) or 0.0),
             "peaks": [
                 {
@@ -376,24 +379,19 @@ def scan_smile_parameters(
         raise RuntimeError(str(scan.get("message", tr("SMILE Scan failed"))))
     # Must be generated after calling _evaluate ** on backend.smile_scan, otherwise the list will
     # always be empty, and log will falsely report the actual evaluation as "not evaluated".
-    _criteria_log = (
+    _criteria_log = tr(
+        "Candidate evaluation criteria: threshold {p0:g}σ (independent of the peak-picking "
+        "step), sign mode {p1}, acquisition-gated edge screening; ",
+        p0=SMILE_SCAN_SIGMA,
+        p1=sign_mode,
+    ) + (
         tr(
-            "Candidate evaluation criteria: threshold {p0:g}σ (independent of the peak-picking "
-            "step), sign mode {p1}, exclude axial peaks ",
-            p0=SMILE_SCAN_SIGMA,
-            p1=sign_mode,
+            "{p0}–{p1} axial-like candidates rejected per spectrum (no blanket edge mask)",
+            p0=min(int(a.get("rejected", 0)) for a in axial_seen),
+            p1=max(int(a.get("rejected", 0)) for a in axial_seen),
         )
-        + (
-            tr(
-                "{p0}–{p1} points(converted on the real axis of the candidate spectrum; the "
-                "physical width is the "
-                "same)",
-                p0=min(edge_margin_seen),
-                p1=max(edge_margin_seen),
-            )
-            if edge_margin_seen
-            else tr("(The backend did not return an evaluable candidate spectrum)")
-        )
+        if axial_seen
+        else tr("(The backend did not return an evaluable candidate spectrum)")
     )
     scan["logs"] = [_criteria_log] + list(scan.get("logs") or [])
     candidates = list(scan.get("candidates") or [])
@@ -442,9 +440,7 @@ def scan_smile_parameters(
                 "quality": round(quality, 2),
                 "holdout_rmse": float(metrics.get("holdout_rmse", 0.0) or 0.0),
                 "holdout_corr": float(metrics.get("holdout_corr", 0.0) or 0.0),
-                "smile_rms_ratio": float(
-                    metrics.get("smile_rms_ratio", 0.0) or 0.0
-                ),
+                "smile_rms_ratio": float(metrics.get("smile_rms_ratio", 0.0) or 0.0),
                 "composite": round(stable - suspect + 0.01 * mean_snr + 0.01 * quality, 3),
                 "ok": bool(entry.get("ok")),
                 "error": str(metrics.get("error", "") or ""),
@@ -485,8 +481,7 @@ def scan_smile_parameters(
     for rank, row in enumerate(rows, start=1):
         row["rank"] = rank
     scripts = {
-        int(row["rank"]): str(row.get("_script", ""))
-        for row in rows[: max(1, int(keep_top))]
+        int(row["rank"]): str(row.get("_script", "")) for row in rows[: max(1, int(keep_top))]
     }
     for row in rows:
         row.pop("_script", None)
@@ -513,7 +508,8 @@ def write_smile_scan_output(
     (0.2.199-patch29hz-repair 3). The sorting list falls into `<data>/smile_optimized/`; the top
     three scripts fall into `<data>/process/ <data_id>_nus_rankN.com` (same place as the final
     script and can be run directly). Return {csv, json, rank1, rank2, rank3} (missing items do
-    not appear)."""
+    not appear).
+    """
     import csv
     import json
 
@@ -524,10 +520,22 @@ def write_smile_scan_output(
     csv_path = out_dir / f"{exp_id}-{data_id}_smile_ranking.csv"
     json_path = out_dir / f"{exp_id}-{data_id}_smile_ranking.json"
     fields = [
-        "rank", "index", "nsigma", "thresh", "net_peaks", "stable_count",
-        "suspect_count", "peak_count",
-        "mean_snr", "quality", "smile_rms_ratio", "holdout_rmse", "holdout_corr",
-        "composite", "ok", "error",
+        "rank",
+        "index",
+        "nsigma",
+        "thresh",
+        "net_peaks",
+        "stable_count",
+        "suspect_count",
+        "peak_count",
+        "mean_snr",
+        "quality",
+        "smile_rms_ratio",
+        "holdout_rmse",
+        "holdout_corr",
+        "composite",
+        "ok",
+        "error",
     ]
     with csv_path.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=fields)
@@ -536,8 +544,7 @@ def write_smile_scan_output(
             writer.writerow({key: row.get(key, "") for key in fields})
     atomic_write_text(
         json_path,
-        json.dumps({"rows": rows, "count": len(rows)}, ensure_ascii=False, indent=2)
-        + "\n",
+        json.dumps({"rows": rows, "count": len(rows)}, ensure_ascii=False, indent=2) + "\n",
     )
     paths: dict[str, str] = {
         "csv": str(csv_path),
@@ -551,11 +558,11 @@ def write_smile_scan_output(
         paths[f"rank{rank}"] = str(target)
     return paths
 
+
 def format_results(results: list[SmileParameterResult]) -> str:
     """Render the candidate list as an aligned parameter combination + stability score table."""
     header = "{:>6} {:>6} {:>8} {:>7} {:>9} {:>6} {:>6} {:>6} {:>6}".format(
-        "nSigma", "thresh", "decision", "overall", "stability", "cross", "snr",
-        "peaks", "artifact"
+        "nSigma", "thresh", "decision", "overall", "stability", "cross", "snr", "peaks", "artifact"
     )
     lines = [header, "-" * len(header)]
     for result in results:
@@ -581,7 +588,6 @@ def save_report(results: list[SmileParameterResult], path: Path | str) -> Path:
     out = Path(path)
     atomic_write_text(
         out,
-        json.dumps([r.to_dict() for r in results], ensure_ascii=False, indent=2)
-        + "\n",
+        json.dumps([r.to_dict() for r in results], ensure_ascii=False, indent=2) + "\n",
     )
     return out

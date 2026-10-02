@@ -29,9 +29,7 @@ def _write_ft2(path: Path, data: np.ndarray) -> None:
     pipe.write(str(path), dic, data.astype(np.float32), overwrite=True)
 
 
-def test_optimize_baseline_direct_axis_slope(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_optimize_baseline_direct_axis_slope(tmp_path: Path, bruker_dir: Path) -> None:
     """Direct dimension (F2) linear drift: optimisation selects a correction (off score is below
     the best)."""
     spec = np.zeros((32, 64))
@@ -51,9 +49,7 @@ def test_optimize_baseline_direct_axis_slope(
     assert "F1" in joined and "未优化" in joined
 
 
-def test_optimize_baseline_grid_contains_off_and_orders(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_optimize_baseline_grid_contains_off_and_orders(tmp_path: Path, bruker_dir: Path) -> None:
     experiment = read_dataset(bruker_dir / "hsqc_2d")
     # Medium-quality spectrum (off score <95): the candidate grid must really run
     spec = np.full((32, 64), 100.0)
@@ -67,9 +63,7 @@ def test_optimize_baseline_grid_contains_off_and_orders(
     assert "order:3" in result.scores["F2"]
 
 
-def test_optimize_baseline_good_baseline_skips_grid(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_optimize_baseline_good_baseline_skips_grid(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.199-patch8: an axis with off score >= 95 skips the candidate grid and stays off."""
     experiment = read_dataset(bruker_dir / "hsqc_2d")
     spec = np.zeros((32, 64))
@@ -82,9 +76,7 @@ def test_optimize_baseline_good_baseline_skips_grid(
     assert any("基线已良好" in line for line in result.logs)
 
 
-def test_optimize_baseline_reports_progress(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_optimize_baseline_reports_progress(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.199-patch7: baseline optimisation reports progress per axis/candidate (a candidate runs
     only when off score <95)."""
     spec = np.full((32, 64), 100.0)
@@ -98,9 +90,7 @@ def test_optimize_baseline_reports_progress(
     assert any("score=" in m for m in messages)
 
 
-def test_optimize_baseline_cancelled_raises(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_optimize_baseline_cancelled_raises(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.199-patch7: with the cancel flag set, baseline optimisation raises an exception and
     exits at once (off score <95)."""
     import pytest
@@ -126,9 +116,7 @@ def test_decimated_reduces_traces() -> None:
         assert dec.ndim == 3
 
 
-def test_optimize_baseline_small_max_traces_works(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_optimize_baseline_small_max_traces_works(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.199-patch8: small max_traces still yields a valid baseline config."""
     spec = np.zeros((32, 64))
     ft2 = tmp_path / "spec.ft2"

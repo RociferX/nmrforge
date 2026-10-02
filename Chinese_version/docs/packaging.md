@@ -1,13 +1,13 @@
 # AppImage 打包方案（NMRForge）
 
-状态：**v1.0.1 已发布**。源码保持 Apache-2.0；Linux AppImage 随 Release 分发（2026-09-22 起 Release 上只有**一份**产物，界面语言在运行时切换；该产物按 tag `v1.0.1` 指向的公开提交 `20d95e9` 构建，见 `APPIMAGE_RELEASE_CHECKLIST.md`）。
+状态：**v1.0.2 源码与 AppImage 发布准备中**；构建和便携性验收通过后发布。源码保持 Apache-2.0，Linux AppImage 随 Release 分发，单份产物在运行时切换界面语言。此前 v1.0.1 是已发布的历史快照，不代表当前源码；实际提交、资产和验证记录见 `APPIMAGE_RELEASE_CHECKLIST.md`。
 
 本页记录 Linux AppImage 的构建方案；每次发布前必须完成根目录
 `APPIMAGE_RELEASE_CHECKLIST.md`，并按最终捆绑的 PySide6/Qt 与其他组件复核许可。
 
 ## 发行策略（PACK-015，2026-09-12 定案）
 
-- **v1.0.1 同时发布源码与 AppImage。** AppImage 由 PyInstaller 打成，`nmrforge_data/config`、`nmrforge_data/presets`、`gui/assets`、`ui_support/locales` 通过 spec 的 `datas` 进 `_MEIPASS`（数据包保持同形），资源定位见 `core/app_paths.py` 与 `ui_support/i18n.py`。
+- **发布提供源码与一份 AppImage。** AppImage 由 PyInstaller 打成，`nmrforge_data/config`、`nmrforge_data/presets`、`gui/assets`、`ui_support/locales` 通过 spec 的 `datas` 进 `_MEIPASS`（数据包保持同形），资源定位见 `core/app_paths.py` 与 `ui_support/i18n.py`。
 - **单产物 + 运行时语言（2026-09-21）。** 界面文案改成 `tr("English text")` + `ui_support/locales/zh.json` 查表层后，构建脚本只产出一个 `NMRForge-<版本>-<arch>.AppImage`；界面语言按「`NMRFORGE_LANG`/`NMRFORGE_LANGUAGE`(临时钉死)→ 设置里的偏好(`nmrforge.local.yaml` 的 `language:`)→ 系统区域(QLocale / `LANG` / `LC_ALL`)→ 本树 `ui_support/locales/default.json`」解析(GUI 里可改,见 [gui.md](gui.md))。公开英文树构建的产物默认英文，私有主干默认中文；两者都随包带 `zh.json`，中英用户拿的是同一个文件。spec 另排除本项目用不到的 Qt 模块（体积），排除项只影响体积，用到时从 `_EXCLUDED_QT_MODULES` 删掉即可；
   `PySide6.QtTest` **不能**排除（`qtcompat/__init__.py` 无条件 import 它），已留注释与守卫。
 - **`pip install .` / wheel 受支持（2026-09-21，方案 A）**：运行资源不再散在仓库根目录 —— 默认配置与实验模板进了数据包 `nmrforge_data/`（`config/`、`presets/`），`gui/assets` 与 `ui_support/locales` 走 `package-data`（见 `pyproject.toml` 的 `[tool.setuptools.package-data]`）。**源码检出与装机态的相对位置一致**，`resource_path("config/nmrforge.yaml")`、`resource_path("presets")` 两边都指得到；开发仍推荐可编辑安装（`pip install -e .`）。包内的 `core|backend|workflow|nmrforge_api/README.md` 也随包一起发 —— `behavior_digest` 覆盖这四棵树的**全部**文件，缺了它们装机态算出来的指纹就和 `compat_declaration` 对不上（`compat_verified` 会恒为 false）；反过来，`ui_support/locales/{source.json,converted.json}` 只是 `scripts/i18n_extract_ui.py` 的翻译工具清单，运行期只读 `default.json`/`en.json`/`zh.json`，所以 `package-data` 里逐个点名而不用 `locales/*.json` 通配（`package_data` 按文件系统展开，`exclude-package-data` 对显式 `package_data` 不生效）。本机重复构建前先删 `build/`：`setuptools` 的 `build_py` 不清理 `build/lib`，改过 `package-data` 后原地重建会把上一轮的残留文件一起打进 wheel（CI 在干净检出里构建，不受影响）。PyPI 发布是另一件事，尚未进行。
@@ -24,8 +24,8 @@
 
 **不打包（运行时发现）：**
 
-- NMRPipe/SMILE 等外部后端：沿用 NMRFlow 的运行时查找策略
-  （PATH → csh 环境 ~/.cshrc 的 NMRPIPEBIN → 常见安装目录），AppImage 不内置。
+- NMRPipe/SMILE 由用户单独安装，不随 AppImage 分发；依次检查显式配置、用户 csh 环境、
+  PATH 与常见安装位置。详见 [external-dependencies.md](external-dependencies.md)。
   AppImage 内应用通过 `core/app_paths.py` 定位自身资源，与外部后端无关。
 
 ## 构建流程（在 Linux 构建机/VM 上执行）

@@ -59,33 +59,25 @@ def test_smile_status_optional_and_outdated(tmp_path: Path) -> None:
     assert statuses["smile"] == "OUTDATED"
 
 
-def test_optimize_smile_rejects_uniform(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_optimize_smile_rejects_uniform(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from core.data.internal_data_model import SamplingMode
 
     manager, exp_id, data_id, _ft2 = _manager_with_artifacts(tmp_path)
     controller = ProcessingController(manager)
-    experiment = SimpleNamespace(
-        sampling=SimpleNamespace(mode=SamplingMode.UNIFORM)
-    )
+    experiment = SimpleNamespace(sampling=SimpleNamespace(mode=SamplingMode.UNIFORM))
     monkeypatch.setattr(controller, "_read_experiment", lambda *a, **k: experiment)
     with pytest.raises(RuntimeError, match="NUS"):
         controller.optimize_smile(None, exp_id=exp_id, data_id=data_id)
 
 
-def test_optimize_smile_rejects_3d_nus(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_optimize_smile_rejects_3d_nus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """0.2.199-patch29hz-fix21 (user): 3D NUS does not offer SMILE optimisation yet (the entry is
     hidden and the controller blocks it too)."""
     from core.data.internal_data_model import SamplingMode
 
     manager, exp_id, data_id, _ft2 = _manager_with_artifacts(tmp_path)
     controller = ProcessingController(manager)
-    experiment = SimpleNamespace(
-        ndim=3, sampling=SimpleNamespace(mode=SamplingMode.NUS)
-    )
+    experiment = SimpleNamespace(ndim=3, sampling=SimpleNamespace(mode=SamplingMode.NUS))
     monkeypatch.setattr(controller, "_read_experiment", lambda *a, **k: experiment)
     with pytest.raises(RuntimeError, match="2D NUS"):
         controller.optimize_smile(None, exp_id=exp_id, data_id=data_id)
@@ -103,12 +95,9 @@ def test_optimize_smile_progress_and_concise_return(
     controller = ProcessingController(manager)
     experiment = SimpleNamespace(sampling=SimpleNamespace(mode=SamplingMode.NUS))
     monkeypatch.setattr(controller, "_read_experiment", lambda *a, **k: experiment)
-    monkeypatch.setattr(
-        controller, "_last_spectrum_params", lambda *a, **k: {"nthread": 4}
-    )
-    def fake_scan(
-        exp, backend, base_params=None, *, scan_dir, grid=None, progress=None, **kw
-    ):
+    monkeypatch.setattr(controller, "_last_spectrum_params", lambda *a, **k: {"nthread": 4})
+
+    def fake_scan(exp, backend, base_params=None, *, scan_dir, grid=None, progress=None, **kw):
         assert base_params == {"nthread": 4}
         progress(1, 25, "正在优化 1/25: {'nsigma': 3.0, 'thresh': 0.9}")
         return {
@@ -148,15 +137,11 @@ def test_optimize_smile_progress_and_concise_return(
         "prepare_intermediate",
         lambda work, exp, params=None: (work, None),
     )
-    monkeypatch.setattr(
-        memory_disk, "teardown_intermediate", lambda work, mem: None
-    )
+    monkeypatch.setattr(memory_disk, "teardown_intermediate", lambda work, mem: None)
     received: list[str] = []
-    out = controller.optimize_smile(
-        None, exp_id=exp_id, data_id=data_id, progress=received.append
-    )
+    out = controller.optimize_smile(None, exp_id=exp_id, data_id=data_id, progress=received.append)
     assert received == ["正在优化 1/25: {'nsigma': 3.0, 'thresh': 0.9}"]
     assert isinstance(out, str)
-    assert "组扫描完成" in out
+    assert "已比较 25 组参数" in out
     assert "Rank1" in out
     assert "/x_ranking.csv" in out

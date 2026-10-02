@@ -61,10 +61,7 @@ def _cycle(phases: list[list[tuple[str, float]]], receivers: list[float]):
     from core.experiment.coherence_pathway import PhaseCycle
 
     return PhaseCycle(
-        scans=tuple(
-            (index, tuple(entry), receivers[index])
-            for index, entry in enumerate(phases)
-        )
+        scans=tuple((index, tuple(entry), receivers[index]) for index, entry in enumerate(phases))
     )
 
 
@@ -126,9 +123,7 @@ def test_phase_cycle_projector_kills_and_keeps_pathways() -> None:
     """``W = Σ_s e^{iΦ(s)}``: terms adding in phase survive, opposite ones cancel out."""
     # Two scans: ph1 = 0/180, receiver 0/0. Δp(ph1) = 0 gives weight 2; Δp(ph1) = 1 gives 0.
     cycle = _cycle([[("ph1", 0.0)], [("ph1", 180.0)]], [0.0, 0.0])
-    kept, killed = cycle_projector(
-        [({"H:ph1": 0.0}, 0.0), ({"H:ph1": 1.0}, 1.0)], cycle
-    )
+    kept, killed = cycle_projector([({"H:ph1": 0.0}, 0.0), ({"H:ph1": 1.0}, 1.0)], cycle)
     assert kept.kept and not killed.kept
     assert kept.magnitude == pytest.approx(2.0)
     assert killed.magnitude == pytest.approx(0.0, abs=1e-9)
@@ -188,14 +183,11 @@ def test_aqseq_decides_the_storage_order(bruker_dir: Path, tmp_path: Path) -> No
     assert coords[1].states["F2"] == 1 and coords[1].indices["F2"] == 0
 
 
-def test_unexpanded_clause_order_never_overrides_aqseq(
-    bruker_dir: Path, tmp_path: Path
-) -> None:
+def test_unexpanded_clause_order_never_overrides_aqseq(bruker_dir: Path, tmp_path: Path) -> None:
     """Only the **unexpanded source** order differs ⇒ trust AQSEQ (no conflict);
     a contradiction in the expanded execution ⇒ error with blocking."""
     text = (
-        ";cbcaconhgpwg3d\n aqseq 321\n go=2 ph31\n mc #0 to 2\n"
-        " F1PH(ip1, id0)\n F2PH(ip5, id10)\n"
+        ";cbcaconhgpwg3d\n aqseq 321\n go=2 ph31\n mc #0 to 2\n F1PH(ip1, id0)\n F2PH(ip5, id10)\n"
     )
     exp = read_dataset(bruker_dir / "hnca_3d")
     exp.acquisition_parameters["acqus"]["AQSEQ"] = 0  # ⇒ 321
@@ -212,9 +204,7 @@ def test_unexpanded_clause_order_never_overrides_aqseq(
     assert not status.blocking
 
 
-def test_expanded_execution_conflict_fails_loudly(
-    bruker_dir: Path, tmp_path: Path
-) -> None:
+def test_expanded_execution_conflict_fails_loudly(bruker_dir: Path, tmp_path: Path) -> None:
     """An **expanded** execution order contradicting AQSEQ ⇒
     ``metadata_execution_conflict`` plus blocking."""
     from tests.test_pulse_pathways import HNCO_PULSEPROGRAM
@@ -268,16 +258,34 @@ def test_rf_channel_and_dimension_nucleus_maps_are_separate(
 
     exp = read_dataset(bruker_dir / "hnca_3d")
     exp.acquisition_parameters["acqus"].update(
-        {"NUC1": "<1H>", "NUC2": "<13C>", "NUC3": "<15N>",
-         "SFO1": "800.19", "SFO2": "201.24", "SFO3": "81.09"}
+        {
+            "NUC1": "<1H>",
+            "NUC2": "<13C>",
+            "NUC3": "<15N>",
+            "SFO1": "800.19",
+            "SFO2": "201.24",
+            "SFO3": "81.09",
+        }
     )
     exp.acquisition_parameters["acqu2s"].update(
-        {"NUC1": "<15N>", "NUC2": "<off>", "NUC3": "<off>",
-         "SFO1": "81.09", "SFO2": "360.13", "SFO3": "500.13"}
+        {
+            "NUC1": "<15N>",
+            "NUC2": "<off>",
+            "NUC3": "<off>",
+            "SFO1": "81.09",
+            "SFO2": "360.13",
+            "SFO3": "500.13",
+        }
     )
     exp.acquisition_parameters["acqu3s"].update(
-        {"NUC1": "<13C>", "NUC2": "<off>", "NUC3": "<off>",
-         "SFO1": "201.24", "SFO2": "500.13", "SFO3": "500.13"}
+        {
+            "NUC1": "<13C>",
+            "NUC2": "<off>",
+            "NUC3": "<off>",
+            "SFO1": "201.24",
+            "SFO2": "500.13",
+            "SFO3": "500.13",
+        }
     )
     rf = rf_channel_nuclei(exp)
     dims = dimension_nuclei(exp)
@@ -329,9 +337,7 @@ def test_spectator_rule_is_conservative() -> None:
         is_spectator_safe,
     )
 
-    shaped_h = OpaquePhysics(
-        kind=OPAQUE_SHAPED, channels=("H",), affects_relevant_pathway=False
-    )
+    shaped_h = OpaquePhysics(kind=OPAQUE_SHAPED, channels=("H",), affects_relevant_pathway=False)
     # Even when declared "does not affect the pathway", a term with z/transverse on H blocks it
     terms = [term([("N", "+"), ("H", "z")])]
     safe, why = is_spectator_safe(shaped_h, terms, coupling_context=False)
@@ -343,16 +349,22 @@ def test_spectator_rule_is_conservative() -> None:
     # Any coupling semantics ⇒ never ignorable
     assert is_spectator_safe(shaped_h, other, coupling_context=True)[0] is False
     # Explicitly affects the pathway / relevant-unknown ⇒ not ignorable
-    assert is_spectator_safe(
-        OpaquePhysics(kind=OPAQUE_SHAPED, channels=("H",), affects_relevant_pathway=True),
-        other,
-        coupling_context=False,
-    )[0] is False
-    assert is_spectator_safe(
-        OpaquePhysics(kind=OPAQUE_SHAPED, channels=("H",), affects_relevant_pathway="unknown"),
-        other,
-        coupling_context=False,
-    )[0] is False
+    assert (
+        is_spectator_safe(
+            OpaquePhysics(kind=OPAQUE_SHAPED, channels=("H",), affects_relevant_pathway=True),
+            other,
+            coupling_context=False,
+        )[0]
+        is False
+    )
+    assert (
+        is_spectator_safe(
+            OpaquePhysics(kind=OPAQUE_SHAPED, channels=("H",), affects_relevant_pathway="unknown"),
+            other,
+            coupling_context=False,
+        )[0]
+        is False
+    )
 
 
 def test_watergate_is_one_opaque_node_not_half_parsed() -> None:

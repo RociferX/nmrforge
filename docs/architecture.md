@@ -20,11 +20,8 @@ Desktop application                  Backend
 Dependency direction: GUI -> Shared Contract ← Backend. GUI does not directly contact NMRPipe syntax.
 Backend does not depend on Qt.
 
-**Development strategy**: the desktop application (`gui/`, `viewer/`) and the backend
-(`backend/`, `workflow/`, `core/`) are developed **separately** against this shared contract.
-Each side can be built, reviewed and tested on its own - the backend never imports Qt, the GUI
-never writes NMRPipe syntax - and the two sides are **integrated and unified** through the
-contract layer before release. Both ship together from one code base.
+The boundary keeps calculations independent of Qt and confines NMRPipe syntax to the backend and
+generated scripts. Both sides are maintained in one source tree and released together.
 
 ## 2. Directory ownership
 
@@ -64,7 +61,7 @@ Project management: core/workspace.WorkspaceManager(Shared, creates the default 
   -> status inference; the directory hierarchy is the hierarchy(see API_CONTRACT §9)
 ```
 
-## 4. Current cross-border contact (unique)
+## 4. Main GUI-to-workflow entry points
 
 `gui/processing.py::ProcessingController`:
 
@@ -73,17 +70,18 @@ Project management: core/workspace.WorkspaceManager(Shared, creates the default 
 - `generate_spectrum(data, exp_id, data_id, params, progress)` →
   `workflow.stepwise.generate_spectrum` → `phase_routes.unified_route`
   (Backend, unified phase optimisation), returns spectrum path;
-- `manual_param_table()` / `manual_script_editor()`: Artificial path occupancy interface
+- Manual scripts run through `workflow.manual`, which records the executed script, parameter
+  differences, status and products in the workflow record.
 
-In addition, `gui/` and `viewer/` only rely on Shared Contract and have no other Backend import.
-For contract changes, see docs/API_CONTRACT.md, Proposal must be used.
+The GUI uses the shared processing contract to reach backend workflows. See the
+[Python API and processing documentation](python-api.md) for supported scripting interfaces.
 
 ## 5. Handling dual paths
 
 - **Automation**:ProcessingController -> workflow.stepwise -> phase_routes.unified_route
   (Understanding -> Processing -> optimisation -> QC), the backend goes NMRPipe/SMILE;
-- **Artificial (implemented)**:workflow/manual -- fid.com Check/Revise/run, spectrum script
-  Edit/run, the product is returned and registered WorkflowRun.
+- **Manual**: `workflow.manual` supports reviewing and running `fid.com` and spectrum scripts,
+  then registering the outputs and run details.
 
 ## 6. Test layering
 
@@ -93,12 +91,4 @@ For contract changes, see docs/API_CONTRACT.md, Proposal must be used.
 
 ## 7. Related documents
 
-- `docs/API_CONTRACT.md` -- Shared Contract definition and change process
-- `docs/GUI_ARCHITECTURE_VISION.md` -- user GUI layout vision (design reference)
 - `docs/README.md` -- documentation index
-- `docs/roadmap.md` -- roadmap and open items
-
-> The development process records (status, decisions, branch workflow) exist only in the private
-> development trunk and are **not part of this snapshot**; for the public snapshot use this
-> directory's README, the roadmap and the release notes. (2026-09-22 review: the public page used
-> to list those three under "Related documents", where no reader could find them.)

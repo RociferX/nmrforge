@@ -23,34 +23,29 @@ warning and output it produced so that the result can be reproduced and audited.
 > and keep the evidence (quality metrics, resolved parameters, run records) alongside the
 > spectrum.
 
-Current version: **1.0.1** · Status: **production release**
+Source version: **1.0.2** · Release channel: **stable**
 Author: **Xuanfeng Li**, University of Science and Technology of China · Source licence: Apache-2.0 (see [LICENSE](LICENSE) and [NOTICE](NOTICE))
 Distribution: source plus a Linux AppImage (one artefact; the interface language is switched at run time)
 Releases: <https://github.com/RociferX/nmrforge/releases>
 Repository: <https://github.com/RociferX/nmrforge>
-Archived at Zenodo: DOI [10.5281/zenodo.22909416](https://doi.org/10.5281/zenodo.22909416) (all versions: [10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415))
+Zenodo concept DOI (all archived versions): [10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415). A version-specific DOI applies only to its archived snapshot.
 
-> **nmrForge 1.0.1 is the production release: the desktop application and the Python/CLI API
-> (`nmrforge_api`, contract version 1.0) are both released.** Behaviour documented here is tested
-> (see the test suite); any later behaviour change is declared through the compat process
+> This page describes the **1.0.2 source** and its desktop/Python/CLI interfaces
+> (`nmrforge_api`, contract version 1.0). Published binaries are listed in GitHub Releases.
+> Regression coverage is in the test suite; behaviour changes are declared through the compat process
 > (`nmrforge_api/compat_declaration.py`: behaviour digests plus the
 > `same/additive/behavior_changed/contract_changed` levels) rather than by "defaults may still
 > change".
 
-> ### Two tracks: the desktop application and the Python/CLI API
+> ### Desktop application and Python/CLI API
 >
-> - **Track A - the desktop application (mature).** The GUI drives the whole pipeline from a
->   Bruker dataset to processed spectra, peak tables, quality control and provenance records;
->   the Linux AppImages are built from it and it is the recommended path for routine work.
-> - **Track B - the Python/CLI API (`nmrforge_api`, first version).** The parameter-study surface
->   (`StudySession`, sweeps, localisation targets, QC records, behaviour digest) is released as its
->   **first version** (`API_VERSION = "1.0"`, since 2026-09-22): names, defaults and the records it
->   writes are managed through `nmrforge_api.compat_manifest()` (`behavior_digest`,
->   `compat_level`, `affected`) and recorded in the release notes. Pin a commit and check the
->   manifest before treating a set of numbers as comparable.
+> The desktop application and `nmrforge_api` are supported interfaces in the same source tree.
+> The Python API is versioned separately (`API_VERSION = "1.0"`) and exposes a compatibility
+> manifest for behaviour and contract changes. A released AppImage is a versioned binary built
+> from a specific source revision; newer source updates do not update an existing AppImage.
 >
-> Both tracks live in one repository and both are at their first version; verify the numbers the
-> API gives you against your own data.
+> Check the manifest and release notes when comparing numerical results across software versions,
+> and validate results against the data and experiment at hand.
 
 > ### Support boundary
 >
@@ -71,8 +66,8 @@ Archived at Zenodo: DOI [10.5281/zenodo.22909416](https://doi.org/10.5281/zenodo
 - **Quality control** - FID-level diagnostics (DC offset, bad points, non-finite values,
   anomalous traces), sampling-consistency checks, and spectrum-level quality metrics
   (signal-to-noise, phase quality, baseline quality, artefacts).
-- **Peak analysis** - automatic peak detection with parabolic or 2D Gaussian sub-grid
-  localisation, plus peak-table import/export in POKY-style tables.
+- **Peak analysis** - automatic peak detection with three-point parabolic sub-grid localisation,
+  plus peak-table import/export in POKY-style tables.
 - **Automation with records** - GUI, command line and Python API entry points; batch runs;
   scripts and candidate spectra are kept; each run stores the resolved parameters and the
   software/tool versions that produced it.
@@ -132,7 +127,7 @@ run headless on a server while `gui/` and `viewer/` provide the desktop interfac
 | [`nmrforge_data/presets/`](nmrforge_data/presets/README.md) | experiment templates; the YAML files are the single source |
 | [`tests/`](tests/README.md) | the pytest suite: unit / integration / regression |
 | [`examples/`](examples/README.md) | runnable synthetic-dataset and walkthrough scripts |
-| [`packaging/`](packaging/README.md) | AppImage build assets (shipped with v1.0.1; the release checklist stays in the maintainer's private repository) |
+| [`packaging/`](packaging/README.md) | AppImage build assets |
 | [`scripts/`](scripts/README.md) | standalone command-line tools and validation scripts |
 | [`docs/`](docs/README.md) | the documentation index |
 | [`.github/`](.github/) | the CI workflow and the issue/PR templates |
@@ -157,10 +152,10 @@ licence inventory.
 
 ## Installation
 
-1.0.1 ships two things: the **Linux AppImage** and the **source**.
-The AppImage bundles Python and Qt, so it needs no environment of its own
-([releases page](https://github.com/RociferX/nmrforge/releases)); for the source, clone the
-repository and use an editable install so the repository-root resources remain available:
+The repository provides source, and the [releases page](https://github.com/RociferX/nmrforge/releases)
+may provide a versioned Linux AppImage. Each AppImage corresponds to its named release and source
+revision; source changes do not rebuild it. For the current source tree, clone the repository and
+use an editable install:
 
 ```bash
 git clone https://github.com/RociferX/nmrforge.git
@@ -177,16 +172,15 @@ are supported since 2026-09-21: the runtime resources ship inside the `nmrforge_
 (see [docs/packaging.md](docs/packaging.md)); the editable install above stays the recommended
 development path.
 
-The AppImage build recipe is [packaging/linux/build_appimage.sh](packaging/linux/build_appimage.sh):
-it builds **one** artefact, and the interface language is decided at run time (`NMRFORGE_LANG`/
+The AppImage build recipe is [packaging/linux/build_appimage.sh](packaging/linux/build_appimage.sh).
+It builds one artefact, and the interface language is decided at run time (`NMRFORGE_LANG`/
 `NMRFORGE_LANGUAGE`, then the preference stored in the settings, then the system locale, falling
 back to the default language this tree declares in
 [`ui_support/locales/default.json`](ui_support/locales/default.json)); `BUILD_INFO.txt` records the
 version, the full commit, the default language and the bundled dependency versions. It bundles
 PySide6/Qt, which are distributed under LGPL-3.0 with their licence texts and notice inside the
-artefact (`./NMRForge-<version>-x86_64.AppImage --licenses`). Every release first completes the
-release checklist kept in the maintainer's private repository. Do not treat the build
-scripts as an available or approved binary.
+artefact (`./NMRForge-<version>-x86_64.AppImage --licenses`). The build scripts are source
+materials; an AppImage is available only when attached to a release.
 
 ## Quick start
 
@@ -248,7 +242,7 @@ nmrforge-viewer                 # after an editable install
 python -m viewer
 ```
 
-## CLI usage (Track B - in flux)
+## CLI usage
 
 ```bash
 python -m nmrforge_api --help
@@ -260,7 +254,7 @@ python -m nmrforge_api report     --study DIR
 python -m nmrforge_api status     --study DIR
 ```
 
-## Python API (Track B - in flux)
+## Python API
 
 ```python
 from nmrforge_api import (
@@ -312,16 +306,17 @@ Automatic behaviour is meant to be visible, not silent:
 - Sampling metadata conflicts (for example, metadata that claims NUS while the sampling list
   actually covers the complete grid) are reported as conflicts rather than silently resolved.
 
-Known gap: these records are written as structured log lines and run parameters today, not yet
-as a single machine-readable quality-audit record per run. See
-the maintainer's private release audit.
+Applied QC corrections have an append-only machine-readable audit record (`qc_audit.jsonl`) in
+addition to the run log and resolved parameters. The audit records corrections; it is not a
+complete per-run snapshot of every QC result.
 
 ## Reproducibility and provenance
 
 Each processing run creates a run record containing the run id, input references, resolved
 parameters, referenced scripts, outputs, software version, external tool versions, timestamps and
-warnings. The parameter-sweep API additionally writes `manifest.json`, `runs.json`,
-`peak_positions.csv` and `uncertainty.csv` into the study directory.
+warnings. The parameter-sweep API writes the manifest, workflow/run records and a unified
+`peak_table_parabolic.csv`; see [Outputs and records](docs/external-api/06-outputs-and-records.md)
+for the current schema and file layout.
 
 `core.__version__` is the single source of the version number; `pyproject.toml` reads it
 dynamically, so the package version and the version written into run records cannot drift apart.
@@ -380,26 +375,20 @@ as well - see [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## Evidence
 
-- [Real-data evidence (public data set)](docs/evidence/real-data-comparison.md) - an **external
-  truth check** on **one public data set** (the raw Bruker data of BMRB timedomain entry 53374): the
+- [Real-data evidence (public data set)](docs/evidence/real-data-comparison.md) - a dated
+  **historical evidence snapshot** from **one public data set** (the raw Bruker data of BMRB
+  timedomain entry 53374): the
   final spectra with the published deposited chemical shifts overlaid, one-to-one per-peak recovery
   (**84.1%** at the tight tolerance of 1H 0.01 / 15N 0.05 ppm, 93.5% at 0.02/0.10 ppm), the chance
   background under the same convention (2.0%), QC scores and a real-machine repeatability snapshot. The
-  criterion lives outside the software instead of comparing it with itself; it is evidence that the
-  **automatic processing** is usable, whichever entry point (desktop application, CLI or scripting
-  API) drives it.
-- [Validation boundary: engineering regression vs scientific validation](docs/external-api/09-limitations-and-roadmap.md)
-  section 9.5 - where each kind of check runs, where its artefacts land, and why scientific
-  conclusions belong to downstream analysis (including the truth check the maintainer ran).
-- **The raw files of that data set are public**: download them by their entry numbers and recompute
-  with the commands on the page. The per-run JSON and log files stay on the machine that has
-  NMRPipe. Aggregate numbers for other data sets cannot be recomputed from this repository alone;
-  the input fingerprints (SHA-256) are listed so that a data owner can re-run them.
+  criterion lives outside the software instead of comparing it with itself. These figures describe
+  that historical run only; they are not a validation of the current source revision, a guarantee
+  for other data, or a scientific conclusion. See the evidence page for its date and scope.
 
 ## Tests
 
-The suite runs without NMRPipe: the engine boundary is mocked, so a clone can be verified on any
-machine with Python >= 3.12.
+The suite uses mocked engine boundaries and can run without NMRPipe on a supported Python
+environment. Real-engine behaviour still requires NMRPipe/SMILE and separate validation.
 
 ```bash
 python -m pip install -e ".[test]"
@@ -408,17 +397,9 @@ python -m pytest -m unit             # fast subset (pure logic; ~45 s, mostly co
 python -m ruff check .               # static checks
 ```
 
-CI (GitHub Actions) runs the static checks, the full suite on Python 3.12 and 3.13, and a
-release-readiness job. One further self-hosted job (`external-engine`) re-runs that same suite
-on a machine that has NMRPipe and publishes the log as an artifact. Be precise about what that
-is: the suite never calls the engine, so the job is a drift check on the machine plus a
-release-time gate, not an engine test. It is skipped unless a self-hosted runner is registered
-and the repository variable `NMRFORGE_SELF_HOSTED_CI` is `true` - with the variable unset a
-release tag alone does not run it. Engine-level work is run by hand: `scripts/vm_test.sh` on a
-machine that has NMRPipe, and `scripts/vm_realdata_report.py` on laboratory data (its aggregate
-report is published as a CI artifact only when `NMRFORGE_REAL_DATA_TARGETS` is configured).
-Test files are flat by design and classified with the `unit` / `integration` / `regression`
-markers (`tests/categories.py` is the single source).
+CI runs the checks configured for the repository. The ordinary test suite does not invoke
+NMRPipe or SMILE; test markers are documented in `tests/categories.py`. Do not interpret a green
+mocked test suite as real-engine or scientific validation.
 
 ## Contributing
 
@@ -434,22 +415,18 @@ verbatim Apache-2.0 text (SPDX `Apache-2.0`), and [NOTICE](NOTICE) records the c
 tools recognise the repository as Apache-2.0.
 
 **The AppImage has a separate distribution boundary.** It bundles PySide6/Qt and other
-third-party libraries, which are distributed under their own licences (LGPL-3.0 among them).
-The v1.0.1 AppImage completed the release checklist kept in the maintainer's private repository
-(licence texts and notice inside the artefact, replace/relink path, clean-machine acceptance,
-recorded SHA-256). Since 2026-09-21 the release carries **one** artefact - the interface language is
-switched at run time - and it is built from the released source commit recorded in
-`usr/share/doc/NMRForge/BUILD_INFO.txt`. This does not change the Apache-2.0 terms of nmrForge's own
-source code.
+third-party libraries, each under its own licence (including LGPL-3.0 components). A released
+AppImage is tied to its release version and source commit; a source checkout may be newer. The
+binary's licence notices and provenance are included with the release artefact. This does not
+change the Apache-2.0 terms of nmrForge's own source code.
 
 What this means in practice:
 
 - **using nmrforge from source**: Apache-2.0, including the patent grant, the requirement to keep
   attribution notices, and a statement of changes if you redistribute modified files;
-- **the AppImage**: the 1.0.1 artefact completed the release checklist kept in the maintainer's
-  private repository; re-check before redistribution;
+- **the AppImage**: check the notices and terms that accompany the specific binary before
+  redistribution;
 - third-party components keep their own licences; see [THIRD_PARTY.md](THIRD_PARTY.md) and, for
   binaries, `packaging/linux/THIRD_PARTY_LICENSES/NOTICE.md`.
 
-The reasoning behind the split is recorded in [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md). Nothing here
-is legal advice.
+Nothing here is legal advice.

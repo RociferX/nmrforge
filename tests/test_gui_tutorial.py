@@ -122,9 +122,7 @@ def test_tutorial_dialog_survives_a_missing_document(
         dialog.close()
 
 
-def test_help_menu_opens_the_tutorial(
-    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_help_menu_opens_the_tutorial(qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
     """The first item of the Help menu (the last entry) is the usage tutorial; clicking it opens the
     tutorial dialog."""
     opened: list[object] = []

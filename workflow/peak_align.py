@@ -9,7 +9,8 @@ ref_count). Peaks with real displacement naturally do not match and count as unm
 Matching: every nucleus must fall within tolerance (Poky kr dialog defaults, 0.2.199-patch29fx
 user:1H +-0.02 ppm,other nuclei +-0.2 ppm). One reference peak is used at most once. - Minimum
 acceptable ratio is 60%: below it the result is flagged "low" so the GUI can tell the user to
-check whether the reference is similar."""
+check whether the reference is similar.
+"""
 
 from __future__ import annotations
 
@@ -19,9 +20,9 @@ from typing import Any
 
 import numpy as np
 
-# --- tunables (edit here and rerun) --------------------------------------- Poky kr (Restricted
-# Peak Pick) dialog box default (0.2.199-patch29fx, user decision): setup_axis_table "1H" fill in.02
-# ppm, other cores are.2 ppm.
+from ui_support.i18n import tr
+
+# --- tunables (edit here and rerun) ---------------------------------------
 TOLERANCE_PPM: dict[str, float] = {
     "1H": 0.02,
     "2H": 0.20,
@@ -46,9 +47,42 @@ MIN_ACCEPTABLE_RATIO: float = 0.60  # below this -> "low" (check similarity)
 _MIN_STEP_PPM = 0.02
 
 
-def row_coords(
-    row: dict[str, Any], nuclei: list[str] | None = None
-) -> dict[str, float]:
+def coordinate_key(nuclei: list[str], logical: int) -> str:
+    """Repeated nuclei retain logical-axis identity rather than overwrite a key."""
+    nucleus = nuclei[logical]
+    return f"{nucleus}:F{logical + 1}" if nuclei.count(nucleus) > 1 else nucleus
+
+
+def coordinate_nucleus(key: str) -> str:
+    return key.split(":", 1)[0]
+
+
+def _finite_ppm(value: Any) -> float:
+    ppm = float(value)
+    if not np.isfinite(ppm):
+        raise ValueError(tr("Peak coordinates must be finite"))
+    return ppm
+
+
+def _validate_tolerances(tolerances: np.ndarray) -> None:
+    if not np.all(np.isfinite(tolerances)) or np.any(tolerances <= 0):
+        raise ValueError(tr("Alignment tolerances and search ranges must be finite and positive"))
+
+
+def _coordinate_columns(row: dict, nuclei: list[str] | None) -> list[tuple[str, str]]:
+    if "F1_shift" in row:
+        return (
+            [(f"F{i + 1}_shift", coordinate_key(nuclei, i)) for i in range(len(nuclei))]
+            if nuclei
+            else []
+        )
+    if nuclei and len(nuclei) == 2 and set(nuclei) != {"15N", "1H"}:
+        # Legacy 2D names are external w1/w2 slots for non-HN spectra.
+        return [("N_shift", coordinate_key(nuclei, 0)), ("H_shift", coordinate_key(nuclei, 1))]
+    return [("H_shift", "1H"), ("N_shift", "15N"), ("C_shift", "13C")]
+
+
+def row_coords(row: dict[str, Any], nuclei: list[str] | None = None) -> dict[str, float]:
     """One peak-table row -> {nucleus: ppm}.
 
     2D rows: N_shift=15N / H_shift=1H / C_shift=13C.
@@ -58,27 +92,18 @@ def row_coords(
     # {nucleus: ppm} coordinate passthrough (caller already parsed, e.g.
     # {"15N": 118.5, "1H": 8.1}); this is what pick_peaks passes in.
     nuclei_keys = ("1H", "2H", "15N", "13C", "19F", "31P", "23Na", "29Si")
-    if any(k in row for k in nuclei_keys):
-        for nucleus in nuclei_keys:
+    if any(coordinate_nucleus(k) in nuclei_keys for k in row):
+        for nucleus in row:
+            if coordinate_nucleus(nucleus) not in nuclei_keys:
+                continue
             value = row.get(nucleus)
             if value is not None and str(value) not in ("", "?"):
-                coords[nucleus] = float(value)
+                coords[nucleus] = _finite_ppm(value)
         return coords
-    if "F1_shift" in row:
-        if nuclei and len(nuclei) >= 3:
-            for i, nucleus in enumerate(nuclei[:3]):
-                value = row.get(f"F{i + 1}_shift")
-                if value is not None and str(value) not in ("", "?"):
-                    coords[nucleus] = float(value)
-        return coords
-    for key, nucleus in (
-        ("H_shift", "1H"),
-        ("N_shift", "15N"),
-        ("C_shift", "13C"),
-    ):
+    for key, nucleus in _coordinate_columns(row, nuclei):
         value = row.get(key)
         if value is not None and str(value) not in ("", "?"):
-            coords[nucleus] = float(value)
+            coords[nucleus] = _finite_ppm(value)
     return coords
 
 
@@ -87,12 +112,11 @@ def common_nuclei(
     ref_coords: list[dict[str, float]],
 ) -> list[str]:
     """Nuclei present in both sets (stable order: 1H, 2H, 15N, 13C, ...)."""
-    order = {"1H": 0, "2H": 1, "15N": 2, "13C": 3, "19F": 4, "31P": 5,
-             "23Na": 6, "29Si": 7}
+    order = {"1H": 0, "2H": 1, "15N": 2, "13C": 3, "19F": 4, "31P": 5, "23Na": 6, "29Si": 7}
     cur = set().union(*(c.keys() for c in cur_coords)) if cur_coords else set()
     ref = set().union(*(c.keys() for c in ref_coords)) if ref_coords else set()
     common = cur & ref
-    return sorted(common, key=lambda n: (order.get(n, 99), n))
+    return sorted(common, key=lambda n: (order.get(coordinate_nucleus(n), 99), n))
 
 
 def _coord_matrix_full(
@@ -101,7 +125,8 @@ def _coord_matrix_full(
     """{nucleus:ppm} list -> (N,K) matrix + original row index; rows lacking common nuclei are
     skipped (cannot participate in common core matching), and return index is used to map the
     matrix rows back to the original peak rows (0.2.199-patch29fx: otherwise the inspection
-    graph will draw the connecting line to the wrong peak)."""
+    graph will draw the connecting line to the wrong peak).
+    """
     rows: list[np.ndarray] = []
     orig: list[int] = []
     for k, c in enumerate(coords):
@@ -114,22 +139,19 @@ def _coord_matrix_full(
     return np.vstack(rows), orig
 
 
-def _coord_matrix(
-    coords: list[dict[str, float]], nuclei: list[str]
-) -> np.ndarray:
+def _coord_matrix(coords: list[dict[str, float]], nuclei: list[str]) -> np.ndarray:
     """Matrix form of _coord_matrix_full (matrix rows only)."""
     matrix, _orig = _coord_matrix_full(coords, nuclei)
     return matrix
 
 
-def _existence_count(
-    cur: np.ndarray, ref: np.ndarray, tol: np.ndarray
-) -> int:
+def _existence_count(cur: np.ndarray, ref: np.ndarray, tol: np.ndarray) -> int:
     """How many cur points sit inside at least one reference tolerance box.
 
     Existence only (multiple cur points may use the same ref point) -- this
     is the shift-search objective: a 2D reference keeps every 3D peak whose
-    common nuclei land on the reference peak (e.g. HNCA CA/CB share N/H)."""
+    common nuclei land on the reference peak (e.g. HNCA CA/CB share N/H).
+    """
     if cur.size == 0 or ref.size == 0:
         return 0
     count = 0
@@ -140,13 +162,12 @@ def _existence_count(
     return count
 
 
-def _score_shift(
-    cur: np.ndarray, ref: np.ndarray, tol: np.ndarray
-) -> tuple[int, float]:
+def _score_shift(cur: np.ndarray, ref: np.ndarray, tol: np.ndarray) -> tuple[int, float]:
     """(matched, normalized-distance cost) with greedy one-to-one pairing.
 
     matched never exceeds min(N_cur, N_ref).  cost is the sum of normalized
-    squared distances of the matched pairs (smaller = tighter fit)."""
+    squared distances of the matched pairs (smaller = tighter fit).
+    """
     if cur.size == 0 or ref.size == 0:
         return 0, 0.0
     used = np.zeros(ref.shape[0], dtype=bool)
@@ -205,10 +226,7 @@ def _best_shift(
     best_shift = med
     best_matched, best_cost = _score_shift(cur + med, ref, tol)
     for _round in range(2):
-        axes = [
-            np.arange(-s, s + 0.5 * st, st)
-            for s, st in zip(span, step)
-        ]
+        axes = [np.arange(-s, s + 0.5 * st, st) for s, st in zip(span, step)]
         for delta in product(*axes):
             trial = med + np.asarray(delta)
             matched, cost = _score_shift(cur + trial, ref, tol)
@@ -253,11 +271,19 @@ def align_peak_files(
             "nuclei": nuclei,
         }
     tol = TOLERANCE_PPM if tol_ppm is None else {**TOLERANCE_PPM, **tol_ppm}
-    ranges = SEARCH_RANGE_PPM if range_ppm is None else {
-        **SEARCH_RANGE_PPM, **range_ppm
-    }
-    tol_a = np.asarray([tol[n] for n in nuclei], dtype=float)
-    range_a = np.asarray([ranges[n] for n in nuclei], dtype=float)
+    ranges = SEARCH_RANGE_PPM if range_ppm is None else {**SEARCH_RANGE_PPM, **range_ppm}
+    tol_a = np.asarray([tol.get(n, tol[coordinate_nucleus(n)]) for n in nuclei], dtype=float)
+    range_a = np.asarray(
+        [ranges.get(n, ranges[coordinate_nucleus(n)]) for n in nuclei],
+        dtype=float,
+    )
+    if (
+        not np.all(np.isfinite(tol_a))
+        or np.any(tol_a <= 0)
+        or not np.all(np.isfinite(range_a))
+        or np.any(range_a <= 0)
+    ):
+        raise ValueError(tr("Alignment tolerances and search ranges must be finite and positive"))
     shift_vec, matched = _best_shift(cur_m, ref_m, tol_a, range_a)
     shift = {n: float(v) for n, v in zip(nuclei, shift_vec)}
     total_min = min(cur_m.shape[0], ref_m.shape[0])
@@ -276,6 +302,7 @@ def align_peak_files(
         ),
     }
 
+
 def matched_pairs(
     cur_coords: list[dict[str, float]],
     ref_coords: list[dict[str, float]],
@@ -286,7 +313,8 @@ def matched_pairs(
     """Return (cur_idx, ref_idx) matched pairs after applying shift.
 
     Uses the same one-to-one greedy matching as the shift scoring so the
-    figure shows exactly the pairs that define the alignment ratio."""
+    figure shows exactly the pairs that define the alignment ratio.
+    """
     # accept either {nucleus: ppm} dicts or peak-table rows
     cur_coords = [row_coords(r) for r in cur_coords]
     ref_coords = [row_coords(r) for r in ref_coords]
@@ -294,8 +322,11 @@ def matched_pairs(
     if not nuclei:
         return [], []
     tol = TOLERANCE_PPM if tol_ppm is None else {**TOLERANCE_PPM, **tol_ppm}
-    tol_a = np.asarray([tol[n] for n in nuclei], dtype=float)
+    tol_a = np.asarray([tol.get(n, tol[coordinate_nucleus(n)]) for n in nuclei], dtype=float)
     shift_a = np.asarray([shift.get(n, 0.0) for n in nuclei], dtype=float)
+    _validate_tolerances(tol_a)
+    if not np.all(np.isfinite(shift_a)):
+        raise ValueError(tr("Peak coordinates must be finite"))
     cur_m, cur_idx = _coord_matrix_full(cur_coords, nuclei)
     ref_m, ref_idx = _coord_matrix_full(ref_coords, nuclei)
     shifted = cur_m + shift_a
@@ -331,7 +362,8 @@ def alignment_figure(
     lines after the whole shift is applied. Only draw true matching lines (0.2.199-patch29fx:
     remove the dotted grid to avoid being mistaken for long lines). PNG 300dpi + same path.svg
     One copy of each (0.2.199-patch29fy, user: add one copy of SVG at the same time;
-    svg.fonttype=none, the text remains and can be edited in Inkscape/Illustrator)."""
+    svg.fonttype=none, the text remains and can be edited in Inkscape/Illustrator).
+    """
     import matplotlib
 
     matplotlib.use("Agg")
@@ -342,31 +374,28 @@ def alignment_figure(
 
     cur_c = [row_coords(r, cur_nuclei) for r in cur_rows]
     ref_c = [row_coords(r, ref_nuclei) for r in ref_rows]
-    pairs, nuclei = matched_pairs(
-        cur_c, ref_c, shift, tol_ppm=tol_ppm
-    )
-    x_nuc, y_nuc = (nuclei[0], nuclei[1]) if len(nuclei) >= 2 else (
-        nuclei[0], nuclei[0]
-    )
+    pairs, nuclei = matched_pairs(cur_c, ref_c, shift, tol_ppm=tol_ppm)
+    x_nuc, y_nuc = (nuclei[0], nuclei[1]) if len(nuclei) >= 2 else (nuclei[0], nuclei[0])
     fig, ax = plt.subplots(figsize=(7.2, 6.0))
-    cur_pts = [
-        (c[x_nuc], c[y_nuc]) for c in cur_c if x_nuc in c and y_nuc in c
-    ]
-    ref_pts = [
-        (c[x_nuc], c[y_nuc]) for c in ref_c if x_nuc in c and y_nuc in c
-    ]
+    cur_pts = [(c[x_nuc], c[y_nuc]) for c in cur_c if x_nuc in c and y_nuc in c]
+    ref_pts = [(c[x_nuc], c[y_nuc]) for c in ref_c if x_nuc in c and y_nuc in c]
     if cur_pts:
         ax.scatter(
             [p[0] for p in cur_pts],
             [p[1] for p in cur_pts],
-            marker="x", color="#1f77b4", s=18, label=cur_label,
+            marker="x",
+            color="#1f77b4",
+            s=18,
+            label=cur_label,
         )
     if ref_pts:
         ax.scatter(
             [p[0] for p in ref_pts],
             [p[1] for p in ref_pts],
-            marker=".", color="#d62728",
-            s=26, label=ref_label,
+            marker=".",
+            color="#d62728",
+            s=26,
+            label=ref_label,
         )
     # shifted current points + matched-pair connectors
     for i, j in pairs:
@@ -376,8 +405,11 @@ def alignment_figure(
         x0 = ci[x_nuc] + shift.get(x_nuc, 0.0)
         y0 = ci[y_nuc] + shift.get(y_nuc, 0.0)
         ax.plot(
-            [x0, ri[x_nuc]], [y0, ri[y_nuc]],
-            color="#888888", lw=0.5, alpha=0.6,
+            [x0, ri[x_nuc]],
+            [y0, ri[y_nuc]],
+            color="#888888",
+            lw=0.5,
+            alpha=0.6,
         )
     ax.set_xlabel(f"{x_nuc} (ppm)")
     ax.set_ylabel(f"{y_nuc} (ppm)")
@@ -410,26 +442,15 @@ def shifted_rows(
         new = dict(row)
         # {nucleus: ppm} passthrough rows (used by pick_peaks)
         nuclei_keys = ("1H", "2H", "15N", "13C", "19F", "31P", "23Na", "29Si")
-        if any(k in new for k in nuclei_keys):
-            for nucleus in nuclei_keys:
-                if nucleus in new and nucleus in shift:
+        if any(coordinate_nucleus(k) in nuclei_keys for k in new):
+            for nucleus in new:
+                if coordinate_nucleus(nucleus) in nuclei_keys and nucleus in shift:
                     new[nucleus] = float(new[nucleus]) + shift[nucleus]
             out.append(new)
             continue
-        if "F1_shift" in new:
-            if nuclei and len(nuclei) >= 3:
-                for i, nucleus in enumerate(nuclei[:3]):
-                    key = f"F{i + 1}_shift"
-                    if key in new and nucleus in shift:
-                        new[key] = float(new[key]) + shift[nucleus]
-        else:
-            for key, nucleus in (
-                ("H_shift", "1H"),
-                ("N_shift", "15N"),
-                ("C_shift", "13C"),
-            ):
-                if key in new and nucleus in shift:
-                    new[key] = float(new[key]) + shift[nucleus]
+        for key, nucleus in _coordinate_columns(new, nuclei):
+            if key in new and nucleus in shift:
+                new[key] = float(new[key]) + shift[nucleus]
         out.append(new)
     return out
 
@@ -457,7 +478,8 @@ def filter_by_reference(
     if not common:
         return [], {"kept": 0, "removed": len(rows), "nuclei": []}
     tol = TOLERANCE_PPM if tol_ppm is None else {**TOLERANCE_PPM, **tol_ppm}
-    tol_a = np.asarray([tol[n] for n in common])
+    tol_a = np.asarray([tol.get(n, tol[coordinate_nucleus(n)]) for n in common])
+    _validate_tolerances(tol_a)
     ref_m = _coord_matrix(ref_c, common)
     keep_flags: list[bool] = []
     for c in cur_c:

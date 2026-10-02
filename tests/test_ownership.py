@@ -94,8 +94,14 @@ def test_changed_files_sees_uncommitted_edits(
     (repo / "tracked.txt").write_text("one\n", encoding="utf-8")
     git("add", "tracked.txt")
     git(
-        "-c", "user.email=t@example.com", "-c", "user.name=t",
-        "commit", "-q", "-m", "init",
+        "-c",
+        "user.email=t@example.com",
+        "-c",
+        "user.name=t",
+        "commit",
+        "-q",
+        "-m",
+        "init",
     )
 
     monkeypatch.setattr(module, "ROOT", repo)

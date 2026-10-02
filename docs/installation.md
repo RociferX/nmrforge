@@ -1,11 +1,11 @@
 # Installation
 
-## Current release: v1.0.1 (source + Linux AppImage)
+## Source and binary releases
 
-Both paths are supported: a **Linux AppImage** (bundling Python and Qt, so no system environment is
-needed, with the interface language following the system locale; see the
-[releases page](https://github.com/RociferX/nmrforge/releases)), or an editable install from the
-repository:
+The GitHub repository contains source. The [releases page](https://github.com/RociferX/nmrforge/releases)
+may also provide a versioned Linux AppImage. An AppImage contains the source revision named in its
+release; later source changes do not update that binary automatically. For the current source tree,
+use an editable install:
 
 ```bash
 git clone https://github.com/RociferX/nmrforge.git
@@ -16,27 +16,25 @@ python -m pip install -e ".[test]"
 python main.py
 ```
 
-`pip install .` and a wheel are supported since 2026-09-21: the shipped data
-(`nmrforge_data/config`, `nmrforge_data/presets`, `gui/assets`, `ui_support/locales`) travels
-with the package, and the relative position is the same in a checkout and when installed. Real processing requires a separately installed NMRPipe; NUS
-reconstruction also requires SMILE.
+Packaged installs and wheels include runtime resources (`nmrforge_data/config`,
+`nmrforge_data/presets`, `gui/assets`, `ui_support/locales`). Real processing requires a separately
+installed NMRPipe; NUS reconstruction also requires SMILE. Neither tool is downloaded or bundled
+by nmrForge.
 
 ## AppImage (Linux)
 
-v1.0.1 offers an AppImage on the releases page ([Releases](https://github.com/RociferX/nmrforge/releases)):
-one artefact whose interface language is switched at run time. It bundles its own interpreter and
-Qt; verify it with:
+When an AppImage is available on the releases page, it bundles its interpreter and Qt. The release
+notes identify its version and checksums. For example:
 
 ```bash
-sha256sum NMRForge-1.0.1-x86_64.AppImage      # compare with the release notes
-chmod +x NMRForge-1.0.1-x86_64.AppImage
-./NMRForge-1.0.1-x86_64.AppImage --licenses  # third-party licences and build provenance
-./NMRForge-1.0.1-x86_64.AppImage             # first run installs the desktop entry
+sha256sum NMRForge-<version>-x86_64.AppImage  # compare with the release notes
+chmod +x NMRForge-<version>-x86_64.AppImage
+./NMRForge-<version>-x86_64.AppImage --licenses
+./NMRForge-<version>-x86_64.AppImage
 ```
 
-They bundle PySide6/Qt, distributed under LGPL-3.0 alongside the Apache-2.0 licence of nmrForge's
-own source. The build, licence and clean-machine acceptance record is
-the release checklist kept in the maintainer's private repository.
+The AppImage includes third-party licence notices, including those for PySide6/Qt. See the
+release assets and [THIRD_PARTY.md](../THIRD_PARTY.md) for distribution information.
 
 ## Developers: editable source install
 
@@ -56,8 +54,7 @@ pip install -e ".[dev]"     # pytest + ruff
 pip install -e ".[docs]"    # documentation tooling
 ```
 
-`python main.py` bootstraps a local `nmrforge/` virtual environment on first run and reuses it
-afterwards. A future AppImage would wrap the same entry point.
+`python main.py` creates or reuses the local application environment on first run.
 
 The editable install exposes one console script:
 
@@ -65,8 +62,7 @@ The editable install exposes one console script:
 | --- | --- |
 | `nmrforge-viewer` | Standalone spectrum viewer (`python -m viewer` works too) |
 
-The main GUI is intentionally not published as a console script, because it depends on the
-repository-root resources (decision PACK-015). Use `python main.py` in the editable checkout.
+Use `python main.py` to start the main GUI from an editable checkout.
 
 The processing command line lives in the `nmrforge_api` package:
 

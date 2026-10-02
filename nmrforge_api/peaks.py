@@ -50,7 +50,8 @@ _NAMED_KEYS: tuple[tuple[str, str], ...] = (
 def reference_peak_id(peak_id: Any) -> str:
     """Peak index -> stable identity ``R0001`` (frozen once the reference table exists).
 
-    The reference table assigns each peak a reference_peak_id; every later workflow table carries
+    The reference table assigns each peak a reference_peak_id; every later workflow table
+    carries
     that column (undetected peaks stay, with detected=false), so downstream can match them back.
     """
     try:
@@ -109,9 +110,7 @@ class PeakMeasurement:
             "cell_high": {str(k): int(v) for k, v in self.cell_high.items()},
             "cell_edge": bool(self.cell_edge),
             "intensity_ratio": float(self.intensity_ratio),
-            "localization": {
-                str(k): v for k, v in (self.localization or {}).items()
-            },
+            "localization": {str(k): v for k, v in (self.localization or {}).items()},
         }
 
     @classmethod
@@ -120,8 +119,7 @@ class PeakMeasurement:
             peak_id=int(data.get("peak_id", 0) or 0),
             assignment=str(data.get("assignment", "")),
             reference_peak_id=str(
-                data.get("reference_peak_id")
-                or reference_peak_id(data.get("peak_id", 0))
+                data.get("reference_peak_id") or reference_peak_id(data.get("peak_id", 0))
             ),
             reference={k: float(v) for k, v in (data.get("reference") or {}).items()},
             positions={k: float(v) for k, v in (data.get("positions") or {}).items()},
@@ -133,12 +131,8 @@ class PeakMeasurement:
             window_edge=bool(data.get("window_edge", False)),
             boundary=bool(data.get("boundary", False)),
             out_of_range=bool(data.get("out_of_range", False)),
-            cell_low={
-                str(k): int(v) for k, v in (data.get("cell_low") or {}).items()
-            },
-            cell_high={
-                str(k): int(v) for k, v in (data.get("cell_high") or {}).items()
-            },
+            cell_low={str(k): int(v) for k, v in (data.get("cell_low") or {}).items()},
+            cell_high={str(k): int(v) for k, v in (data.get("cell_high") or {}).items()},
             cell_edge=bool(data.get("cell_edge", False)),
             intensity_ratio=float(data.get("intensity_ratio") or float("nan")),
             localization=dict(data.get("localization") or {}),
@@ -165,11 +159,7 @@ def _read_ppm_csv(path: Path) -> list[dict[str, Any]] | None:
         return None
     rows: list[dict[str, Any]] = []
     for index, row in enumerate(csv.DictReader(lines), start=1):
-        normalized = {
-            str(key).strip().lower(): value
-            for key, value in row.items()
-            if key
-        }
+        normalized = {str(key).strip().lower(): value for key, value in row.items() if key}
 
         def _num(name: str) -> str:
             value = normalized.get(name, "")
@@ -210,23 +200,20 @@ def read_reference_peaks(path: Path | str) -> list[dict[str, Any]]:
         peaks = load_peaks(target)
     # stable identity: the reference table assigns reference_peak_id, later tables reuse it
     for position, row in enumerate(peaks, start=1):
-        if not row.get('reference_peak_id'):
-            row['reference_peak_id'] = reference_peak_id(
-                row.get('Peak_ID') or position
-            )
+        if not row.get("reference_peak_id"):
+            row["reference_peak_id"] = reference_peak_id(row.get("Peak_ID") or position)
     usable = [row for row in peaks if peak_coordinates(row, None)]
     if not usable:
-        raise MeasurementError(tr(
-            "reference peak table has no measurable positions: "
-            "{p0}",
-            p0=path,
-        ))
+        raise MeasurementError(
+            tr(
+                "reference peak table has no measurable positions: {p0}",
+                p0=path,
+            )
+        )
     return usable
 
 
-def peak_coordinates(
-    row: dict[str, Any], axes: SpectrumAxes | None
-) -> dict[str, float]:
+def peak_coordinates(row: dict[str, Any], axes: SpectrumAxes | None) -> dict[str, float]:
     """A peak-table row -> {nucleus: ppm}.
 
     - 2D rows use the named keys ``H_shift`` / ``N_shift`` / ``C_shift``;
@@ -235,46 +222,28 @@ def peak_coordinates(
     """
     coords: dict[str, float] = {}
     if axes is not None:
+        from workflow.peak_align import coordinate_key
+
+        logical_nuclei = [axes.nuclei[storage] for storage in axes.logical_to_storage]
         for logical, storage in enumerate(axes.logical_to_storage):
             value = row.get(f"F{logical + 1}_shift")
             if value is None or str(value) == "":
                 continue
             nucleus = axes.nuclei[storage] if storage < len(axes.nuclei) else ""
             if nucleus:
-                coords.setdefault(nucleus, float(value))
+                coords[coordinate_key(logical_nuclei, logical)] = float(value)
     for key, nucleus in _NAMED_KEYS:
         value = row.get(key)
         if value is not None and str(value) != "":
+            if axes is not None and axes.nuclei.count(nucleus) > 1:
+                raise MeasurementError(
+                    tr(
+                        "Repeated nuclei require explicit F-axis coordinates: {p0}",
+                        p0=nucleus,
+                    )
+                )
             coords.setdefault(nucleus, float(value))
     return coords
-
-
-def _add_nucleus_localization(
-    record: dict[str, Any], axes: SpectrumAxes
-) -> None:
-    """Attach the Gaussian diagnostics by **nucleus** (FWHM_H/FWHM_N cannot be guessed by axis).
-
-    ``core.peaks.localize`` reports its derived values in data-axis order (``fwhm_f1`` = axis 0),
-    while the unified table's H/N columns are keyed by nucleus: map through ``axes.nuclei`` and
-    write nothing for an unknown nucleus (the table falls back to NaN) rather than guessing.
-    """
-    if str(record.get('actual_method', '')) != 'gaussian':
-        return
-    fwhm: dict[str, float] = {}
-    sigma: dict[str, float] = {}
-    for index, nucleus in enumerate(axes.nuclei[:2]):
-        if not nucleus:
-            continue
-        value = record.get(f'fwhm_f{index + 1}')
-        if value is not None:
-            fwhm[nucleus] = float(value)
-        value = record.get(f'sigma_f{index + 1}')
-        if value is not None:
-            sigma[nucleus] = float(value)
-    if fwhm:
-        record['fwhm_by_nucleus'] = fwhm
-    if sigma:
-        record['sigma_by_nucleus'] = sigma
 
 
 def _parabolic_offset(y_minus: float, y_zero: float, y_plus: float) -> float:
@@ -296,9 +265,7 @@ def _axis_step_ppm(axes: SpectrumAxes, axis: int) -> float:
     return abs(float(ppm_axis[1] - ppm_axis[0]))
 
 
-def _parabolic_qc(
-    y_minus: float, y_zero: float, y_plus: float, step_ppm: float
-) -> dict[str, Any]:
+def _parabolic_qc(y_minus: float, y_zero: float, y_plus: float, step_ppm: float) -> dict[str, Any]:
     """Three-point parabola -> vertex offset + equivalent linewidth + edge flag (P3-7).
 
     With vertex height ``H = c - b^2/(4a)`` and curvature ``a``, the equivalent Gaussian
@@ -331,7 +298,11 @@ def _parabolic_qc(
 
 
 def _parabolic_stencil_qc(
-    data: np.ndarray, center: Sequence[int], axes: SpectrumAxes
+    data: np.ndarray,
+    center: Sequence[int],
+    axes: SpectrumAxes,
+    *,
+    baseline: float = 0.0,
 ) -> dict[str, Any]:
     """Integer grid point -> three-point parabola QC record (the workflow path).
 
@@ -354,7 +325,7 @@ def _parabolic_stencil_qc(
         for shift in (-1, 0, 1):
             index_tuple = [int(v) for v in center]
             index_tuple[axis] = position + shift
-            profile.append(float(data[tuple(index_tuple)]))
+            profile.append(float(data[tuple(index_tuple)]) - baseline)
         qc = _parabolic_qc(*profile, step_ppm=_axis_step_ppm(axes, axis))
         if qc["boundary_hit"]:
             edge = True
@@ -406,9 +377,7 @@ def window_points_by_axis(
                 if window_ppm is not None
                 else axis_units.measurement_window_ppm(nucleus, obs)
             )
-            source = (
-                tr("ppm_explicit") if window_ppm is not None else tr("ppm_auto_linewidth")
-            )
+            source = tr("ppm_explicit") if window_ppm is not None else tr("ppm_auto_linewidth")
             points = axis_units.points_for_ppm(axis_ppm, width)
             if points <= 0:
                 points = int(DEFAULT_WINDOW_PTS_FALLBACK)
@@ -417,9 +386,7 @@ def window_points_by_axis(
         out[axis] = {
             "points": int(points),
             "ppm": round(float(width), 6),
-            "effective_ppm": round(
-                axis_units.ppm_for_points(axis_ppm, points), 6
-            ),
+            "effective_ppm": round(axis_units.ppm_for_points(axis_ppm, points), 6),
             "source": source,
             "nucleus": nucleus,
             "obs_mhz": round(float(obs), 4),
@@ -438,81 +405,91 @@ def measure_peak_positions(
     sign: str = "abs",
     refine: str = "parabolic",
     nuclei: Iterable[str] | None = None,
-    roi_f1_ppm: float | None = None,
-    roi_f2_ppm: float | None = None,
     noise_sigma: float | None = None,
     exclusive_windows: bool = True,
 ) -> list[PeakMeasurement]:
     """Measure the sub-pixel positions of ``peaks`` on ``spectrum_path``.
 
-    sign: ``"abs"`` (default, follow either sign) | ``"positive"`` | ``"negative"``;
-    refine: ``"parabolic"`` (three-point parabola) | ``"none"`` (integer maximum
-    only) | ``"gaussian"`` (a 2D fit, **2D only**; the ROI is a physical width in ppm,
-    ``roi_f1_ppm``/``roi_f2_ppm``, defaulting to config ``peaks.localization``;
-    a failed fit falls back to parabolic and records requested/actual/why, never silently).
-    A non-empty nuclei list measures only those nuclei; the rest keep their reference values.
+        sign: ``"abs"`` (default, follow either sign) | ``"positive"`` | ``"negative"``;
+        refine: ``"parabolic"`` (three-point parabola) | ``"none"`` (integer maximum
+        only) | ``"gaussian"`` (a 2D fit, **2D only**; the ROI is a physical width in ppm,
+        ``roi_f1_ppm``/``roi_f2_ppm``, defaulting to config ``peaks.localization``;
+        a failed fit falls back to parabolic and records requested/actual/why, never silently).
+        A non-empty nuclei list measures only those nuclei; the rest keep their reference
+        values.
 
-    Search window: defaults to a physical width (linewidth x1.5 in ppm) converted per axis,
-    so **zero filling never changes the ppm width the window covers**; ``window_ppm`` sets that
-    width and ``window_pts`` forces points (not recommended). Pass already-read axes via ``axes``
-to avoid re-reading the spectrum.
+        Search window: defaults to a physical width (linewidth x1.5 in ppm) converted per axis,
+        so **zero filling never changes the ppm width the window covers**; ``window_ppm`` sets
+        that
+        width and ``window_pts`` forces points (not recommended). Pass already-read axes via
+        ``axes``
+    to avoid re-reading the spectrum.
 
-    ``exclusive_windows`` is on by default: the half-width is only an **upper bound**, and each
-    reference peak's search region is truncated at the midpoints to its neighbouring reference
-    peaks, so a peak only takes the extremum inside its own cell. Without that, a window wider
-    than the spacing between neighbouring peaks makes two reference records hit the same
-    extremum cell and the table gets duplicate rows differing only in ``reference_peak_id``
-    (fixed 2026-09-19); pass ``False`` for the previous "all peaks share one fixed window"
-    wording.
+        ``exclusive_windows`` is on by default: the half-width is only an **upper bound**, and
+        each
+        reference peak's search region is truncated at the midpoints to its neighbouring
+        reference
+        peaks, so a peak only takes the extremum inside its own cell. Without that, a window
+        wider
+        than the spacing between neighbouring peaks makes two reference records hit the same
+        extremum cell and the table gets duplicate rows differing only in ``reference_peak_id``
+        (fixed 2026-09-19); pass ``False`` for the previous "all peaks share one fixed window"
+        wording.
 
-    ``noise_sigma``: this spectrum's noise. Defaults to the robust MAD in ``core.qc.noise``;
-    each peak's ``SNR = |intensity| / sigma`` is written with sigma (the unified SNR column),
-    so downstream can recheck whether a peak is strong enough to be called detected.
+        ``noise_sigma``: this spectrum's noise. Defaults to the robust MAD in ``core.qc.noise``;
+        each peak's ``SNR = |intensity| / sigma`` is written with sigma (the unified SNR
+        column),
+        so downstream can recheck whether a peak is strong enough to be called detected.
 
-    Parameters
-    ----------
-    spectrum_path : Path | str
-        the spectrum to measure (2D ``.ft2``; Gaussian refinement is 2D only).
-    peaks : Sequence[dict[str, Any]]
-        the candidate peaks (unified fields: ``N_shift``/``H_shift``/``label``...).
-    window_pts : int, optional
-        half-width of the search window in points; exclusive with ``window_ppm``.
-    window_ppm : float, optional
-        half-width in ppm. Prefer this: it converts at the current spacing and does not drift.
-    axes : SpectrumAxes, optional
-        already-read axes, reused across peaks to avoid re-reading.
-    sign : str, default "abs"
-        which peak signs to follow.
-    refine : str, default "parabolic"
-        ``parabolic`` or ``gaussian``; Gaussian on non-2D data raises instead of degrading quietly.
-    nuclei : Iterable[str], optional
-        axis nuclei; inferred from the header by default.
-    roi_f1_ppm, roi_f2_ppm : float, optional
-        Gaussian ROI radius (ppm).
-    noise_sigma : float, optional
-        known noise sigma; estimated from the spectrum by default.
-    exclusive_windows : bool, default True
-        each reference peak searches only its own cell (bounded by the midpoints to its
-        neighbours), so two reference records are never relocated onto the same grid point;
-        ``False`` restores the shared fixed window.
+        Parameters
+        ----------
+        spectrum_path : Path | str
+            the spectrum to measure (2D ``.ft2``; Gaussian refinement is 2D only).
+        peaks : Sequence[dict[str, Any]]
+            the candidate peaks (unified fields: ``N_shift``/``H_shift``/``label``...).
+        window_pts : int, optional
+            half-width of the search window in points; exclusive with ``window_ppm``.
+        window_ppm : float, optional
+            half-width in ppm. Prefer this: it converts at the current spacing and does not
+            drift.
+        axes : SpectrumAxes, optional
+            already-read axes, reused across peaks to avoid re-reading.
+        sign : str, default "abs"
+            which peak signs to follow.
+        refine : str, default "parabolic"
+            ``parabolic`` or ``gaussian``; Gaussian on non-2D data raises instead of degrading
+            quietly.
+        nuclei : Iterable[str], optional
+            axis nuclei; inferred from the header by default.
+        roi_f1_ppm, roi_f2_ppm : float, optional
+            Gaussian ROI radius (ppm).
+        noise_sigma : float, optional
+            known noise sigma; estimated from the spectrum by default.
+        exclusive_windows : bool, default True
+            each reference peak searches only its own cell (bounded by the midpoints to its
+            neighbours), so two reference records are never relocated onto the same grid point;
+            ``False`` restores the shared fixed window.
 
-    Returns
-    -------
-    list[PeakMeasurement]
-        per-peak results: position, intensity/SNR, detection, method used and fit diagnostics.
+        Returns
+        -------
+        list[PeakMeasurement]
+            per-peak results: position, intensity/SNR, detection, method used and fit
+            diagnostics.
 
-    Raises
-    ------
-    MeasurementError
-        the spectrum is unreadable, Gaussian was asked for on non-2D data, or a peak is invalid.
+        Raises
+        ------
+        MeasurementError
+            the spectrum is unreadable, Gaussian was asked for on non-2D data, or a peak is
+            invalid.
 
-    Side effects
-    ------------
-    Reads the spectrum only; the caller writes records.
+        Side effects
+        ------------
+        Reads the spectrum only; the caller writes records.
 
-    Examples
-    --------
-        rows = measure_peak_positions("spectra/a.ft2", peaks, window_ppm=1.0)
+        Examples
+        --------
+            rows = measure_peak_positions("spectra/a.ft2", peaks, window_ppm=1.0)
+
     """
     path = Path(spectrum_path)
     if not path.is_file():
@@ -521,27 +498,23 @@ to avoid re-reading the spectrum.
         raise MeasurementError(tr("window_pts cannot be negative"))
     if sign not in ("abs", "positive", "negative"):
         raise MeasurementError(tr("unknown sign: {p0}", p0=sign))
-    if refine not in ("parabolic", "none", "gaussian"):
-        raise MeasurementError(tr("unknown refine: {p0}", p0=refine))
+    if refine not in ("parabolic", "none"):
+        raise MeasurementError(
+            tr(
+                "unknown refine: {p0!r} (parabolic / none; the Gaussian fit was removed)",
+                p0=refine,
+            )
+        )
 
     spectrum_axes = axes if axes is not None else read_spectrum_axes(path)
     axes = spectrum_axes
     data = np.asarray(axes.data, dtype=float)
-    # Gaussian is 2D only (checked after reading, the same rule as localisation)
-    if refine == "gaussian" and data.ndim != 2:
-        from core.peaks.localize import GAUSSIAN_UNSUPPORTED_MESSAGE
-
-        raise MeasurementError(GAUSSIAN_UNSUPPORTED_MESSAGE)
-    window_by_axis = window_points_by_axis(
-        axes, window_pts=window_pts, window_ppm=window_ppm
-    )
+    window_by_axis = window_points_by_axis(axes, window_pts=window_pts, window_ppm=window_ppm)
     from core.qc import noise as _noise
 
-    sigma = (
-        float(noise_sigma)
-        if noise_sigma is not None
-        else float(_noise.estimate(data).global_sigma)
-    )
+    estimate = _noise.estimate(data)
+    data = data - estimate.baseline
+    sigma = float(noise_sigma) if noise_sigma is not None else float(estimate.global_sigma)
     wanted = {str(n) for n in nuclei} if nuclei else None
     # Pre-pass: work out each reference peak's integer grid centre on every searched axis -
     # the "one cell per peak" split below needs the positions of all peaks at once.
@@ -554,7 +527,11 @@ to avoid re-reading the spectrum.
         centers: list[int] = []
         out_of_range = False
         for nucleus, ppm_value in coords.items():
-            if wanted is not None and nucleus not in wanted:
+            if (
+                wanted is not None
+                and nucleus not in wanted
+                and nucleus.split(":", 1)[0] not in wanted
+            ):
                 continue
             axis = axes.storage_of(nucleus)
             if axis is None:
@@ -562,8 +539,7 @@ to avoid re-reading the spectrum.
             axis_ppm = np.asarray(axes.ppm[axis], dtype=float)
             size = int(data.shape[axis])
             if axis_ppm.size and (
-                ppm_value < float(np.min(axis_ppm))
-                or ppm_value > float(np.max(axis_ppm))
+                ppm_value < float(np.min(axis_ppm)) or ppm_value > float(np.max(axis_ppm))
             ):
                 # a reference position outside the spectrum is still searched near the edge,
                 # so the user can see how far off it is instead of losing the peak.
@@ -598,11 +574,7 @@ to avoid re-reading the spectrum.
             size = int(data.shape[axis])
             ordered = sorted(set(centres))
             for position, center in enumerate(ordered):
-                low = (
-                    0
-                    if position == 0
-                    else (ordered[position - 1] + center) // 2 + 1
-                )
+                low = 0 if position == 0 else (ordered[position - 1] + center) // 2 + 1
                 high = (
                     size - 1
                     if position == len(ordered) - 1
@@ -621,9 +593,7 @@ to avoid re-reading the spectrum.
         measurement = PeakMeasurement(
             peak_id=peak_id,
             assignment=assignment,
-            reference_peak_id=str(
-                row.get('reference_peak_id') or reference_peak_id(peak_id)
-            ),
+            reference_peak_id=str(row.get("reference_peak_id") or reference_peak_id(peak_id)),
             reference=coords,
             noise_sigma=sigma,
         )
@@ -671,17 +641,13 @@ to avoid re-reading the spectrum.
                     )
             bounds[axis] = (low, high)
         measurement.cell_low = {
-            nucleus: int(bounds[axis][0])
-            for nucleus, axis in zip(search_nuclei, search_axes)
+            nucleus: int(bounds[axis][0]) for nucleus, axis in zip(search_nuclei, search_axes)
         }
         measurement.cell_high = {
-            nucleus: int(bounds[axis][1])
-            for nucleus, axis in zip(search_nuclei, search_axes)
+            nucleus: int(bounds[axis][1]) for nucleus, axis in zip(search_nuclei, search_axes)
         }
         slices = tuple(
-            slice(bounds[axis][0], bounds[axis][1] + 1)
-            if axis in bounds
-            else slice(None)
+            slice(bounds[axis][0], bounds[axis][1] + 1) if axis in bounds else slice(None)
             for axis in range(data.ndim)
         )
         block = data[slices]
@@ -698,17 +664,11 @@ to avoid re-reading the spectrum.
         flat = int(np.nanargmax(values))
         relative = np.unravel_index(flat, values.shape)
         best = [
-            (bounds[axis][0] + int(relative[axis]))
-            if axis in bounds
-            else int(relative[axis])
+            (bounds[axis][0] + int(relative[axis])) if axis in bounds else int(relative[axis])
             for axis in range(data.ndim)
         ]
-        measurement.intensity = float(
-            data[tuple(best)] if np.isfinite(data[tuple(best)]) else 0.0
-        )
-        measurement.snr = (
-            abs(measurement.intensity) / sigma if sigma > 0 else 0.0
-        )
+        measurement.intensity = float(data[tuple(best)] if np.isfinite(data[tuple(best)]) else 0.0)
+        measurement.snr = abs(measurement.intensity) / sigma if sigma > 0 else 0.0
         # the extremum sits on **that** exclusive-cell edge = the real top may lie in the
         # neighbour's cell (2026-09-19). Only the side the neighbour truncated counts;
         # stopping on the physical window edge is still just window_edge.
@@ -718,9 +678,7 @@ to avoid re-reading the spectrum.
                 continue
             low, high, low_from_cell, high_from_cell = cell
             position = int(best[axis])
-            if (low_from_cell and position == low) or (
-                high_from_cell and position == high
-            ):
+            if (low_from_cell and position == low) or (high_from_cell and position == high):
                 measurement.cell_edge = True
         # Measured intensity / the identity-table Height: about 1 means the record stopped
         # on its own top (>1 means it is more likely a shoulder). Fixed 2026-09-19: the
@@ -736,9 +694,7 @@ to avoid re-reading the spectrum.
         except (TypeError, ValueError):
             picked_value = 0.0
         measurement.intensity_ratio = (
-            abs(float(measurement.intensity)) / abs(picked_value)
-            if picked_value
-            else float("nan")
+            abs(float(measurement.intensity)) / abs(picked_value) if picked_value else float("nan")
         )
         for axis in search_axes:
             lo, hi = window_bounds[axis]
@@ -752,32 +708,7 @@ to avoid re-reading the spectrum.
 
         # sub-pixel refine per measured axis, the others held at their best point
         fractions = [float(index_) for index_ in best]
-        if refine == "gaussian":
-            # 2D Gaussian localisation (core.peaks.localize): physical ROI width plus fallback
-            from core.peaks.localize import localize_peak
-
-            peak_sign = 1 if float(data[tuple(best)]) >= 0 else -1
-            if sign == "positive":
-                peak_sign = 1
-            elif sign == "negative":
-                peak_sign = -1
-            ppm_axes = [np.asarray(a, dtype=float) for a in axes.ppm]
-            loc = localize_peak(
-                data,
-                best,
-                method="gaussian",
-                sign=peak_sign,
-                ppm_axes=ppm_axes,
-                roi_f1_ppm=roi_f1_ppm,
-                roi_f2_ppm=roi_f2_ppm,
-                logical_axes=list(axes.logical_to_storage),
-            )
-            fractions = [float(v) for v in loc.position]
-            measurement.localization = loc.to_dict(ppm_axes)
-            _add_nucleus_localization(measurement.localization, axes)
-        elif refine == "parabolic":
-            # P3-7: the parabola reports per-axis QC too (equivalent linewidth / edge
-            # flag), so the QC columns are no longer Gaussian-only.
+        if refine == "parabolic":
             qc_fwhm: dict[str, float] = {}
             qc_ok = True
             qc_edge = False
@@ -816,20 +747,22 @@ to avoid re-reading the spectrum.
                 "boundary_hit": qc_edge,
                 "fwhm_by_nucleus": qc_fwhm,
                 "source": tr("core.peaks(three-point parabola)"),
+                "baseline_offset": float(estimate.baseline),
+                "height_reference": "global_median_baseline",
             }
 
         for nucleus, _ppm_value in coords.items():
-            if wanted is not None and nucleus not in wanted:
+            if (
+                wanted is not None
+                and nucleus not in wanted
+                and nucleus.split(":", 1)[0] not in wanted
+            ):
                 continue
             axis = axes.storage_of(nucleus)
             if axis is None:
                 continue
-            measurement.positions[nucleus] = axes.ppm_at_fraction(
-                axis, fractions[axis]
-            )
-            measurement.deltas[nucleus] = (
-                measurement.positions[nucleus] - float(coords[nucleus])
-            )
+            measurement.positions[nucleus] = axes.ppm_at_fraction(axis, fractions[axis])
+            measurement.deltas[nucleus] = measurement.positions[nucleus] - float(coords[nucleus])
         results.append(measurement)
     return results
 
@@ -840,9 +773,6 @@ def pick_reference_peaks(
     sigma_multiplier: float | None = None,
     out_path: Path | str | None = None,
     details: dict[str, Any] | None = None,
-    localization_method: str = "parabolic",
-    gaussian_roi_f1_ppm: float | None = None,
-    gaussian_roi_f2_ppm: float | None = None,
     dataset: Any | None = None,
 ) -> Path:
     """Pick peaks on the reference spectrum, producing the fixed table the sweep tracks.
@@ -898,9 +828,6 @@ def pick_reference_peaks(
         dataset.exp_id,
         dataset.data_id,
         sigma_multiplier=sigma_multiplier,
-        localization_method=localization_method,
-        gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
-        gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
     )
     if details is not None:
         details["detection"] = result.get("detection") or {}
@@ -927,13 +854,11 @@ def detect_and_localize(
     sigma_multiplier: float | None = None,
     edge_margin_ppm: float | None = None,
     edge_margin_points: int | None = None,
-    method: str = "parabolic",
-    roi_f1_ppm: float | None = None,
-    roi_f2_ppm: float | None = None,
-    sign_mode: str = "dominant",
+    sign_mode: str = "auto",
     axes: SpectrumAxes | None = None,
     targets: Collection[int] | None = None,
     allow_empty_targets: bool = False,
+    experiment: Any | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Pick independently on **this combination's own spectrum** at the given threshold.
 
@@ -1015,23 +940,6 @@ def detect_and_localize(
         if sigma_multiplier is not None and float(sigma_multiplier) > 0
         else float(DEFAULT_DETECTION_SIGMA)
     )
-    # validate the refinement first: an unsupported method or dimension raises
-    wanted = str(method).strip().lower() or "parabolic"
-    if wanted not in ("parabolic", "gaussian"):
-        raise MeasurementError(
-            tr(
-            "unknown peak-localisation method: {p0!r} (parabolic / "
-            "gaussian)",
-            p0=method,
-        )
-        )
-    if wanted == "gaussian" and data.ndim != 2:
-        from core.peaks.localize import GAUSSIAN_UNSUPPORTED_MESSAGE as _msg
-
-        raise MeasurementError(_msg)
-    nuclei = list(spectrum_axes.nuclei)
-    axis0_nucleus = nuclei[0] if nuclei else ""
-    obs0 = float(spectrum_axes.obs[0]) if spectrum_axes.obs else 0.0
     try:
         from backend.config import load_processing_defaults
 
@@ -1042,21 +950,20 @@ def detect_and_localize(
         edge_points = max(0, int(edge_margin_points))
         edge_ppm = axis_units.ppm_for_points(spectrum_axes.ppm[0], edge_points)
         edge_source = tr("points_explicit")
-    else:
-        if edge_margin_ppm is not None:
-            edge_ppm = float(edge_margin_ppm)
-            edge_source = tr("ppm_explicit")
-        else:
-            edge_ppm = axis_units.edge_margin_ppm(
-                axis0_nucleus, obs0, linewidth_hz_by_nucleus=linewidths
-            )
-            edge_source = tr("ppm_physical_width")
+    elif edge_margin_ppm is not None:
+        edge_ppm = max(0.0, float(edge_margin_ppm))
+        edge_source = tr("ppm_explicit")
         edge_points = axis_units.points_for_ppm(spectrum_axes.ppm[0], edge_ppm)
-        if edge_points <= 0:
+        if edge_points <= 0 and edge_ppm > 0:
             edge_points = 1
             edge_ppm = axis_units.ppm_for_points(spectrum_axes.ppm[0], edge_points)
             edge_source = tr("points_fallback")
-    sigma = float(_noise.estimate(data).global_sigma)
+    else:
+        edge_points = 0
+        edge_ppm = 0.0
+        edge_source = "acquisition_and_spectral_evidence"
+    estimate = _noise.estimate(data)
+    sigma = float(estimate.global_sigma)
     peaks = _detect.detect(
         data,
         _detect.PeakDetectionParams(
@@ -1066,12 +973,42 @@ def detect_and_localize(
             edge_margin=edge_points,
         ),
     )
-    resolved_sign = str(sign_mode or "dominant")
-    if resolved_sign in ("dominant", "auto"):
+    axial = None
+    if edge_margin_points is None and edge_margin_ppm is None:
+        from core.peaks.axial import filter_axial_peaks
+
+        peaks, axial = filter_axial_peaks(
+            data,
+            peaks,
+            experiment,
+            dic=spectrum_axes.dic,
+            axes_ppm=spectrum_axes.ppm,
+            linewidth_hz_by_nucleus=linewidths,
+        )
+    resolved_sign = str(sign_mode or "auto")
+    if resolved_sign not in ("auto", "dominant", "positive", "negative", "both"):
+        raise MeasurementError(tr("Unknown peak sign mode: {p0}", p0=resolved_sign))
+    if resolved_sign == "auto":
+        from core.experiments.registry import get as get_template
+        from workflow.pick_peaks import strong_two_sign_evidence
+
+        kind = getattr(experiment, "experiment_type", None)
+        template = get_template(str(getattr(kind, "name", "") or ""))
+        confidence = float(getattr(kind, "confidence", 0.0) or 0.0)
+        uncertain = template is None or not np.isfinite(confidence) or confidence < 0.6
+        resolved_sign = (
+            "both"
+            if template is not None
+            and template.peak_sign == "mixed"
+            or uncertain
+            and strong_two_sign_evidence(peaks)
+            else "dominant"
+        )
+    if resolved_sign == "dominant":
         peaks = _detect.keep_dominant(peaks)
-        resolved_sign = "dominant"
-    # targeted localization (2026-09-19): only the target peaks take the chosen
-    # method's refinement.
+    elif resolved_sign in ("positive", "negative"):
+        sign = 1 if resolved_sign == "positive" else -1
+        peaks = [peak for peak in peaks if peak.sign == sign]
     target_ids: set[int] | None = None
     if targets is not None:
         target_ids = {int(value) for value in targets}
@@ -1080,13 +1017,11 @@ def detect_and_localize(
                 tr(
                     "the target peak list is empty: give at least one peak_id (an empty list "
                     "raises instead of silently falling back to whole-spectrum localization; pass "
-                    "allow_empty_targets for \"this condition refines "
-                    "nothing\")",
+                    'allow_empty_targets for "this condition refines '
+                    'nothing")',
                 )
             )
-        unknown = sorted(
-            value for value in target_ids if value < 1 or value > len(peaks)
-        )
+        unknown = sorted(value for value in target_ids if value < 1 or value > len(peaks))
         if unknown:
             shown = ", ".join(str(value) for value in unknown[:20])
             tail = tr(" ... ({p0} in total)", p0=len(unknown)) if len(unknown) > 20 else ""
@@ -1105,9 +1040,14 @@ def detect_and_localize(
             )
     axis_h = spectrum_axes.storage_of("1H")
     axis_n = spectrum_axes.storage_of("15N")
+    if any(spectrum_axes.nuclei.count(nucleus) > 1 for nucleus in ("1H", "15N")):
+        raise MeasurementError(
+            tr(
+                "The H/N study peak table cannot represent repeated H or N axes; "
+                "use project peak picking to generate the full-dimensional peak table",
+            )
+        )
     rows: list[dict[str, Any]] = []
-    fallback_reasons: dict[str, int] = {}
-    n_fallback = 0
     n_boundary = 0
     n_skipped = 0
     for index, peak in enumerate(peaks, start=1):
@@ -1115,53 +1055,20 @@ def detect_and_localize(
         record: dict[str, Any] = {}
         skipped = target_ids is not None and index not in target_ids
         if skipped:
-            # Not a target: skip this method's refinement and keep the detection-stage
-            # parabola (the method this row actually used); QC stays NaN = "not done",
-            # not "failed".
             n_skipped += 1
-        elif wanted == "gaussian":
-            from core.peaks.localize import localize_peak as _localize
-
-            loc = _localize(
+        else:
+            record = _parabolic_stencil_qc(
                 data,
                 [int(round(v)) for v in peak.position],
-                method="gaussian",
-                sign=int(peak.sign),
-                ppm_axes=list(spectrum_axes.ppm),
-                roi_f1_ppm=roi_f1_ppm,
-                roi_f2_ppm=roi_f2_ppm,
-                logical_axes=list(spectrum_axes.logical_to_storage),
-            )
-            position = tuple(float(v) for v in loc.position)
-            record = loc.to_dict(spectrum_axes.ppm)
-            _add_nucleus_localization(record, spectrum_axes)
-            if record.get("fallback"):
-                n_fallback += 1
-                reason = str(record.get("fallback_reason", "") or "")
-                fallback_reasons[reason] = fallback_reasons.get(reason, 0) + 1
-            if record.get("boundary_hit"):
-                n_boundary += 1
-        else:
-            # P3-7: the workflow path records parabolic QC with the same conversion
-            record = _parabolic_stencil_qc(
-                data, [int(round(v)) for v in peak.position], spectrum_axes
+                spectrum_axes,
+                baseline=estimate.baseline,
             )
             if record.get("boundary_hit"):
                 n_boundary += 1
-        # P3-7: the QC columns follow the method this row actually used - a
-        # gaussian failure/fallback is False, and only a parabola with no
-        # value at all leaves NaN. Under targeted localization an untargeted
-        # peak never ran this method, so it stays NaN rather than failed.
         if skipped:
             fit_success = None
-        elif wanted == "gaussian":
-            fit_success = bool(record.get("gaussian_fit_success"))
         else:
-            fit_success = (
-                None
-                if record.get("fit_success") is None
-                else bool(record["fit_success"])
-            )
+            fit_success = None if record.get("fit_success") is None else bool(record["fit_success"])
         h_ppm = (
             float(spectrum_axes.ppm_at_fraction(axis_h, position[axis_h]))
             if axis_h is not None
@@ -1172,9 +1079,7 @@ def detect_and_localize(
             if axis_n is not None
             else float("nan")
         )
-        fwhm_map = {
-            str(k): float(v) for k, v in (record.get("fwhm_by_nucleus") or {}).items()
-        }
+        fwhm_map = {str(k): float(v) for k, v in (record.get("fwhm_by_nucleus") or {}).items()}
         rows.append(
             {
                 "peak_id": int(index),
@@ -1185,24 +1090,14 @@ def detect_and_localize(
                 "intensity": float(peak.height),
                 "SNR": float(peak.snr),
                 "detected": True,
-                "localization_method": wanted,
-                "localization_requested": str(record.get("requested_method") or wanted),
+                "localization_method": "parabolic",
                 "fallback": bool(record.get("fallback")),
                 "fallback_reason": str(record.get("fallback_reason", "") or ""),
-                # P3-7: the QC columns follow the method this row actually used
-                # P3-7: the QC columns follow the method this row used
                 "fit_success": fit_success,
                 "FWHM_H": fwhm_map.get("1H"),
                 "FWHM_N": fwhm_map.get("15N"),
-                "fit_rmse": (
-                    float(record["fit_rmse"])
-                    if record.get("fit_rmse") is not None
-                    else None
-                ),
                 "boundary_hit": (
-                    None
-                    if record.get("boundary_hit") is None
-                    else bool(record.get("boundary_hit"))
+                    None if record.get("boundary_hit") is None else bool(record.get("boundary_hit"))
                 ),
                 "duplicate_localization": False,
             }
@@ -1220,10 +1115,12 @@ def detect_and_localize(
         "edge_margin_points": int(edge_points),
         "edge_margin_source": edge_source,
         "noise_sigma": sigma,
-        "localization_method": wanted,
+        "baseline_offset": float(estimate.baseline),
+        "height_reference": "global_median_baseline",
+        "localization_method": "parabolic",
         "n_peaks": len(rows),
-        "n_fallback": int(n_fallback),
-        "fallback_reasons": fallback_reasons,
+        "n_fallback": 0,
+        "fallback_reasons": {},
         "n_boundary_hit": int(n_boundary),
         # targeted localization (2026-09-19): scope plus counts. Untargeted peaks
         # are not refined (position from the detection-stage parabola, this method's
@@ -1234,15 +1131,15 @@ def detect_and_localize(
         "n_targeted": len(target_ids) if target_ids is not None else len(rows),
         "n_skipped": int(n_skipped),
         "targeted_peak_ids": (
-            [int(value) for value in sorted(target_ids)]
-            if target_ids is not None
-            else []
+            [int(value) for value in sorted(target_ids)] if target_ids is not None else []
         ),
         "duplicate_localization": {
             "n_rows": len(rows),
             "n_extra": int(n_duplicate),
         },
     }
+    if axial is not None:
+        meta["axial_screening"] = axial
     return rows, meta
 
 

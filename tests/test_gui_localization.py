@@ -1,5 +1,6 @@
 """GUI: Peak positioning method control for peak picking step (Parabolic / 2D Gaussian) +
-persistence by data."""
+persistence by data.
+"""
 
 from __future__ import annotations
 
@@ -20,9 +21,30 @@ class _FakeController:
 
     def __init__(self, ndim: int) -> None:
         self.ndim = int(ndim)
+        self.last_localization = ""
 
     def data_facts(self, exp_id: str, data_id: str) -> dict:
         return {"ndim": self.ndim, "direct_nucleus": "1H", "is_nus": False}
+
+    def pick_peaks(
+        self,
+        _data,
+        *,
+        exp_id: str,
+        data_id: str,
+        sigma_multiplier: float,
+        localization_method: str,
+    ) -> dict:
+        self.last_localization = localization_method
+        return {"status": "success"}
+
+
+class _SyncThread:
+    def __init__(self, target=None, daemon=None) -> None:
+        self._target = target
+
+    def start(self) -> None:
+        self._target()
 
 
 @pytest.fixture(scope="module")
@@ -38,77 +60,52 @@ def _manager(tmp_path: Path):
     return manager, entry.id, data.id
 
 
-def test_localization_combo_defaults_to_parabolic(
-    tmp_path: Path, qapp: QApplication
-) -> None:
-    """Default is Parabolic; both options are available (Parabolic / Gaussian Fit)."""
+def test_peak_row_has_no_localization_selector(tmp_path: Path, qapp: QApplication) -> None:
+    """Regression coverage: test peak row has no localization selector."""
     manager, exp_id, data_id = _manager(tmp_path)
     panel = PipelinePanel(manager, _FakeController(2))
     panel.set_selection("data", exp_id, data_id)
     row = panel._rows["peaks"]
-    assert row.localization_combo.count() == 2
-    assert [row.localization_combo.itemData(i) for i in range(2)] == [
-        "parabolic",
-        "gaussian",
-    ]
+    assert not hasattr(row, "localization_label")
+    assert not hasattr(row, "localization_combo")
     assert row.get_localization_method() == "parabolic"
-    # Availability and threshold controls are on the same gate (disabled when runnable data is not
-    # selected).
-    assert row.localization_combo.isEnabled() == row.threshold_spin.isEnabled()
     panel.close()
 
 
-def test_localization_select_gaussian_emits_and_persists(
+def test_threshold_control_keeps_its_status_gate_without_localization_ui(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """Select Gaussian: signal + write the data ui_state (the same partition as the threshold does
-    not cover each other)."""
-    from gui.per_data_records import load_ui_state
-
+    """Regression coverage: test threshold control keeps its status gate without localization ui."""
     manager, exp_id, data_id = _manager(tmp_path)
     panel = PipelinePanel(manager, _FakeController(2))
-    seen: list[str] = []
-    panel._rows["peaks"].localization_changed.connect(seen.append)
     panel.set_selection("data", exp_id, data_id)
     row = panel._rows["peaks"]
-    row.threshold_spin.setValue(18.0)
-    row.set_localization_method("gaussian")
-    row.localization_changed.emit("gaussian")  # Simulate user changing the combo selection.
-    assert seen == ["gaussian"]
-    state = load_ui_state(manager, exp_id, data_id).get("peaks") or {}
-    assert state["localization_method"] == "gaussian"
-    assert float(state["threshold"]) == pytest.approx(18.0)  # Threshold was not cleared.
+    row.set_status("LOCKED")
+    assert row.threshold_spin.isEnabled() is False
+    for status in ("READY", "SUCCESS", "OUTDATED", "FAILED"):
+        row.set_status(status)
+    row.set_status("SUCCESS")
+    assert row.threshold_spin.isEnabled() is True
+    panel.refresh()
     panel.close()
 
 
-def test_localization_gaussian_disabled_for_3d(
-    tmp_path: Path, qapp: QApplication
-) -> None:
-    """Non-2D: Gaussian item is disabled + clear prompt; if Gaussian is selected, parabola will be
-    reverted."""
-    from core.peaks.localize import GAUSSIAN_UNSUPPORTED_MESSAGE
-
+def test_fixed_localization_is_safe_for_3d_data(tmp_path: Path, qapp: QApplication) -> None:
+    """Regression coverage: test fixed localization is safe for 3d data."""
     manager, exp_id, data_id = _manager(tmp_path)
+
     panel = PipelinePanel(manager, _FakeController(3))
     panel.set_selection("data", exp_id, data_id)
     row = panel._rows["peaks"]
-    model = row.localization_combo.model()
-    item = model.item(row.localization_combo.findData("gaussian"))
-    assert item is not None and item.isEnabled() is False
-    assert GAUSSIAN_UNSUPPORTED_MESSAGE in row.localization_combo.toolTip()
-    # Even if Gaussian has been saved before, 3D data falls back to the parabola (the wrong
-    # algorithm will not run silently).
-    row.set_localization_method("gaussian")
-    row.set_localization_supported(False)
+    assert not hasattr(row, "localization_combo")
     assert row.get_localization_method() == "parabolic"
     panel.close()
 
 
-def test_localization_restored_from_ui_state_for_2d(
+def test_stale_gaussian_in_ui_state_falls_back_to_parabolic(
     tmp_path: Path, qapp: QApplication
 ) -> None:
-    """Per-data restore: after reopening the panel, 2D data still shows the last selected
-    Gaussian."""
+    """Regression coverage: test stale gaussian in ui state falls back to parabolic."""
     from gui.per_data_records import update_ui_state
 
     manager, exp_id, data_id = _manager(tmp_path)
@@ -121,15 +118,39 @@ def test_localization_restored_from_ui_state_for_2d(
     )
     panel = PipelinePanel(manager, _FakeController(2))
     panel.set_selection("data", exp_id, data_id)
-    assert panel._rows["peaks"].get_localization_method() == "gaussian"
+    row = panel._rows["peaks"]
+    assert row.get_localization_method() == "parabolic"
+    assert not hasattr(row, "localization_combo")
+
+    panel._ndim_cache[(exp_id, data_id)] = 3
+    panel.refresh()
+    assert row.get_localization_method() == "parabolic"
     panel.close()
 
 
-def test_switching_data_does_not_copy_previous_localization(
-    tmp_path: Path, qapp: QApplication
+def test_peak_run_passes_the_fixed_parabolic_method(
+    tmp_path: Path,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When switching, the threshold signal must not overwrite the current data's positioning
-    method with the previous data's."""
+    manager, exp_id, data_id = _manager(tmp_path)
+    controller = _FakeController(2)
+    panel = PipelinePanel(manager, controller)
+    panel.set_selection("data", exp_id, data_id)
+    monkeypatch.setattr(
+        "gui.pipeline_panel.compute_data_step_statuses",
+        lambda *_args, **_kwargs: {"peaks": "READY"},
+    )
+    monkeypatch.setattr("threading.Thread", _SyncThread)
+
+    panel._on_run_requested("peaks")
+
+    assert controller.last_localization == "parabolic"
+    panel.close()
+
+
+def test_switching_data_keeps_each_threshold_separate(tmp_path: Path, qapp: QApplication) -> None:
+    """Regression coverage: test switching data keeps each threshold separate."""
     from gui.per_data_records import load_ui_state, update_ui_state
 
     manager = ProjectManager.create_project(tmp_path / "switch", "demo")
@@ -153,9 +174,20 @@ def test_switching_data_does_not_copy_previous_localization(
 
     panel = PipelinePanel(manager, _FakeController(2))
     panel.set_selection("data", entry.id, first.id)
-    assert panel._rows["peaks"].get_localization_method() == "gaussian"
+    row = panel._rows["peaks"]
+    assert row.get_localization_method() == "parabolic"
+    row.threshold_spin.setValue(21.0)
+    first_state = load_ui_state(manager, entry.id, first.id)["peaks"]
+    assert float(first_state["threshold"]) == pytest.approx(21.0)
+
     panel.set_selection("data", entry.id, second.id)
     assert panel._rows["peaks"].get_localization_method() == "parabolic"
-    state = load_ui_state(manager, entry.id, second.id).get("peaks") or {}
-    assert state["localization_method"] == "parabolic"
+    second_state = load_ui_state(manager, entry.id, second.id)["peaks"]
+    assert float(second_state["threshold"]) == pytest.approx(25.0)
+
+    panel.set_selection("data", entry.id, first.id)
+    assert panel._rows["peaks"].get_localization_method() == "parabolic"
+    assert panel._rows["peaks"].threshold_spin.value() == pytest.approx(21.0)
+    first_again = load_ui_state(manager, entry.id, first.id)["peaks"]
+    assert float(first_again["threshold"]) == pytest.approx(21.0)
     panel.close()

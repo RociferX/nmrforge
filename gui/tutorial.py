@@ -76,9 +76,7 @@ class TutorialDialog(QDialog):
         if text:
             self.view.setMarkdown(text)
         else:
-            self.view.setPlainText(
-                tr("The tutorial document is missing from this installation.")
-            )
+            self.view.setPlainText(tr("The tutorial document is missing from this installation."))
         layout.addWidget(self.view, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.button(QDialogButtonBox.StandardButton.Close).setText(tr("close"))

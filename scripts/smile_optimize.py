@@ -30,9 +30,22 @@ from workflow.smile_optimize import (
 
 # Sort table column (same caliber as workflow.smile_optimize.write_smile_scan_output).
 _RANK_FIELDS = (
-    "rank", "index", "nsigma", "thresh", "net_peaks", "stable_count",
-    "suspect_count", "peak_count", "mean_snr", "quality", "smile_rms_ratio",
-    "holdout_rmse", "holdout_corr", "composite", "ok", "error",
+    "rank",
+    "index",
+    "nsigma",
+    "thresh",
+    "net_peaks",
+    "stable_count",
+    "suspect_count",
+    "peak_count",
+    "mean_snr",
+    "quality",
+    "smile_rms_ratio",
+    "holdout_rmse",
+    "holdout_corr",
+    "composite",
+    "ok",
+    "error",
 )
 
 
@@ -46,13 +59,11 @@ def _parse_grid(text: str) -> list[dict[str, float]]:
         nsigma, thresh = (float(v.strip()) for v in pair.split(","))
         grid.append({"nsigma": nsigma, "thresh": thresh})
     if not grid:
-        raise SystemExit("Error: --grid format expected \"nsigma, thresh; nsigma, thresh\"")
+        raise SystemExit('Error: --grid format expected "nsigma, thresh; nsigma, thresh"')
     return grid
 
 
-def _write_outputs(
-    out_dir: Path, rows: list[dict], scripts: dict[int, str]
-) -> dict[str, str]:
+def _write_outputs(out_dir: Path, rows: list[dict], scripts: dict[int, str]) -> dict[str, str]:
     """Write the sorting table (CSV+JSON) and the top three scripts (CLI does not connect to the
     project tree, but directly falls into directory)."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -64,10 +75,7 @@ def _write_outputs(
         for row in rows:
             writer.writerow({key: row.get(key, "") for key in _RANK_FIELDS})
     json_path.write_text(
-        json.dumps(
-            {"rows": rows, "count": len(rows)}, ensure_ascii=False, indent=2
-        )
-        + chr(10),
+        json.dumps({"rows": rows, "count": len(rows)}, ensure_ascii=False, indent=2) + chr(10),
         encoding="utf-8",
         newline="",
     )
@@ -83,35 +91,42 @@ def _write_outputs(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="SMILE parameter optimisation (optional tool)")
-    parser.add_argument("datasets", nargs="+", help=(
-        "Bruker dataset directory (multiple=multiple experiments)"
-    ))
+    parser.add_argument(
+        "datasets", nargs="+", help=("Bruker dataset directory (multiple=multiple experiments)")
+    )
     parser.add_argument("--ext-lo", default="9.0", help="1H extraction window low ppm")
     parser.add_argument("--ext-hi", default="7.5", help="1H extraction window height ppm")
     parser.add_argument("--nthread", type=int, default=2, help="SMILE Number of threads")
     parser.add_argument("--grid", default="", help="Custom grid (default by --grid-size)")
     parser.add_argument(
-        "--grid-size", type=int, default=SMILE_GRID_DEFAULT,
+        "--grid-size",
+        type=int,
+        default=SMILE_GRID_DEFAULT,
         help=(
             f"optimisation degree n x n({SMILE_GRID_MIN}..{SMILE_GRID_MAX}, default "
             f"{SMILE_GRID_DEFAULT})"
         ),
     )
     parser.add_argument(
-        "--rank-mode", default="true_peaks",
+        "--rank-mode",
+        default="true_peaks",
         choices=("true_peaks", "consistency"),
         help="Sorting caliber: net true peak priority / consistency priority (leave residuals)",
     )
     parser.add_argument(
-        "--holdout-ratio", type=float, default=SMILE_HOLDOUT_RATIO,
+        "--holdout-ratio",
+        type=float,
+        default=SMILE_HOLDOUT_RATIO,
         help="The proportion reserved for consistency caliber (default 0.25)",
     )
-    parser.add_argument("--scan-dir", default="", help=(
-        "candidate spectrum temporary directory (default system temporary directory)"
-    ))
-    parser.add_argument("--out", default="", help=(
-        "Sort table/script output directory (default dataset sibling)"
-    ))
+    parser.add_argument(
+        "--scan-dir",
+        default="",
+        help=("candidate spectrum temporary directory (default system temporary directory)"),
+    )
+    parser.add_argument(
+        "--out", default="", help=("Sort table/script output directory (default dataset sibling)")
+    )
     args = parser.parse_args(argv)
 
     paths = [Path(p) for p in args.datasets]

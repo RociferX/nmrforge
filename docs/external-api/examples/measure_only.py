@@ -1,9 +1,13 @@
-r"""Example 3: Only use the measurement layer (do not process the two peak tables of the existing
-spectrum). Purpose: The reference spectrum/candidate spectrum is already in hand, but I just
-want to do parabolic/2D gaussian positioning based on the same batch of reference peaks and get
-the unified peak table (It is convenient to find out the threshold first/window/ROI and then
-officially run the study). Usage:: python docs/external-api/examples/measure_only.py --spectrum
-cand.ft2 \ --peaks reference.list --out./tables."""
+r"""Example 3: measure reference peaks on an existing spectrum.
+
+This does not run conversion, reconstruction, or other processing. Peak localization uses the
+supported three-point parabolic method.
+
+Usage::
+
+    python docs/external-api/examples/measure_only.py --spectrum candidate.ft2 \
+        --peaks reference.list --out ./tables
+"""
 
 from __future__ import annotations
 
@@ -25,36 +29,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--peaks", required=True, help="Reference peak table (.list/CSV)")
     parser.add_argument("--out", default="tables", help="output directory")
     parser.add_argument("--window-ppm", type=float, default=None)
-    parser.add_argument("--roi-f1-ppm", type=float, default=None)
-    parser.add_argument("--roi-f2-ppm", type=float, default=None)
     args = parser.parse_args(argv)
 
     out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
     rows = read_reference_peaks(args.peaks)
-    tables: dict[str, Path] = {}
-    for method in ("parabolic", "gaussian"):
-        measurements = measure_peak_positions(
-            args.spectrum,
-            rows,
-            window_ppm=args.window_ppm,
-            refine=method,
-            roi_f1_ppm=args.roi_f1_ppm,
-            roi_f2_ppm=args.roi_f2_ppm,
-        )
-        table_rows = peak_table_rows(
-            measurements,
-            workflow_id="reference",
-            condition="A",
-            dataset=Path(args.spectrum).stem,
-            method=method,
-        )
-        tables[method] = write_peak_table(
-            out / f"peak_table_{method}.csv", table_rows
-        )
-        detected = sum(1 for row in table_rows if row["detected"])
-        print(f"{method}: {detected}/{len(table_rows)} detected -> {tables[method]}")
+    measurements = measure_peak_positions(
+        args.spectrum, rows, window_ppm=args.window_ppm, refine="parabolic"
+    )
+    table_rows = peak_table_rows(
+        measurements,
+        workflow_id="reference",
+        condition="A",
+        dataset=Path(args.spectrum).stem,
+        method="parabolic",
+    )
+    table = write_peak_table(out / "peak_table_parabolic.csv", table_rows)
+    detected = sum(1 for row in table_rows if row["detected"])
+    print(f"{detected}/{len(table_rows)} detected -> {table}")
 
-    sample = read_peak_table(tables["parabolic"])[:1]
+    sample = read_peak_table(table)[:1]
     print("List:", list(sample[0]) if sample else [])
     return 0
 

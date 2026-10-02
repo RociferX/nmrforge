@@ -31,8 +31,7 @@ def _manager_with_peaks(tmp_path: Path):
     peaks = manager.data_dir(exp_id, data_id, "peaks")
     peaks.mkdir(parents=True, exist_ok=True)
     (peaks / f"{exp_id}-{data_id}.csv").write_text(
-        "Peak_ID,H_shift,N_shift,Intensity,SN,label\n"
-        "1,8.0,115.0,100,20,OLD\n",
+        "Peak_ID,H_shift,N_shift,Intensity,SN,label\n1,8.0,115.0,100,20,OLD\n",
         encoding="utf-8",
     )
     manager.save()
@@ -66,26 +65,18 @@ def test_import_poky_replaces_association_then_save_writes_list(
 
     # Import: replace the association, do not overwrite the old CSV
     panel._on_import_poky()
-    old_csv = (
-        manager.data_dir(exp_id, data_id, "peaks") / f"{exp_id}-{data_id}.csv"
-    )
+    old_csv = manager.data_dir(exp_id, data_id, "peaks") / f"{exp_id}-{data_id}.csv"
     assert "OLD" in old_csv.read_text(encoding="utf-8")
     assert any("替换当前峰表关联" in text for text in shown)
     assert panel.peak_table.rowCount() == 2
 
     # Save: write the Poky .list peak file and register a manual_peaks run
     panel._on_save_peaks()
-    list_path = (
-        manager.data_dir(exp_id, data_id, "peaks") / f"{exp_id}-{data_id}.list"
-    )
+    list_path = manager.data_dir(exp_id, data_id, "peaks") / f"{exp_id}-{data_id}.list"
     assert list_path.is_file()
     content = list_path.read_text(encoding="utf-8")
     assert "G1" in content and "A2" in content and "OLD" not in content
-    runs = [
-        r
-        for r in manager.project.workflow_runs
-        if r.workflow_ref == "manual_peaks"
-    ]
+    runs = [r for r in manager.project.workflow_runs if r.workflow_ref == "manual_peaks"]
     assert len(runs) == 1 and runs[0].status == "success"
     assert runs[0].outputs["peaks"] == str(list_path)
     panel.close()
@@ -129,9 +120,7 @@ def test_projection_file_hides_peak_ui(
     panel.close()
 
 
-def test_peak_table_lazy_assignment_widgets(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_peak_table_lazy_assignment_widgets(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.199-patch29dc: Assignment editors are created on demand; peak tables with thousands of
     rows no longer stall."""
     manager, exp_id, data_id = _manager_with_peaks(tmp_path)
@@ -166,9 +155,7 @@ def test_peak_table_lazy_assignment_widgets(
     panel.close()
 
 
-def test_3d_peak_table_columns_use_nucleus_names(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_3d_peak_table_columns_use_nucleus_names(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.199-patch29df: 3D peak-table columns show nucleus names (F1_shift -> N/H/C)."""
     import json
 
@@ -230,3 +217,76 @@ def test_3d_peak_table_columns_use_nucleus_names(
     panel.close()
 
 
+def _manager_for_snr(tmp_path: Path, name: str, peak_text: str, suffix: str):
+    "Regression coverage:  manager for snr."
+    manager = ProjectManager.create_project(tmp_path / name, "demo")
+    entry = manager.create_experiment("HSQC")
+    data = manager.import_data(entry.id, "/fake/1")
+    exp_id, data_id = entry.id, data.id
+    spectra = manager.data_dir(exp_id, data_id, "spectra")
+    spectra.mkdir(parents=True, exist_ok=True)
+    spectrum = spectra / f"{exp_id}-{data_id}.ft2"
+    spectrum.write_bytes(b"x")
+    peaks_dir = manager.data_dir(exp_id, data_id, "peaks")
+    peaks_dir.mkdir(parents=True, exist_ok=True)
+    peak_path = peaks_dir / f"{exp_id}-{data_id}{suffix}"
+    peak_path.write_text(peak_text, encoding="utf-8")
+    manager.save()
+    return manager, exp_id, data_id, spectrum, peak_path
+
+
+def test_peak_table_sn_column_shows_snr(tmp_path: Path, qapp: QApplication) -> None:
+    "Regression coverage: test peak table sn column shows snr."
+    manager, exp_id, data_id, spectrum, _peak_path = _manager_for_snr(
+        tmp_path,
+        "proj_snr",
+        "Peak_ID,H_shift,N_shift,Intensity,SNR,label\n"
+        "1,8.0,115.0,100,20.53,G1\n"
+        "2,7.5,118.0,80,,A2\n"
+        "3,7.0,120.0,60,NaN,C3\n",
+        ".csv",
+    )
+    panel = SpectrumPanel(manager)
+    panel.set_context(exp_id, data_id)
+    panel._load_peaks(spectrum)
+    assert panel.peak_table.rowCount() == 3
+    sn_col = panel._peak_keys.index("SN")
+    assert panel.peak_table.item(0, sn_col).text() == "20.5"
+    assert panel.peak_table.item(1, sn_col).text() == ""
+    assert panel.peak_table.item(2, sn_col).text() == ""
+
+    assert panel._peaks[0]["SN"] == "20.53"
+    panel.close()
+
+
+def test_peak_table_sn_column_accepts_legacy_sn_column(tmp_path: Path, qapp: QApplication) -> None:
+    "Regression coverage: test peak table sn column accepts legacy sn column."
+    manager, exp_id, data_id, spectrum, _peak_path = _manager_for_snr(
+        tmp_path,
+        "proj_sn",
+        "Peak_ID,H_shift,N_shift,Intensity,SN,label\n1,8.0,115.0,100,3,OLD\n",
+        ".csv",
+    )
+    panel = SpectrumPanel(manager)
+    panel.set_context(exp_id, data_id)
+    panel._load_peaks(spectrum)
+    sn_col = panel._peak_keys.index("SN")
+    assert panel.peak_table.item(0, sn_col).text() == "3.0"
+    panel.close()
+
+
+def test_peak_table_sn_column_empty_for_poky_list(tmp_path: Path, qapp: QApplication) -> None:
+    "Regression coverage: test peak table sn column empty for poky list."
+    manager, exp_id, data_id, spectrum, _peak_path = _manager_for_snr(
+        tmp_path,
+        "proj_list_sn",
+        "Assignment w1 w2 Data Height Volume\nG1 118.0 8.2 0 100.0 100.0\n",
+        ".list",
+    )
+    panel = SpectrumPanel(manager)
+    panel.set_context(exp_id, data_id)
+    panel._load_peaks(spectrum)
+    assert panel.peak_table.rowCount() == 1
+    sn_col = panel._peak_keys.index("SN")
+    assert panel.peak_table.item(0, sn_col).text() == ""
+    panel.close()

@@ -150,10 +150,13 @@ def test_terminate_kills_child_process_tree() -> None:
     kill the grandchild too.
     """
     parent = subprocess.Popen(
-        [sys.executable, "-c",
-         "import subprocess,sys,time;"
-         "subprocess.Popen([sys.executable,'-c','import time;time.sleep(120)'],"
-         "start_new_session=True);time.sleep(120)"],
+        [
+            sys.executable,
+            "-c",
+            "import subprocess,sys,time;"
+            "subprocess.Popen([sys.executable,'-c','import time;time.sleep(120)'],"
+            "start_new_session=True);time.sleep(120)",
+        ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
@@ -168,15 +171,18 @@ def test_terminate_kills_child_process_tree() -> None:
         assert parent.poll() is not None
         # confirm the grandchild was terminated too: look it up by command line
         import os
+
         if os.name == "nt":
             out = subprocess.run(
                 ["tasklist", "/FI", "IMAGENAME eq python.exe", "/FO", "CSV"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
+                errors="replace",
             ).stdout
             assert "time.sleep(120)" not in out  # placeholder only; a PID tree lookup is steadier
         else:
             ps = subprocess.run(
-                ["ps", "-ef"], capture_output=True, text=True
+                ["ps", "-ef"], capture_output=True, text=True, errors="replace"
             ).stdout
             assert "time.sleep(120)" not in ps
     finally:

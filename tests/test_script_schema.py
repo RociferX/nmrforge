@@ -95,10 +95,7 @@ def test_render_scripts_nus_window_poly_time(bruker_dir: Path) -> None:
     assert "GM" not in nus
     assert "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 1 -c 0.5 \\" in nus
     # 2D NUS: POLY -time must come before the window (first step in the time domain)
-    assert nus.index("| nmrPipe -fn POLY -time") < nus.index(
-        "| nmrPipe -fn SP -off 0.45"
-    )
-
+    assert nus.index("| nmrPipe -fn POLY -time") < nus.index("| nmrPipe -fn SP -off 0.45")
 
 
 def test_param_schema_ext_keys() -> None:
@@ -109,7 +106,6 @@ def test_param_schema_ext_keys() -> None:
     assert schema["default"]["ext_lo"] == "10.5"
     assert schema["default"]["ext_hi"] == "6.5"
     assert schema["default"]["extract"] is True
-
 
 
 def test_param_schema_zero_fill_keys() -> None:

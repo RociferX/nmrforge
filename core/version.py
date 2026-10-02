@@ -45,6 +45,7 @@ def _git(*args: str) -> tuple[int, str]:
             ["git", "-C", str(root), *args],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=10,
             check=False,
         )
@@ -84,7 +85,8 @@ def git_commit() -> str:
 
 def git_commit_dirty() -> bool:
     """Whether the working tree holds uncommitted changes to tracked files
-    (False without git, or when frozen)."""
+    (False without git, or when frozen).
+    """
     if _GIT_COMMIT is None:
         git_commit()
     return bool(_GIT_DIRTY)
@@ -125,7 +127,8 @@ def _distribution_version(name: str) -> str:
 
 def dependency_versions() -> dict[str, str]:
     """Python and key dependency versions (an empty string means the value is
-    unavailable; nothing is faked as "unknown")."""
+    unavailable; nothing is faked as "unknown").
+    """
     versions = {"python": platform.python_version()}
     for name in _DEPENDENCIES:
         version = _distribution_version(name)
@@ -149,7 +152,8 @@ def registered_tool_versions() -> dict[str, str]:
 
 def tool_versions() -> dict[str, str]:
     """Full tool version table written to a WorkflowRun (itself + dependencies +
-    probed external tools)."""
+    probed external tools).
+    """
     versions = {"nmrforge": software_version()}
     versions.update(dependency_versions())
     versions.update(registered_tool_versions())

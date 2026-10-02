@@ -36,7 +36,6 @@ from nmrforge_api.direct_range import (
 from nmrforge_api.errors import ReferenceError, SweepError
 from nmrforge_api.peak_tables import (
     REFERENCE_WORKFLOW_ID,
-    gaussian_fallback_rows,
     mark_duplicate_localization,
     peak_table_digest,
     peak_table_rows,
@@ -78,17 +77,13 @@ _NON_SWEEP_KEYS: tuple[str, ...] = (
 #: they live only in ``params['diagnostics']``; without promotion a combination falls back
 #: to backend defaults, so scripts differ on parameters nobody set. Real case: a direct-
 #: dimension DC offset put ``nmrPipe -fn POLY -time`` in the reference script only.
-_RUNTIME_DECISION_KEYS: tuple[tuple[str, str], ...] = (
-    ("direct_poly_time", "apply_poly_time"),
-)
+_RUNTIME_DECISION_KEYS: tuple[tuple[str, str], ...] = (("direct_poly_time", "apply_poly_time"),)
 
 REFERENCE_FILENAME = "reference.json"
 REFERENCE_PEAK_LIST_FILENAME = "reference.list"
 REFERENCE_TABLE_FILENAMES = {
     "parabolic": "reference_peak_table_parabolic.csv",
-    "gaussian": "reference_peak_table_gaussian.csv",
 }
-GAUSSIAN_UNSUPPORTED_NDIM_REASON = "gaussian_unsupported_ndim"
 
 
 @dataclass
@@ -104,11 +99,11 @@ class ReferenceSpectrum:
     ndim: int = 2
     # effective sampling: full sampling (even when labelled NUS) degrades to uniform
     sampling: str = "uniform"
-    sampling_schedule: str = ""      # origin: nuslist/params/full_sampling/...
+    sampling_schedule: str = ""
     sampling_evidence: list[str] = field(default_factory=list)
-    spectrum_path: str = ""            # the active spectrum under the project spectra/
-    frozen_spectrum: str = ""          # the copy kept inside the study
-    script_path: str = ""              # the reference script copy inside the study
+    spectrum_path: str = ""  # the active spectrum under the project spectra/
+    frozen_spectrum: str = ""  # the copy kept inside the study
+    script_path: str = ""  # the reference script copy inside the study
     script_sha256: str = ""
     spectrum_sha256: str = ""
     params: dict[str, Any] = field(default_factory=dict)
@@ -120,11 +115,10 @@ class ReferenceSpectrum:
     # per-axis PS (p0, p1) from the reference run, passed as direct_phase_override so that
     # candidates carry the **actual** phase the reference produced.
     direct_phase: dict[str, list[float]] = field(default_factory=dict)
-    # reference tables: reference.list holds the identity, the two CSVs the two methods
     peak_table_path: str = ""
     peak_table_sha256: str = ""
     peak_count: int = 0
-    peak_source: str = ""          # auto (NMRForge picking) | external | shared:<condition>
+    peak_source: str = ""  # auto (NMRForge picking) | external | shared:<condition>
     peak_params: dict[str, Any] = field(default_factory=dict)
     peak_created_at: str = ""
     peak_tables: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -147,9 +141,11 @@ class ReferenceSpectrum:
         """Sampling flags that steer the FT sign and direction, fixed when the reference is built.
 
         User 2026-09-25 (building a reference through the API): a manual flip such as ``-neg``,
-        written as ``build_reference(params={"sampling": {"flip_f1": True}})``, must really reach
+        written as ``build_reference(params={"sampling": {"flip_f1": True}})``, must really
+        reach
         **every** reference step (phase preview, joint evaluation, final script) and freeze with
-        the reference. This reads that choice back out of the resolved parameters so combinations
+        the reference. This reads that choice back out of the resolved parameters so
+        combinations
         inherit it and records keep it; a combination must **not** treat it as a sweep axis (see
         the locked keys of :func:`nmrforge_api.sweep.validate_axes`).
         """
@@ -158,10 +154,6 @@ class ReferenceSpectrum:
     @property
     def peak_table_parabolic_path(self) -> str:
         return str((self.peak_tables.get("parabolic") or {}).get("path", ""))
-
-    @property
-    def peak_table_gaussian_path(self) -> str:
-        return str((self.peak_tables.get("gaussian") or {}).get("path", ""))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -216,9 +208,7 @@ class ReferenceSpectrum:
             ndim=int(data.get("ndim", 2) or 2),
             sampling=str(data.get("sampling", "uniform")),
             sampling_schedule=str(data.get("sampling_schedule", "")),
-            sampling_evidence=[
-                str(x) for x in (data.get("sampling_evidence") or [])
-            ],
+            sampling_evidence=[str(x) for x in (data.get("sampling_evidence") or [])],
             spectrum_path=str(data.get("spectrum_path", "")),
             frozen_spectrum=str(data.get("frozen_spectrum", "")),
             script_path=str(data.get("script_path", "")),
@@ -248,31 +238,29 @@ class ReferenceSpectrum:
             created_at=str(data.get("created_at", "")),
             software_version=str(data.get("software_version", "")),
             software_commit=str(data.get("software_commit", "")),
-            tool_versions={
-                str(k): str(v) for k, v in (data.get("tool_versions") or {}).items()
-            },
+            tool_versions={str(k): str(v) for k, v in (data.get("tool_versions") or {}).items()},
             logs_tail=[str(x) for x in (data.get("logs_tail") or [])],
         )
 
     def direct_phase_override(self) -> dict[str, tuple[float, float]] | None:
         """Reference phases -> the backend ``direct_phase_override`` used for phase locking.
 
-        The backend applies it per axis (see the phase branch of ``script_generator._stage_lines``),
-        so every axis PS from the reference run is returned: the direct-dimension search is skipped
+        The backend applies it per axis (see the phase branch of
+        ``script_generator._stage_lines``),
+        so every axis PS from the reference run is returned: the direct-dimension search is
+        skipped
         and the indirect ones keep the reference result; otherwise a phase difference would leak
         into the measured peak positions.
         """
         if not self.direct_phase:
             return None
         return {
-            axis: (float(values[0]), float(values[1]))
-            for axis, values in self.direct_phase.items()
+            axis: (float(values[0]), float(values[1])) for axis, values in self.direct_phase.items()
         }
 
     def normalized_direct_phase(self) -> dict[str, list[float]]:
         return {
-            axis: [float(values[0]), float(values[1])]
-            for axis, values in self.direct_phase.items()
+            axis: [float(values[0]), float(values[1])] for axis, values in self.direct_phase.items()
         }
 
     def phase_record(self) -> dict[str, Any]:
@@ -287,9 +275,7 @@ class ReferenceSpectrum:
                 "phase_mode": "auto",
                 "actual_p0": float(values[0]),
                 "actual_p1": float(values[1]),
-                "source": (
-                    f"reference_run:{self.run_id}" if self.run_id else "reference_run"
-                ),
+                "source": (f"reference_run:{self.run_id}" if self.run_id else "reference_run"),
             }
         return record
 
@@ -336,9 +322,7 @@ def parse_reference_spec(spec: Any) -> ReferenceHandle:
     if path.is_file() and path.name == REFERENCE_FILENAME:
         # <root>/study/reference/<key>/reference.json -> infer the study root
         root = path.parent.parent.parent.parent
-        return ReferenceHandle(
-            root=str(root), condition="", reference_json=str(path)
-        )
+        return ReferenceHandle(root=str(root), condition="", reference_json=str(path))
     condition = ""
     if "#" in text:
         text, _, condition = text.partition("#")
@@ -369,16 +353,15 @@ def resolve_reference(
     target: DatasetRef | None = None
     if handle.reference_json:
         try:
-            payload = json.loads(
-                Path(handle.reference_json).read_text(encoding="utf-8")
-            )
+            payload = json.loads(Path(handle.reference_json).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            raise ReferenceError(tr(
-                "cannot read the reference file: {p0} "
-                "({p1})",
-                p0=handle.reference_json,
-                p1=exc,
-            ))
+            raise ReferenceError(
+                tr(
+                    "cannot read the reference file: {p0} ({p1})",
+                    p0=handle.reference_json,
+                    p1=exc,
+                )
+            )
         key = str(payload.get("dataset_key", ""))
         target = next((ref for ref in session.datasets if ref.key == key), None)
         if target is None:
@@ -396,8 +379,7 @@ def resolve_reference(
         if target is None:
             raise ReferenceError(
                 tr(
-                    "study {p0} has no condition {p1!r}: available conditions are "
-                    "{p2}",
+                    "study {p0} has no condition {p1!r}: available conditions are {p2}",
                     p0=root,
                     p1=handle.condition,
                     p2=session.conditions,
@@ -450,9 +432,7 @@ def sanitize_sweep_params(params: dict[str, Any]) -> dict[str, Any]:
     promoted to top-level keys (an explicit top-level value is not overwritten).
     """
     cleaned = {
-        str(key): value
-        for key, value in dict(params or {}).items()
-        if key not in _NON_SWEEP_KEYS
+        str(key): value for key, value in dict(params or {}).items() if key not in _NON_SWEEP_KEYS
     }
     for key, value in reference_runtime_decisions(params).items():
         cleaned.setdefault(key, value)
@@ -484,9 +464,7 @@ def _as_phase_pair(raw: object) -> list[float] | None:
         return None
 
 
-def reference_phase(
-    effective: dict[str, Any], *, ndim: int = 2
-) -> dict[str, list[float]]:
+def reference_phase(effective: dict[str, Any], *, ndim: int = 2) -> dict[str, list[float]]:
     """The reference parameters -> per-axis PS (p0, p1) used for locking.
 
     - ``phases``: the per-axis PS dict (unified route; indirect phases live here);
@@ -508,9 +486,7 @@ def reference_phase(
     return locked
 
 
-def dataset_for_reference(
-    session: StudySession, reference: ReferenceSpectrum
-) -> DatasetRef | None:
+def dataset_for_reference(session: StudySession, reference: ReferenceSpectrum) -> DatasetRef | None:
     """Reference -> its condition dataset in the session (None when not found)."""
     for ref in session.datasets:
         if ref.key == reference.dataset_key:
@@ -606,12 +582,14 @@ def build_reference(
     Returns
     -------
     ReferenceSpectrum
-        the frozen reference: paths and hashes, full script, resolved parameters, phase, work dir.
+        the frozen reference: paths and hashes, full script, resolved parameters, phase, work
+        dir.
 
     Raises
     ------
     ReferenceError
-        the backend failed, data is missing or the reference is unusable; nothing partial is kept.
+        the backend failed, data is missing or the reference is unusable; nothing partial is
+        kept.
 
     Side effects
     ------------
@@ -651,13 +629,22 @@ def build_reference(
     work = reference_work_dir(session, target_ref)
     _log(tr("reference [{p0}]: generating the FID", p0=target_ref.condition))
     generate_fid(
-        manager, exp_id, data_id, session.backend,
-        work_dir=work, progress=_log,
+        manager,
+        exp_id,
+        data_id,
+        session.backend,
+        work_dir=work,
+        progress=_log,
     )
     _log(tr("reference [{p0}]: generating the spectrum (optimisation)", p0=target_ref.condition))
     spectrum_path = generate_spectrum(
-        manager, exp_id, data_id, session.backend,
-        params=run_params, work_dir=work, progress=_log,
+        manager,
+        exp_id,
+        data_id,
+        session.backend,
+        params=run_params,
+        work_dir=work,
+        progress=_log,
     )
     run = manager.last_run_for_data(exp_id, data_id, STEP_RUN_REFS["spectrum"])
     if run is None or run.status != "success":
@@ -672,9 +659,7 @@ def build_reference(
     frozen_spectrum = target_dir / f"reference{Path(spectrum_path).suffix}"
     frozen_script = target_dir / "process.com"
     shutil.copy2(spectrum_path, frozen_spectrum)
-    frozen_script.write_text(
-        script.read_text(encoding="utf-8"), encoding="utf-8", newline="\n"
-    )
+    frozen_script.write_text(script.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
 
     experiment = read_experiment(manager, exp_id, data_id)
     # effective sampling: detection already degraded "labelled NUS but full" to uniform
@@ -763,22 +748,24 @@ def load_reference(
     try:
         raw = json.loads(state_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise ReferenceError(tr(
-            "reference state file is corrupt: {p0} "
-            "({p1})",
-            p0=state_file,
-            p1=exc,
-        )) from exc
+        raise ReferenceError(
+            tr(
+                "reference state file is corrupt: {p0} ({p1})",
+                p0=state_file,
+                p1=exc,
+            )
+        ) from exc
     reference = ReferenceSpectrum.from_dict(raw)
     if not reference.condition:
         reference.condition = target_ref.condition
     for path in (reference.frozen_spectrum, reference.script_path):
         if not path or not Path(path).is_file():
-            raise ReferenceError(tr(
-                "reference artefacts are missing; rebuild with force=True: "
-                "{p0}",
-                p0=path,
-            ))
+            raise ReferenceError(
+                tr(
+                    "reference artefacts are missing; rebuild with force=True: {p0}",
+                    p0=path,
+                )
+            )
     return reference
 
 
@@ -836,8 +823,6 @@ def build_reference_peak_tables(
     *,
     window_pts: int | None = None,
     window_ppm: float | None = None,
-    roi_f1_ppm: float | None = None,
-    roi_f2_ppm: float | None = None,
 ) -> ReferenceSpectrum:
     """Write both reference peak tables (parabolic + gaussian) from one reference spectrum.
 
@@ -867,48 +852,15 @@ def build_reference_peak_tables(
         dataset=dataset_label,
         method="parabolic",
     )
-    if int(reference.ndim) == 2 and int(axes.ndim) == 2:
-        gaussian = measure_peak_positions(
-            spectrum_path,
-            rows,
-            axes=axes,
-            window_pts=window_pts,
-            window_ppm=window_ppm,
-            refine="gaussian",
-            roi_f1_ppm=roi_f1_ppm,
-            roi_f2_ppm=roi_f2_ppm,
-        )
-        gaussian_rows = peak_table_rows(
-            gaussian,
-            workflow_id=REFERENCE_WORKFLOW_ID,
-            condition=condition,
-            dataset=dataset_label,
-            method="gaussian",
-        )
-    else:
-        gaussian_rows = gaussian_fallback_rows(
-            parabolic,
-            workflow_id=REFERENCE_WORKFLOW_ID,
-            condition=condition,
-            dataset=dataset_label,
-            reason=GAUSSIAN_UNSUPPORTED_NDIM_REASON,
-        )
     target_dir = session.reference_dir_for(dataset)
     written: dict[str, Path] = {}
-    for method, table_rows in (
-        ("parabolic", parabolic_rows),
-        ("gaussian", gaussian_rows),
-    ):
+    for method, table_rows in (("parabolic", parabolic_rows),):
         written[method] = write_peak_table(
             target_dir / REFERENCE_TABLE_FILENAMES[method], table_rows
         )
-    reference.peak_tables = {
-        method: peak_table_digest(path) for method, path in written.items()
-    }
+    reference.peak_tables = {method: peak_table_digest(path) for method, path in written.items()}
     reference.peak_localization = {
         "parabolic": _localization_summary(parabolic_rows),
-        "gaussian": _localization_summary(gaussian_rows),
-        # wording on record: one cell per peak since 2026-09-19, not one shared window
         "exclusive_windows": True,
         "window_by_axis": {
             str(axis): dict(spec)
@@ -938,8 +890,6 @@ def rebuild_reference_peak_tables(
     *,
     window_pts: int | None = None,
     window_ppm: float | None = None,
-    roi_f1_ppm: float | None = None,
-    roi_f2_ppm: float | None = None,
 ) -> ReferenceSpectrum:
     """Rebuild the two reference peak tables from the **existing** frozen spectrum.
 
@@ -996,19 +946,18 @@ def rebuild_reference_peak_tables(
         ref,
         window_pts=window_pts,
         window_ppm=window_ppm,
-        roi_f1_ppm=roi_f1_ppm,
-        roi_f2_ppm=roi_f2_ppm,
     )
     if sha256_file(spectrum) != spectrum_before:
         raise ReferenceError(tr("the reference spectrum file changed while rebuilding"))
     if updated.spectrum_sha256 and updated.spectrum_sha256 != spectrum_before:
         raise ReferenceError(tr("the recorded reference spectrum sha256 no longer matches"))
     if sha256_file(peaks) != peaks_before:
-        raise ReferenceError(tr(
-            "recomputing the tables changed the reference peak identity table ({p0}), "
-            "aborted",
-            p0=peaks.name,
-        ))
+        raise ReferenceError(
+            tr(
+                "recomputing the tables changed the reference peak identity table ({p0}), aborted",
+                p0=peaks.name,
+            )
+        )
     # Fixed 2026-09-19: refresh the study-level aggregate records/reference.json. The CLI
     # `--rebuild-peak-tables` branch returns right here, so without this the downstream
     # reader keeps seeing the old SHA, the old version and no exclusive_windows.
@@ -1067,9 +1016,6 @@ def ensure_reference_peaks(
     sigma_multiplier: float | None = None,
     max_peaks: int = 0,
     force: bool = False,
-    localization_method: str = "parabolic",
-    gaussian_roi_f1_ppm: float | None = None,
-    gaussian_roi_f2_ppm: float | None = None,
 ) -> ReferenceSpectrum:
     """Ensure the identity table and both reference tables exist (peaks are picked by default).
 
@@ -1077,8 +1023,10 @@ def ensure_reference_peaks(
     - other conditions copy that identity table, then measure both tables on their own spectrum;
     - an existing identity table with both files is reused unless ``force`` is given;
     - **the picking threshold is chosen when the reference is built and then locked**:
-        ``sigma_multiplier`` (35 sigma by default) may be supplied while no reference table exists;
-        once the reference is fixed a **different** value raises ``ReferenceError``, because every
+        ``sigma_multiplier`` (35 sigma by default) may be supplied while no reference table
+        exists;
+        once the reference is fixed a **different** value raises ``ReferenceError``, because
+        every
         later workflow must use the reference threshold. Changing it means rebuilding:
         ``force=True``, or delete ``study/reference/<key>/`` and run again;
     - the actual usage lands in ``peak_params``: ``sigma_multiplier`` (the reference value),
@@ -1094,7 +1042,8 @@ def ensure_reference_peaks(
     reference : ReferenceSpectrum, optional
         an existing reference; ``None`` uses the frozen one in the session.
     sigma_multiplier : float, optional
-        picking threshold (sigma). **Only settable while building**; a different later value raises.
+        picking threshold (sigma). **Only settable while building**; a different later value
+        raises.
     max_peaks : int, default 0
         maximum number of reference peaks (0 = keep all).
     force : bool, default False
@@ -1126,14 +1075,10 @@ def ensure_reference_peaks(
     if ref is None:
         raise ReferenceError(tr("there is no reference spectrum yet; call build_reference() first"))
     requested_sigma = (
-        float(sigma_multiplier)
-        if sigma_multiplier and float(sigma_multiplier) > 0
-        else None
+        float(sigma_multiplier) if sigma_multiplier and float(sigma_multiplier) > 0 else None
     )
     stored_sigma = ref.peak_params.get("sigma_multiplier")
-    stored_sigma_value = (
-        float(stored_sigma) if stored_sigma not in (None, "") else None
-    )
+    stored_sigma_value = float(stored_sigma) if stored_sigma not in (None, "") else None
     stored_detection = dict(ref.peak_params.get("detection") or {})
     # the effective threshold: the picking default (35 sigma) when unrecorded, used to decide
     # whether an external value agrees with the frozen reference.
@@ -1143,9 +1088,7 @@ def ensure_reference_peaks(
     else:
         effective_stored_sigma = float(effective_stored_sigma)
     reference_peaks_frozen = bool(
-        ref.peak_table_path
-        and Path(ref.peak_table_path).is_file()
-        and ref.peak_tables
+        ref.peak_table_path and Path(ref.peak_table_path).is_file() and ref.peak_tables
     )
     # 2026-09-14 (user): the threshold is **settled when the reference is built**; afterwards
     # every perturbation reuses it, and a different value raises instead of re-picking.
@@ -1175,7 +1118,7 @@ def ensure_reference_peaks(
         and ref.peak_tables
         and all(
             Path(str((ref.peak_tables.get(method) or {}).get("path", ""))).is_file()
-            for method in ("parabolic", "gaussian")
+            for method in ("parabolic",)
         )
     ):
         return ref
@@ -1196,9 +1139,6 @@ def ensure_reference_peaks(
             sigma_multiplier=sigma_multiplier,
             out_path=target,
             details=details,
-            localization_method=localization_method,
-            gaussian_roi_f1_ppm=gaussian_roi_f1_ppm,
-            gaussian_roi_f2_ppm=gaussian_roi_f2_ppm,
             dataset=dataset,
         )
         if max_peaks and max_peaks > 0:
@@ -1214,7 +1154,7 @@ def ensure_reference_peaks(
                 "max_peaks": int(max_peaks),
                 # the margin width/point conversion (user option A), for cross-resolution rechecking
                 "detection": details.get("detection") or {},
-                "localization_method": str(localization_method),
+                "localization_method": "parabolic",
                 "localization": details.get("localization") or {},
             },
         )
@@ -1228,9 +1168,7 @@ def ensure_reference_peaks(
                     "ensure_reference_peaks()",
                 )
             )
-        target.write_text(
-            source_list.read_text(encoding="utf-8"), encoding="utf-8"
-        )
+        target.write_text(source_list.read_text(encoding="utf-8"), encoding="utf-8")
         ref = set_reference_peaks(
             session,
             target,
@@ -1239,7 +1177,7 @@ def ensure_reference_peaks(
             params={
                 "sigma_multiplier": sigma_multiplier,
                 "max_peaks": int(max_peaks),
-                "localization_method": str(localization_method),
+                "localization_method": "parabolic",
                 "shared_from": primary.dataset_key,
                 "shared_peak_count": int(primary.peak_count),
                 "shared_peak_table_sha256": primary.peak_table_sha256,
@@ -1250,8 +1188,6 @@ def ensure_reference_peaks(
     return build_reference_peak_tables(
         session,
         ref,
-        roi_f1_ppm=gaussian_roi_f1_ppm,
-        roi_f2_ppm=gaussian_roi_f2_ppm,
     )
 
 
@@ -1262,9 +1198,7 @@ def _keep_top_peaks(path: Path, keep: int) -> None:
     rows = load_peaks(path)
     if len(rows) <= keep:
         return
-    rows.sort(
-        key=lambda row: abs(float(row.get("Intensity") or 0.0)), reverse=True
-    )
+    rows.sort(key=lambda row: abs(float(row.get("Intensity") or 0.0)), reverse=True)
     export_peaks_poky(path, rows[:keep])
     # the frozen identity table is usually free of attachments; if this path happens to have
     # localisation attachments, truncate them by row too; normally a no-op.
@@ -1274,11 +1208,11 @@ def _keep_top_peaks(path: Path, keep: int) -> None:
 
 
 __all__ = [
-    "GAUSSIAN_UNSUPPORTED_NDIM_REASON",
-    "ReferenceHandle",
     "REFERENCE_FILENAME",
     "REFERENCE_PEAK_LIST_FILENAME",
     "REFERENCE_TABLE_FILENAMES",
+    "ReferenceError",
+    "ReferenceHandle",
     "ReferenceSpectrum",
     "build_reference",
     "build_reference_peak_tables",

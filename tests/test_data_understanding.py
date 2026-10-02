@@ -31,7 +31,16 @@ def test_read_nus_2d(bruker_dir: Path) -> None:
     assert exp.sampling.mode is SamplingMode.NUS
     assert exp.sampling.sampling_fraction == 0.25
     assert exp.sampling.nus_list
+    assert all(len(point) == 1 for point in exp.sampling.nus_list)
     assert exp.sampling.confidence >= 0.9
+
+
+def test_read_nus_3d_uses_two_indirect_coordinates(bruker_dir: Path) -> None:
+    exp = read_dataset(bruker_dir / "nus_3d")
+    assert exp.ndim == 3
+    assert exp.sampling.mode is SamplingMode.NUS
+    assert exp.sampling.nus_list
+    assert all(len(point) == 2 for point in exp.sampling.nus_list)
 
 
 def test_read_hnca_3d(bruker_dir: Path) -> None:
@@ -180,9 +189,14 @@ def test_sweep_width_without_sw_h_uses_the_ppm_convention(tmp_path: Path) -> Non
     600.
     """
     no_sw_h = _DIRECT_OK.replace("##$SW_h= 8389.26174496644\n", "")
-    exp = read_dataset(_write_2d_params(tmp_path, "no_sw_h", no_sw_h, _indirect(
-        "30", "1824.534", "60.81782065611", "60.810645", "7175.65611"
-    )))
+    exp = read_dataset(
+        _write_2d_params(
+            tmp_path,
+            "no_sw_h",
+            no_sw_h,
+            _indirect("30", "1824.534", "60.81782065611", "60.810645", "7175.65611"),
+        )
+    )
     direct = exp.direct_dimension
     assert direct is not None
     assert direct.sw == pytest.approx(8389.26174496644, rel=1e-6)
@@ -212,7 +226,7 @@ def test_carrier_ppm_fallback_without_o1p(tmp_path: Path, bruker_dir: Path) -> N
 
 
 def test_o1p_uses_bf1_matching_topspin(tmp_path: Path) -> None:
-    """Measured parameters from sampleK (15N): O1/BF1 = 117.000, matching the TopSpin display."""
+    """Measured parameters from data/102 (15N): O1/BF1 = 117.000, matching the TopSpin display."""
     params = (
         "##$PULPROG= nuc\n"
         "##$TD= 1024\n"
@@ -254,7 +268,7 @@ def test_o1p_prefers_explicit_o1p(tmp_path: Path, bruker_dir: Path) -> None:
 
 
 def test_o1p_fallback_bf1_for_1h(tmp_path: Path, bruker_dir: Path) -> None:
-    """1H dimension: falls back to O1/BF1 when BF1 exists (≈O1P 4.703; sampleI 4.700 same family)."""
+    """1H dimension: falls back to O1/BF1 when BF1 exists (≈O1P 4.703; data/8 4.700 same family)."""
     import shutil
 
     dst = tmp_path / "o1p_1h"
@@ -275,9 +289,8 @@ def test_o1p_fallback_bf1_for_1h(tmp_path: Path, bruker_dir: Path) -> None:
     # Difference from the old O1/SFO1 value ≈ O1P²/1e6, proving the BF1 branch is taken
     assert abs(direct.o1p - 2821.062748 / 599.8937495) > 1e-5
 
-def _experiment_with_nuclei(
-    ndim: int, nuclei: list[str], pulprog: str
-):
+
+def _experiment_with_nuclei(ndim: int, nuclei: list[str], pulprog: str):
     """Build an Experiment with the given nuclei and PULPROG (for classifier tests)."""
     from pathlib import Path
 
@@ -424,8 +437,6 @@ def test_classify_ssnmr_tedor_pain_nn() -> None:
     assert nn.name == "NN"
 
 
-
-
 def test_classify_user_title_miss_and_hit() -> None:
     """0.2.199-patch29fd: pdata/title user type -- adopted when there is no hit; when a hit is
     inconsistent but nucleus-compatible the user title wins with a warning; incompatible nuclei
@@ -494,9 +505,7 @@ def test_classify_family_fallback_safe() -> None:
     hh = classify(_experiment_with_nuclei(2, ["1H", "1H"], "unknown_pulprog"))
     assert hh.name == "CHHC"
 
-    cch3d = classify(
-        _experiment_with_nuclei(3, ["1H", "13C", "13C"], "unknown_pulprog")
-    )
+    cch3d = classify(_experiment_with_nuclei(3, ["1H", "13C", "13C"], "unknown_pulprog"))
     assert cch3d.name == "CCH"
 
 
@@ -506,9 +515,7 @@ def test_classify_family_fallback_mixed_sign_stays_generic() -> None:
     representative pick)."""
     from core.experiment.experiment_classifier import classify
 
-    result = classify(
-        _experiment_with_nuclei(3, ["13C", "15N", "13C"], "unknown_pulprog")
-    )
+    result = classify(_experiment_with_nuclei(3, ["13C", "15N", "13C"], "unknown_pulprog"))
     assert result.name == "generic_3d"
     assert result.confidence < 0.6
     joined = " ".join(result.evidence)
@@ -543,6 +550,7 @@ def test_classify_liquid_not_shadowed_by_solid() -> None:
     for ndim, nuclei, pulprog, expected in cases:
         result = classify(_experiment_with_nuclei(ndim, nuclei, pulprog))
         assert result.name == expected, (pulprog, result)
+
 
 def test_classify_liquid_edited_and_other_nuclei() -> None:
     """0.2.167: extra templates are ordered precisely by PULPROG (the same nuclei are told apart
@@ -581,6 +589,7 @@ def test_classify_liquid_edited_and_other_nuclei() -> None:
         result = classify(_experiment_with_nuclei(ndim, nuclei, pulprog))
         assert result.name == expected, (pulprog, result.name)
 
+
 def test_classify_same_nucleus_position_sensitive() -> None:
     """0.2.168: the same nucleus is told apart by dimension position (x/y/z index) -- HETCOR (13C
     direct) and HSQC-13C (13C indirect), HNHETCOR (15N direct) and HSQC (15N indirect) no longer
@@ -598,9 +607,10 @@ def test_classify_same_nucleus_position_sensitive() -> None:
     r = classify(_experiment_with_nuclei(2, ["1H", "13C"], "hsqctocsy"))
     assert r.name == "HSQC-TOCSY-13C"
 
+
 def test_is_data_directory(tmp_path: Path) -> None:
-    '''A directory holding any key Bruker file counts as a data directory; none of them means
-    not data (used for ignoring, Task F).'''
+    """A directory holding any key Bruker file counts as a data directory; none of them means
+    not data (used for ignoring, Task F)."""
     from core.data.bruker_reader import is_data_directory
 
     d = tmp_path / "segA"
@@ -623,8 +633,8 @@ def test_is_data_directory(tmp_path: Path) -> None:
 
 
 def test_discover_segment_dirs_ignores_non_data(tmp_path: Path) -> None:
-    '''Container discovery returns only subdirectories holding acqus; non-data subdirectories
-    are ignored (Task F).'''
+    """Container discovery returns only subdirectories holding acqus; non-data subdirectories
+    are ignored (Task F)."""
     from core.data.bruker_reader import discover_segment_dirs
 
     container = tmp_path / "container"
@@ -641,8 +651,8 @@ def test_discover_segment_dirs_ignores_non_data(tmp_path: Path) -> None:
 
 
 def test_read_dataset_container_non_data_errors(tmp_path: Path) -> None:
-    '''With 0 or 1 data subdirectories report a clear error (non-data ones are already
-    ignored) rather than a missing acqus.'''
+    """With 0 or 1 data subdirectories report a clear error (non-data ones are already
+    ignored) rather than a missing acqus."""
     from core.data.bruker_reader import read_dataset_container
 
     no_data = tmp_path / "no_data"
@@ -663,9 +673,7 @@ def test_read_dataset_container_non_data_errors(tmp_path: Path) -> None:
         read_dataset_container(one)
 
 
-def test_read_dataset_container_not_segmented_experiment(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_read_dataset_container_not_segmented_experiment(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.198: when the subdirectory parameters differ (independent datasets), say clearly that
     this is not a segmented experiment."""
     import shutil
@@ -685,9 +693,11 @@ def test_read_dataset_container_not_segmented_experiment(
     with pytest.raises(ValueError, match="不是分段实验"):
         read_dataset_container(container)
 
+
 def test_classify_kinetics_by_pulprog() -> None:
     """29hm: a kinetics PULPROG is identified as Kinetics."""
     from core.experiment.experiment_classifier import classify
+
     exp = _experiment_with_nuclei(2, ["1H", "13C"], "kinetics-2d")
     result = classify(exp)
     assert result.name == "Kinetics"
@@ -698,10 +708,12 @@ def test_classify_kinetics_by_pulprog() -> None:
 def test_classify_kinetics_by_vdlist() -> None:
     """29hm: acqus.VDLIST -> Kinetics."""
     from core.experiment.experiment_classifier import classify
+
     exp = _experiment_with_nuclei(2, ["1H", "13C"], "hsqc")
     exp.acquisition_parameters["acqus"]["VDLIST"] = "vdlist"
     result = classify(exp)
     assert result.name == "Kinetics"
+
 
 def test_kinetics_import_blocked_before_project_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -729,12 +741,40 @@ def test_kinetics_import_blocked_before_project_mutation(
     assert not (manager.root / entry.id).exists()
 
 
+def test_kinetics_import_is_blocked_before_sampling_detection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    "Regression coverage: test kinetics import is blocked before sampling detection."
+    from core.project import ProjectManager
+    from workflow.import_workflow import KineticsUnsupportedError, import_data
+
+    source = tmp_path / "t1rho"
+    source.mkdir()
+    (source / "acqus").write_text(
+        "##$PULPROG= <XH2D_N_T1rho_180Hdec_top4.shex>\n##$VDLIST= <NCP_15NT1rho>\n",
+        encoding="utf-8",
+    )
+
+    def _must_not_read(_path: Path) -> None:
+        raise AssertionError("read_dataset/sampling detection must not run for kinetics data")
+
+    monkeypatch.setattr("workflow.import_workflow.read_dataset", _must_not_read)
+    manager = ProjectManager.create_project(tmp_path / "project_early", "demo")
+    entry = manager.create_experiment("T1rho")
+
+    with pytest.raises(KineticsUnsupportedError, match="不支持导入"):
+        import_data(manager, entry.id, source)
+
+    assert entry.data == []
+
+
 def test_non_kinetics_passes_import_policy_guard() -> None:
     """Ordinary experiments are not caught by the Kinetics policy."""
     from workflow.import_workflow import _raise_if_kinetics
 
     normal = _experiment_with_nuclei(2, ["1H", "13C"], "hsqc")
     _raise_if_kinetics(normal)
+
 
 def test_vdlist_placeholder_not_kinetics() -> None:
     """patch29hq-fix: acqus.VDLIST holding only D placeholders (Bruker set no variable delay) is
@@ -745,6 +785,34 @@ def test_vdlist_placeholder_not_kinetics() -> None:
     exp.acquisition_parameters["acqus"]["VDLIST"] = "DDDDDDDDDDDDDDD"
     assert _is_kinetics(exp) is False
     assert classify(exp).name != "Kinetics"
+
+
+def test_kinetics_source_preflight_ignores_vdlist_placeholder(tmp_path: Path) -> None:
+    "Regression coverage: test kinetics source preflight ignores vdlist placeholder."
+    from core.experiment.experiment_classifier import is_kinetics_source
+
+    source = tmp_path / "normal"
+    source.mkdir()
+    (source / "acqus").write_text(
+        "##$PULPROG= <hncacbgp3d.x>\n##$VDLIST= <DDDDDDDDDDDDDDD>\n",
+        encoding="utf-8",
+    )
+    assert is_kinetics_source(source) is False
+
+
+def test_kinetics_source_preflight_ignores_unselected_vdlist_file(tmp_path: Path) -> None:
+    "Regression coverage: test kinetics source preflight ignores unselected vdlist file."
+    from core.experiment.experiment_classifier import is_kinetics_source
+
+    source = tmp_path / "normal_with_leftover_vdlist"
+    source.mkdir()
+    (source / "acqus").write_text(
+        "##$PULPROG= <hncacbgp3d.x>\n##$VDLIST= <>\n",
+        encoding="utf-8",
+    )
+    (source / "vdlist").write_text("0.01\n0.02\n", encoding="utf-8")
+
+    assert is_kinetics_source(source) is False
 
 
 def test_resolve_sweep_width_treats_non_finite_values_as_missing() -> None:

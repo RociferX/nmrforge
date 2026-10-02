@@ -136,9 +136,28 @@ def test_raw_processing_artifacts_ignored(tmp_path: Path) -> None:
     assert f1 == f2, "处理产物不应改变 raw 输入指纹"
 
 
-def test_statuses_success_without_state(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_raw_fingerprint_tracks_schedule_named_by_acqus(tmp_path: Path) -> None:
+    "Regression coverage: test raw fingerprint tracks schedule named by acqus."
+    from gui import pipeline_state as ps
+
+    manager = ProjectManager.create_project(tmp_path / "proj_named", "demo")
+    entry = manager.create_experiment(title="e")
+    data = manager.import_data(entry.id, str(tmp_path / "src"))
+    raw = manager.data_dir(entry.id, data.id, "raw")
+    raw.mkdir(parents=True, exist_ok=True)
+    data.raw_dir = str(raw)
+    (raw / "acqus").write_text("##$NUSLIST= <CANH>\n", encoding="utf-8")
+    (raw / "CANH").write_text("0 0\n1 1\n", encoding="utf-8")
+    manager.save()
+
+    first = ps.raw_fingerprint(manager, entry.id, data.id)
+    (raw / "CANH").write_text("0 0\n1 2\n", encoding="utf-8")
+    second = ps.raw_fingerprint(manager, entry.id, data.id)
+
+    assert first != second
+
+
+def test_statuses_success_without_state(tmp_path: Path, qapp: QApplication) -> None:
     """Old data (no fingerprint state): an existing artifact is SUCCESS, not OUTDATED."""
     manager, exp_id, _data_id, _artifacts = _manager_with_artifacts(tmp_path)
     statuses = compute_step_statuses(manager, exp_id)
@@ -146,9 +165,7 @@ def test_statuses_success_without_state(
         assert statuses[step] == "SUCCESS"
 
 
-def test_upstream_regen_marks_downstream_outdated(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_upstream_regen_marks_downstream_outdated(tmp_path: Path, qapp: QApplication) -> None:
     """Re-running spectrum generation and recording it → peak picking becomes
     OUTDATED (fingerprint check)."""
     manager, exp_id, data_id, artifacts = _manager_with_artifacts(tmp_path)
@@ -165,8 +182,7 @@ def test_upstream_regen_marks_downstream_outdated(
 
     # re-pick peaks (peak table content updated) and record → peaks back to SUCCESS
     artifacts["csv"].write_text(
-        "Peak_ID,H_shift,N_shift,Intensity,SN,label\n"
-        "1,8.0,115.0,100,20,G1\n2,7.5,118.0,80,15,A2\n",
+        "Peak_ID,H_shift,N_shift,Intensity,SN,label\n1,8.0,115.0,100,20,G1\n2,7.5,118.0,80,15,A2\n",
         encoding="utf-8",
     )
     record_step_success(manager, exp_id, data_id, "peaks")
@@ -201,10 +217,7 @@ def test_smile_rank_scripts_do_not_invalidate_active_spectrum(
     assert statuses["spectrum"] == "OUTDATED"
 
 
-
-def test_projection_only_is_not_primary_spectrum(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_projection_only_is_not_primary_spectrum(tmp_path: Path, qapp: QApplication) -> None:
     """STATE-006: a projection leftover must not make any Pipeline view treat
     the main spectrum as present."""
     manager = ProjectManager.create_project(tmp_path / "proj_projection", "demo")
@@ -229,9 +242,8 @@ def test_projection_only_is_not_primary_spectrum(
     assert find_primary_spectrum(manager, entry.id, data.id) == main
     assert compute_step_statuses(manager, entry.id)["spectrum"] == "SUCCESS"
 
-def test_raw_change_marks_fid_outdated_and_propagates(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+
+def test_raw_change_marks_fid_outdated_and_propagates(tmp_path: Path, qapp: QApplication) -> None:
     """Raw data change → FID OUTDATED, propagated to downstream along dependencies."""
     manager, exp_id, data_id, _artifacts = _manager_with_artifacts(tmp_path)
     _record_all(manager, exp_id, data_id)
@@ -243,9 +255,7 @@ def test_raw_change_marks_fid_outdated_and_propagates(
     assert statuses["peaks"] == "OUTDATED"
 
 
-def test_segmented_merged_fid_directory_counts_as_done(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_segmented_merged_fid_directory_counts_as_done(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.108: when the segmented merged FID is a process/merged/fid
     directory, the FID step is SUCCESS."""
     manager, exp_id, data_id, _artifacts = _manager_with_artifacts(tmp_path)
@@ -279,9 +289,7 @@ def test_simple_mode_disables_outdated(
     assert statuses["spectrum"] == "SUCCESS"
 
 
-def test_mtime_fallback_without_state(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_mtime_fallback_without_state(tmp_path: Path, qapp: QApplication) -> None:
     """Old data (no fingerprint state): an upstream artifact newer than the
     downstream one → OUTDATED (mtime heuristic)."""
     manager, exp_id, data_id, artifacts = _manager_with_artifacts(tmp_path)
@@ -298,10 +306,8 @@ def test_mtime_fallback_without_state(
     assert statuses["peaks"] == "OUTDATED"
 
 
-def test_panel_shows_outdated_and_rerun_button(
-    tmp_path: Path, qapp: QApplication
-) -> None:
-    """Panel: an OUTDATED step shows the "run again" entry and the next-step hint."""
+def test_panel_shows_outdated_and_rerun_button(tmp_path: Path, qapp: QApplication) -> None:
+    'Panel: an OUTDATED step shows the "run again" entry and the next-step hint.'
     manager, exp_id, data_id, artifacts = _manager_with_artifacts(tmp_path)
     _record_all(manager, exp_id, data_id)
     artifacts["ft2"].write_bytes(b"ft2-v2")
@@ -310,9 +316,9 @@ def test_panel_shows_outdated_and_rerun_button(
     panel = PipelinePanel(manager, _FakeController())
     panel.set_selection("data", exp_id, data_id)
     assert panel._rows["peaks"].status_label.text().startswith("!")
-    assert panel._rows["peaks"].run_button.text() == "重新运行"
+    assert panel._rows["peaks"].run_button.text() == "更新结果"
     assert not panel._rows["peaks"].run_button.isHidden()
-    assert "重新运行" in panel.next_label.text()
+    assert "更新" in panel.next_label.text()
     panel.close()
 
 
@@ -350,9 +356,7 @@ class _FakeController:
 
         from core.data.internal_data_model import SamplingMode
 
-        return SimpleNamespace(
-            sampling=SimpleNamespace(mode=SamplingMode.NUS)
-        )
+        return SimpleNamespace(sampling=SimpleNamespace(mode=SamplingMode.NUS))
 
     def data_facts(self, *args, **kwargs) -> dict:
         """Public interface (0.2.199-patch29hz): Pipeline gating reads a dict,
@@ -363,8 +367,6 @@ class _FakeController:
             "is_nus": True,
             "sampling_mode": "NUS",
         }
-
-
 
 
 def test_next_label_skips_optional_smile(tmp_path: Path, qapp: QApplication) -> None:
@@ -394,9 +396,8 @@ def test_next_label_skips_optional_smile(tmp_path: Path, qapp: QApplication) -> 
     assert "峰挑选" in text
     panel.close()
 
-def test_pipeline_peaks_reference_selection(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+
+def test_pipeline_peaks_reference_selection(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.199-patch29dl: peak-picking "Reference spectrum" button, candidate
     data and reference loading."""
     from core.peaks.peak_table import export_peaks_poky
@@ -440,10 +441,7 @@ def test_pipeline_peaks_reference_selection(
     panel.close()
 
 
-
-def test_pipeline_peak_threshold_isolated_per_data(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_pipeline_peak_threshold_isolated_per_data(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.199-patch29fz: the peak-picking threshold is isolated per data set --
     changing it for d_001 does not affect d_002, and switching back to d_001
     restores each value."""
@@ -469,9 +467,7 @@ def test_pipeline_peak_threshold_isolated_per_data(
     panel.close()
 
 
-def test_pipeline_threshold_persisted_in_data_folder(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_pipeline_threshold_persisted_in_data_folder(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.199-patch29ga: the threshold is persisted to d_xxx/ui_state.json and
     restored after a restart."""
     import json
@@ -497,9 +493,7 @@ def test_pipeline_threshold_persisted_in_data_folder(
     panel2.close()
 
 
-def test_threshold_legacy_default15_migrates_to35(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_threshold_legacy_default15_migrates_to35(tmp_path: Path, qapp: QApplication) -> None:
     """Legacy default 15σ (not explicitly customized) migrates to the new default 35σ."""
     import json
 
@@ -521,9 +515,7 @@ def test_threshold_legacy_default15_migrates_to35(
     panel.close()
 
 
-def test_threshold_explicit_15_preserved_when_custom(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_threshold_explicit_15_preserved_when_custom(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.199-patch29gc: an explicitly customized 15σ (custom=True) is not
     overwritten by the migration."""
     import json
@@ -537,9 +529,7 @@ def test_threshold_explicit_15_preserved_when_custom(
     base = manager.data_base(exp.id, d1.id)
     base.mkdir(parents=True, exist_ok=True)
     (base / "ui_state.json").write_text(
-        json.dumps(
-            {"version": 1, "peaks": {"threshold": 15.0, "custom": True}}
-        ),
+        json.dumps({"version": 1, "peaks": {"threshold": 15.0, "custom": True}}),
         encoding="utf-8",
     )
     panel = PipelinePanel(manager)
@@ -548,9 +538,7 @@ def test_threshold_explicit_15_preserved_when_custom(
     panel.close()
 
 
-def test_pipeline_smile_step_hidden_for_uniform_data(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_pipeline_smile_step_hidden_for_uniform_data(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.199-patch29gd: non-NUS (fully sampled) data hides the SMILE optimization step."""
     from types import SimpleNamespace
 
@@ -562,19 +550,15 @@ def test_pipeline_smile_step_hidden_for_uniform_data(
     exp = manager.create_experiment("HSQC")
     d1 = manager.import_data(exp.id, "/fake/1")
     panel = PipelinePanel(manager)
-    panel.controller._read_experiment = (
-        lambda *a, **k: SimpleNamespace(
-            sampling=SimpleNamespace(mode=SamplingMode.UNIFORM)
-        )
+    panel.controller._read_experiment = lambda *a, **k: SimpleNamespace(
+        sampling=SimpleNamespace(mode=SamplingMode.UNIFORM)
     )
     panel.set_selection("data", exp.id, d1.id)
     assert panel._rows["smile"].isHidden()
     panel.close()
 
 
-def test_pipeline_smile_step_shown_for_2d_nus_data(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_pipeline_smile_step_shown_for_2d_nus_data(tmp_path: Path, qapp: QApplication) -> None:
     """2D NUS data shows the SMILE optimization step (0.2.199-patch29gd + fix21 limits it to 2D)."""
     from types import SimpleNamespace
 
@@ -586,19 +570,15 @@ def test_pipeline_smile_step_shown_for_2d_nus_data(
     exp = manager.create_experiment("HNCA")
     d1 = manager.import_data(exp.id, "/fake/1")
     panel = PipelinePanel(manager)
-    panel.controller._read_experiment = (
-        lambda *a, **k: SimpleNamespace(
-            ndim=2, sampling=SimpleNamespace(mode=SamplingMode.NUS)
-        )
+    panel.controller._read_experiment = lambda *a, **k: SimpleNamespace(
+        ndim=2, sampling=SimpleNamespace(mode=SamplingMode.NUS)
     )
     panel.set_selection("data", exp.id, d1.id)
     assert not panel._rows["smile"].isHidden()
     panel.close()
 
 
-def test_pipeline_smile_step_hidden_for_3d_nus_data(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_pipeline_smile_step_hidden_for_3d_nus_data(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.199-patch29hz-fix21 (user): 3D NUS temporarily hides the SMILE optimization entry."""
     from types import SimpleNamespace
 
@@ -610,10 +590,8 @@ def test_pipeline_smile_step_hidden_for_3d_nus_data(
     exp = manager.create_experiment("HNCA")
     d1 = manager.import_data(exp.id, "/fake/1")
     panel = PipelinePanel(manager)
-    panel.controller._read_experiment = (
-        lambda *a, **k: SimpleNamespace(
-            ndim=3, sampling=SimpleNamespace(mode=SamplingMode.NUS)
-        )
+    panel.controller._read_experiment = lambda *a, **k: SimpleNamespace(
+        ndim=3, sampling=SimpleNamespace(mode=SamplingMode.NUS)
     )
     panel.set_selection("data", exp.id, d1.id)
     assert panel._rows["smile"].isHidden()

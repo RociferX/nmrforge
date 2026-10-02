@@ -32,9 +32,11 @@ Two rules matter here:
 
 - **Filenames are not evidence.** Classification uses the pulse program and the physical
   parameters, not the directory or file name.
-- **Contradictions become `uncertain`, not a guess.** If the metadata says NUS but the sampling
-  table actually covers the complete grid, nmrForge says so and refuses to process, because a
-  wrong uniform/NUS decision silently changes what every parameter means.
+- **Ambiguous sampling is not guessed.** Only a standard `nuslist` or a file explicitly named by
+  `acqus.NUSLIST` is used; arbitrary integer files are not discovered by scanning a directory.
+  A valid full-grid schedule in standard order may use the uniform route, while full coverage in
+  another order still requires schedule-based placement. Explicit NUS data with no recoverable
+  schedule is rejected at import. Trailing zero padding does not count as missing sampling.
 
 `presets/*.yaml` is the only data source for experiment templates. A template declares the
 expected nucleus combination, whether the experiment is phase-sensitive or magnitude, and
@@ -84,10 +86,11 @@ Why the constraints exist:
   "sub-grid peak position" means; it must be settled before peak localisation, and it influences
   the cost of the phase search.
 
-Both the direct and the indirect dimensions are optimised for real. The window candidate pool
-includes "no window", because a natural-decay axis should legitimately end up unwindowed; axes
-that are truncated in acquisition prefer mild windows; indirect dimensions are scored with an
-explicit resolution-retention factor.
+For uniform data, both direct and indirect dimensions can be optimised. The candidate pool includes
+"no window"; axes truncated during acquisition may benefit from a mild window, and indirect
+dimensions are scored with a resolution-retention factor. NUS/SMILE requires a fixed SP window on
+the direct dimension, so its optimiser cannot replace that window with none, Gaussian or
+exponential weighting. Indirect-dimension optimisation remains available.
 
 ## Step 4 - what is recorded
 
@@ -119,8 +122,8 @@ quietly ignored - for example, writing window sub-parameters for an axis whose w
 
 ## Dimensionality and the four processing paths
 
-nmrForge treats these as four distinct paths, and a change to processing behaviour is expected to
-apply to all four unless the exception is justified and documented:
+nmrForge treats these as four distinct paths, and processing changes are expected to cover all four
+unless a documented technical reason makes a path-specific exception necessary:
 
 | Path | Reconstruction |
 | --- | --- |
@@ -142,4 +145,7 @@ nmrForge automates what it can verify and reports what it cannot:
   numerically highest score;
 - a reconstruction that fails inside SMILE is a failed run, never a success with a wrong
   spectrum;
-- bad-point *repair* is optional and always logged; bad-point *detection* is unconditional.
+- bad-point repair follows specific rules and retains a backup and audit record; other anomalous
+  signals are reported rather than automatically deleted.
+- the stand-alone FID quality check is read-only and does not replace pipeline diagnostics or
+  audit records.

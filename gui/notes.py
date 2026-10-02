@@ -3,7 +3,8 @@ convention). - Project comment: ProjectInfo.protein.notes(JSON field string, com
 plain text); - Experiment comment: ExperimentEntry.metadata["note_fields"](dict, convention
 key); - Sample data comment: ExperimentEntry.metadata["data_notes"][data_id](dict, convention
 key). Fields at all levels are "regular information list", determined by user The form is filled
-in line by line; the write operation is called by the caller before manager.save()."""
+in line by line; the write operation is called by the caller before manager.save().
+"""
 
 from __future__ import annotations
 
@@ -14,9 +15,6 @@ from pathlib import Path
 from ui_support.i18n import tr
 from viewer.axis_labels import infer_nucleus
 
-# Annotation fields at all levels (key/display name), divided by level starting from 0.2.79: project
-# = basic information of protein sample; experiment type = currently supported experimental
-# category; sample data = repeat/condition/pH/temperature + dimension /data type (presets)/core.
 SAMPLE_FIELDS: tuple[tuple[str, str], ...] = (
     ("protein_name", tr("Protein name")),
     ("expression_system", tr("Expression system")),
@@ -39,6 +37,7 @@ DATA_FIELDS: tuple[tuple[str, str], ...] = (
     ("dimension", tr("Dimensions")),
     ("experiment_type", tr("Data type")),
     ("nuclei", tr("Nuclei")),
+    ("sampling_mode", tr("Sampling mode")),
     ("peak_sign", tr("Peak symbol")),
     ("notes", tr("Remark")),
 )
@@ -49,7 +48,7 @@ _FIELD_BY_KIND: dict[str, tuple[tuple[str, str], ...]] = {
     "data": DATA_FIELDS,
 }
 
-# There are only a few fields with values, and the form directly gives drop-down options (0.2.85).
+
 DIMENSION_OPTIONS: tuple[str, ...] = ("1D", "2D", "3D")
 NUCLEI_OPTIONS: tuple[str, ...] = (
     "1H",
@@ -65,9 +64,8 @@ NUCLEI_OPTIONS: tuple[str, ...] = (
     "1H-15N-1H",
     "13C-13C-1H",
 )
-# IMPORT-007 Plan A: The import of kinetic data is prohibited and will not be displayed as an
-# optional product capability. Editable dropdowns will still retain customizations already in the
-# old project/dynamics text.
+
+
 EXPERIMENT_CATEGORY_OPTIONS: tuple[str, ...] = (tr("identification experiment"),)
 _GENERIC_PRESET_NAMES = {"Generic1D", "Generic2D", "Generic3D"}
 _PRESET_OPTIONS: list[tuple[str, int]] | None = None
@@ -91,8 +89,7 @@ def _preset_options() -> list[tuple[str, int]]:
     for file in files:
         try:
             data = yaml.safe_load(file.read_text(encoding="utf-8")) or {}
-        # Damage to a single template does not affect other options.
-        except Exception:  # noqa: BLE001 -
+        except Exception:  # noqa: BLE001
             continue
         name = str(data.get("name", "")).strip()
         ndim = int(data.get("constraints", {}).get("ndim", 0) or 0)
@@ -113,7 +110,8 @@ def _ndim_int(ndim: str | int) -> int:
 
 def experiment_type_options(ndim: str | int = "") -> list[str]:
     """Common data type options (from presets template, HSQC, etc.); filter by dimension when ndim
-    is non-empty."""
+    is non-empty.
+    """
     if ndim in ("", None):
         return [name for name, _ in _preset_options()]
     target = _ndim_int(ndim)
@@ -121,13 +119,13 @@ def experiment_type_options(ndim: str | int = "") -> list[str]:
         return []
     return [name for name, n in _preset_options() if n == target]
 
+
 _FIELD_LABELS: dict[str, str] = {
     key: label
     for schema in (SAMPLE_FIELDS, DATA_FIELDS, EXPERIMENT_FIELDS)
     for key, label in schema
 }
-# The presets experiment type field in the sample data annotation is displayed as "data type"
-# (2026-08-18).
+
 _DATA_FIELD_LABELS: dict[str, str] = dict(_FIELD_LABELS)
 _DATA_FIELD_LABELS["experiment_type"] = tr("Data type")
 
@@ -139,7 +137,8 @@ def note_fields(kind: str) -> tuple[tuple[str, str], ...]:
 
 def format_fields(fields: dict, labels: dict | None = None) -> str:
     """Field dict -> multi-line "display name: value" (skip empty values); labels overwrite the
-    display name."""
+    display name.
+    """
     label_map = labels if labels is not None else _FIELD_LABELS
     lines: list[str] = []
     for key, value in (fields or {}).items():
@@ -162,7 +161,6 @@ def _loads(value: str) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-# ---------------------------------------------------------------- project.
 def sample_note_fields(project) -> dict:
     """Project structured comments: protein.notes in JSON fields."""
     protein = getattr(project, "protein", None)
@@ -177,7 +175,8 @@ def set_sample_note_fields(project, fields: dict) -> None:
 
 def sample_note(project) -> str:
     """Project comment display text (structured fields have multiple lines; old plain text is
-    returned directly)."""
+    returned directly).
+    """
     fields = sample_note_fields(project)
     if fields:
         return format_fields(fields)
@@ -185,7 +184,6 @@ def sample_note(project) -> str:
     return str(getattr(protein, "notes", "") or "")
 
 
-# -------------------------------------------------------------------------- experiment type.
 def experiment_note_fields(project, exp_id: str) -> dict:
     entry = project.experiment(exp_id) if project is not None else None
     if entry is None:
@@ -205,7 +203,8 @@ def set_experiment_note_fields(project, exp_id: str, fields: dict) -> None:
 
 def experiment_note(project, exp_id: str) -> str:
     """Experiment annotation display text (structured fields take precedence, compatible with
-    entry.notes plain text)."""
+    entry.notes plain text).
+    """
     fields = experiment_note_fields(project, exp_id)
     if fields:
         return format_fields(fields)
@@ -213,7 +212,6 @@ def experiment_note(project, exp_id: str) -> str:
     return str(getattr(entry, "notes", "") or "") if entry is not None else ""
 
 
-# ---------------------------------------------------------------- data.
 def data_note_fields(project, exp_id: str, data_id: str) -> dict:
     if project is None:
         return {}
@@ -248,7 +246,7 @@ def group_note(project, exp_id: str, group_id: str) -> str:
     if group is None:
         return ""
     lines: list[str] = []
-    for data_id in (group.data_ids or []):
+    for data_id in group.data_ids or []:
         d = next((x for x in exp.data if x.id == data_id), None)
         label = (d.title or f"Data {data_id}") if d else f"Data {data_id}"
         note = data_note(project, exp_id, data_id)
@@ -259,7 +257,8 @@ def group_note(project, exp_id: str, group_id: str) -> str:
 
 def data_note(project, exp_id: str, data_id: str) -> str:
     """Sample data annotation display text (structured fields take precedence; compatible with old
-    plain text strings)."""
+    plain text strings).
+    """
     fields = data_note_fields(project, exp_id, data_id)
     if fields:
         return format_fields(fields, _DATA_FIELD_LABELS)
@@ -272,7 +271,6 @@ def data_note(project, exp_id: str, data_id: str) -> str:
     return str(raw or "") if isinstance(raw, str) else ""
 
 
-# --------------------------------------------------------------------- Import AutoFill.
 def _acqus_value(raw_dir, key: str) -> str:
     """Read a single parameter value (such as TE) from Bruker acqus."""
     acqus = Path(raw_dir) / "acqus"
@@ -288,7 +286,8 @@ def temperature_from_acqus(raw_dir) -> str:
     """Bruker TE -> Celsius temperature string; automatically recognizes 0.1 K / K / °C, cannot be
     parsed and returns an empty string. - TE The convention is 0.1 K (such as 2980 -> 298.0 K ->
     24.9 °C); - Some data are directly stored in K (such as 298.0) or °C (such as 25), and are
-    judged according to the numerical range."""
+    judged according to the numerical range.
+    """
     value = _acqus_value(raw_dir, "TE")
     if not value:
         return ""
@@ -307,24 +306,62 @@ def temperature_from_acqus(raw_dir) -> str:
     return f"{celsius:.1f}" if celsius is not None else ""
 
 
+def sampling_mode_text(dataset: dict) -> str:
+    """Format sampling metadata without guessing absent information.
+
+    Parameters
+    ----------
+    dataset : dict
+        metadata['dataset'], including its sampling dictionary.
+
+    Returns
+    -------
+    str
+        'NUS(fraction 25%)', 'uniform', or an empty string when sampling information is
+        unavailable. NUS uses uppercase and includes its percentage; uniform has no percentage
+        suffix.
+
+    Examples
+    --------
+    >>> sampling_mode_text({'sampling': {'mode': 'nus', 'sampling_fraction': 0.25}})
+    'NUS(fraction 25%)'
+    >>> sampling_mode_text({'sampling': {'mode': 'uniform'}})
+    'uniform'
+    """
+    sampling = (dataset or {}).get("sampling") or {}
+    mode = str(sampling.get("mode", "") or "").strip().lower()
+    if not mode:
+        return ""
+    if mode == "nus":
+        try:
+            fraction = float(sampling.get("sampling_fraction") or 0.0)
+        except (TypeError, ValueError):
+            fraction = 0.0
+
+        if 0.0 < fraction <= 1.0:
+            return f"NUS(fraction {fraction * 100:.0f}%)"
+        return "NUS"
+    if mode == "uncertain":
+        return "uncertain"
+    return "uniform"
+
+
 def _raw_dir_for(project, exp_id: str, data_id: str) -> Path | None:
     try:
         raw = project.data_dir(exp_id, data_id, "raw")
         if raw.is_dir():
             return raw
-    # If the layout is not available, it will be processed as no original directory.
-    except Exception:  # noqa: BLE001 -
+    except Exception:  # noqa: BLE001
         pass
     return None
 
 
-def auto_fill_notes_from_metadata(
-    manager, exp_id: str, data_id: str, metadata: dict
-) -> dict:
+def auto_fill_notes_from_metadata(manager, exp_id: str, data_id: str, metadata: dict) -> dict:
     """After importing, press Bruker file / metadata to automatically fill in the fields that can
     be filled in the sample data annotation (without overwriting existing values). Sample data
     annotation: dimension / data type (presets name) / core / temperature (acqus TE). Return the
-    summary of the {field: value} actually filled this time."""
+    summary of the {field: value} actually filled this time.
+    """
     filled: dict[str, str] = {}
     project = manager.project if manager is not None else None
     if project is None:
@@ -348,8 +385,7 @@ def auto_fill_notes_from_metadata(
             sf = float(dim.get("sf", 0) or 0)
         except (TypeError, ValueError):
             sf = 0.0
-        # 0.2.89: Give priority to inferring the core by chemical shift (observation frequency sf),
-        # and fall back to the storage field if it fails.
+
         nucleus = infer_nucleus(sf) or str(dim.get("nucleus", "") or "").strip()
         if nucleus:
             nuclei.append(nucleus)
@@ -360,8 +396,13 @@ def auto_fill_notes_from_metadata(
         temp = temperature_from_acqus(raw_dir) if raw_dir is not None else ""
         if temp:
             data_fields["temperature"] = temp
+
+    if not data_fields.get("sampling_mode"):
+        mode_text = sampling_mode_text(dataset)
+        if mode_text:
+            data_fields["sampling_mode"] = mode_text
     set_data_note_fields(project, exp_id, data_id, data_fields)
-    for key in ("dimension", "experiment_type", "nuclei", "temperature"):
+    for key in ("dimension", "experiment_type", "nuclei", "temperature", "sampling_mode"):
         value = data_fields.get(key, "")
         if value:
             filled[f"data.{key}"] = value

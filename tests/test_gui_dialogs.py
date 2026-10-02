@@ -79,7 +79,7 @@ def test_import_dialog_validation_requires_acqus(
 def test_import_dialog_segmented_container(
     qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.108: the container-directory import validates and auto-checks segmented acquisition."""
+    "0.2.108: the container-directory import validates and auto-checks segmented acquisition."
     container = tmp_path / "container"
     container.mkdir()
     for seg in ("seg1", "seg2"):
@@ -87,20 +87,23 @@ def test_import_dialog_segmented_container(
         (container / seg / "acqus").write_text("x", encoding="utf-8")
     dialog = ImportExperimentDialog(None)
     dialog.source_edit.setText(str(container))
-    assert dialog.segmented_check.isChecked()
+
+    assert not dialog.segmented_check.isChecked()
+
+    assert dialog.segmented_check.toolTip().strip()
     monkeypatch.setattr(
         "gui.dialogs.InfoDialog.show_info",
         staticmethod(lambda *args, **kwargs: None),
     )
     dialog._validate_and_accept()
     assert dialog.result() == dialog.DialogCode.Accepted
+
+    dialog.segmented_check.setChecked(True)
     assert dialog.result_data()["segmented"] is True
     dialog.close()
 
 
-def test_confirm_dialog_returns_exec(
-    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_confirm_dialog_returns_exec(qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ConfirmDialog, "exec", lambda self: 1)
     assert ConfirmDialog.confirm(None, "t", "x") is True
     monkeypatch.setattr(ConfirmDialog, "exec", lambda self: 0)
@@ -246,9 +249,8 @@ def test_dialog_centered_on_screen(qapp: QApplication) -> None:
 def test_import_dialog_browse_starts_at_data_root(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0.2.199-patch29gg: the import "Browse..." dialog starts in the data root directory."""
-    from qtcompat.QtWidgets import QFileDialog
-
+    '0.2.199-patch29gg: the import "Browse..." dialog starts in the data root directory.'
+    from gui import dialogs as dialogs_module
     from gui import settings as settings_module
     from gui.dialogs import ImportExperimentDialog
 
@@ -263,11 +265,38 @@ def test_import_dialog_browse_starts_at_data_root(
         starts.append(str(start))
         return str(tmp_path)
 
-    monkeypatch.setattr(
-        QFileDialog, "getExistingDirectory", staticmethod(fake_existing)
-    )
+    monkeypatch.setattr(dialogs_module, "choose_directory", fake_existing)
     dialog = ImportExperimentDialog(None)
     dialog._browse()
     assert starts == [str(tmp_path)]
     assert dialog.source_edit.text() == str(tmp_path)
     dialog.close()
+
+
+def test_choose_directory_is_parented_window_modal_and_non_native(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from qtcompat.QtCore import Qt
+    from qtcompat.QtWidgets import QFileDialog, QWidget
+
+    from gui.file_dialogs import choose_directory
+
+    owner = QWidget()
+    child = QWidget(owner)
+    seen: list[QFileDialog] = []
+
+    def fake_exec(dialog: QFileDialog) -> QFileDialog.DialogCode:
+        seen.append(dialog)
+        return QFileDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(QFileDialog, "exec", fake_exec)
+    monkeypatch.setattr(QFileDialog, "selectedFiles", lambda _self: [str(tmp_path)])
+
+    assert choose_directory(child, "Choose a folder", str(tmp_path)) == str(tmp_path)
+    assert len(seen) == 1
+    dialog = seen[0]
+    assert dialog.parentWidget() is owner
+    assert dialog.windowModality() == Qt.WindowModality.WindowModal
+    assert dialog.testOption(QFileDialog.Option.DontUseNativeDialog)
+    assert dialog.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+    owner.close()

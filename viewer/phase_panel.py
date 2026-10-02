@@ -1,14 +1,14 @@
 """Interactive phase correction panel (P0/P1 slider, 0.2.87). View the one-dimensional spectrum
 like nmrDraw and drag P0/P1 to see the phase with the naked eye -- only display, no data
 changes, real spectrum is also available; values can be copied with one click for writing back
-manual phase parameter or script PS lines."""
+manual phase parameter or script PS lines.
+"""
 
 from __future__ import annotations
 
 from qtcompat.QtCore import Qt
 from qtcompat.QtWidgets import (
     QApplication,
-    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -19,11 +19,13 @@ from qtcompat.QtWidgets import (
 
 from qtcompat import Signal
 from ui_support.i18n import tr
+from ui_support.numeric_inputs import CommitDoubleSpinBox
 
 
 class PhasePanel(QWidget):
     """P0/P1 phase slider; ``phase_changed(final)`` emitted when adjusting (final=False for real-
-    time, True for release)."""
+    time, True for release).
+    """
 
     phase_changed = Signal(bool)
 
@@ -36,42 +38,51 @@ class PhasePanel(QWidget):
         outer.setContentsMargins(4, 2, 4, 2)
         outer.setSpacing(2)
 
-        # 0.2.147:P0/P1 One row side by side, the gap is obvious.
         row = QHBoxLayout()
         row.setSpacing(12)
 
-        # 0.2.148:P0/P1 The value is displayed directly after the title and can be entered, and is
-        # synchronized with the slider in both directions.
-        self.p0_label = QDoubleSpinBox()
-        self.p0_label.setPrefix("P0: ")
-        self.p0_label.setSuffix("°")
+        p0_field = QWidget()
+        p0_layout = QHBoxLayout(p0_field)
+        p0_layout.setContentsMargins(0, 0, 0, 0)
+        p0_layout.setSpacing(2)
+        p0_layout.addWidget(QLabel("P0:"))
+        self.p0_label = CommitDoubleSpinBox()
         self.p0_label.setRange(-180.0, 180.0)
         self.p0_label.setDecimals(0)
+        self.p0_label.setSingleStep(1)
         self.p0_label.setValue(0.0)
-        self.p0_label.setFixedWidth(110)
+        self.p0_label.setFixedWidth(62)
+        p0_layout.addWidget(self.p0_label)
+        p0_layout.addWidget(QLabel("°"))
         self.p0_label.valueChanged.connect(self._on_p0_spin_changed)
         self.p0_slider = QSlider(Qt.Orientation.Horizontal)
         self.p0_slider.setRange(-180, 180)
         self.p0_slider.setValue(0)
         self.p0_slider.valueChanged.connect(self._on_p0_changed)
         self.p0_slider.sliderReleased.connect(lambda: self.phase_changed.emit(True))
-        row.addWidget(self.p0_label)
+        row.addWidget(p0_field)
         row.addWidget(self.p0_slider, 1)
 
-        self.p1_label = QDoubleSpinBox()
-        self.p1_label.setPrefix("P1: ")
-        self.p1_label.setSuffix("°")
+        p1_field = QWidget()
+        p1_layout = QHBoxLayout(p1_field)
+        p1_layout.setContentsMargins(0, 0, 0, 0)
+        p1_layout.setSpacing(2)
+        p1_layout.addWidget(QLabel("P1:"))
+        self.p1_label = CommitDoubleSpinBox()
         self.p1_label.setRange(-180.0, 180.0)
         self.p1_label.setDecimals(0)
+        self.p1_label.setSingleStep(1)
         self.p1_label.setValue(0.0)
-        self.p1_label.setFixedWidth(110)
+        self.p1_label.setFixedWidth(62)
+        p1_layout.addWidget(self.p1_label)
+        p1_layout.addWidget(QLabel("°"))
         self.p1_label.valueChanged.connect(self._on_p1_spin_changed)
         self.p1_slider = QSlider(Qt.Orientation.Horizontal)
         self.p1_slider.setRange(-180, 180)
         self.p1_slider.setValue(0)
         self.p1_slider.valueChanged.connect(self._on_p1_changed)
         self.p1_slider.sliderReleased.connect(lambda: self.phase_changed.emit(True))
-        row.addWidget(self.p1_label)
+        row.addWidget(p1_field)
         row.addWidget(self.p1_slider, 1)
 
         self.reset_button = QPushButton("Reset")
@@ -80,7 +91,7 @@ class PhasePanel(QWidget):
         row.addWidget(self.reset_button)
         self.copy_button = QPushButton("Copy")
         self.copy_button.setToolTip(
-                tr(
+            tr(
                 "Copy the P0/P1 value, which can be pasted into the manual phase parameter or "
                 "script PS "
                 "line",
@@ -95,8 +106,6 @@ class PhasePanel(QWidget):
         self.hint_label.setStyleSheet("color: #888;")
         outer.addWidget(self.hint_label)
         self.set_available(False)
-
-
 
     # ------------------------------------------------------------- API
     def values(self) -> tuple[float, float]:
@@ -113,7 +122,8 @@ class PhasePanel(QWidget):
 
     def set_visible_1d_mode(self, visible: bool) -> None:
         """The phase panel is shown in 1D mode (also shown in strip mode); it is not interactive
-        when hidden."""
+        when hidden.
+        """
         self.setVisible(visible)
         self.set_available(visible)
 
@@ -131,12 +141,14 @@ class PhasePanel(QWidget):
         self.hint_label.setText(
             ""
             if available
-            else (hint or
-                tr(
-                "Only display phase modulation (do not change data): Available after viewing "
-                "one-dimensional spectra or turning on 1D "
-                "strips",
-            ))
+            else (
+                hint
+                or tr(
+                    "Only display phase modulation (do not change data): Available after viewing "
+                    "one-dimensional spectra or turning on 1D "
+                    "strips",
+                )
+            )
         )
 
     # ------------------------------------------------------------- slots

@@ -24,24 +24,26 @@ def _data_is_trashed(manager: object, exp_id: str, data_id: str) -> bool:
     """Whether the data has been deleted/Already in the recycle bin (even if it does not exist), is
     used to stop writing its log. 0.2.199-patch29hz: The judgment logic is shared with the
     gui/per_data_records.data_is_trashed to avoid the drift of the two sets of judgments in the
-    log and interface records."""
+    log and interface records.
+    """
     from gui.per_data_records import data_is_trashed
 
     return data_is_trashed(manager, exp_id, data_id)
 
 
 class LogPanel(QWidget):
-    """Log panel: isolate by scope (single data/data group/experiment/overall situation) + append +
-    clear. User requirements: logs of individual data are independent, click on which data to
-    display which log; members of the data group share the same data group log. When the change
-    is selected, the main window calls set_scope to switch the current display and append
-    targets."""
+    """Append and clear logs isolated by dataset, group, experiment or global scope.
+
+    User selection changes the displayed scope through set_scope. Background jobs append to
+    their frozen target scope without changing the selection. Group operations use group logs;
+    independent member operations use dataset logs.
+    """
 
     stop_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        # 0.2.199-patch29hz-Repair 2: Partition card + unified title style.
+
         self.setObjectName("PanelCard")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         layout = QVBoxLayout(self)
@@ -52,9 +54,7 @@ class LogPanel(QWidget):
         title.setObjectName("PanelTitle")
         header.addWidget(title)
         self.scope_label = QLabel("")
-        self.scope_label.setStyleSheet(
-            f"color: {TEXT_MUTED}; font-size: 11px;"
-        )
+        self.scope_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px;")
         header.addWidget(self.scope_label)
         header.addStretch(1)
         self.clear_button = QPushButton(tr("Clear"))
@@ -62,7 +62,7 @@ class LogPanel(QWidget):
         header.addWidget(self.clear_button)
         self.stop_button = QPushButton(tr("Stop task"))
         self.stop_button.setToolTip(
-                tr(
+            tr(
                 "Terminate the processing task that is running (including SMILE/nmrPipe child "
                 "processes, leaving no "
                 "residue)",
@@ -91,21 +91,18 @@ class LogPanel(QWidget):
             return None
         new_path = None
         try:
-
             from gui.per_data_records import data_log_path, group_log_path
 
             if key.startswith("data:"):
                 _kind, exp_id, data_id = key.split(":", 2)
-                # 0.2.199-patch29gp:Deleted/Data that has been put into the recycle bin is no longer
-                # persisted log, to avoid rebuilding data_base/report/log.txt which may lead to
-                # mistaken restoration during restart.
+
                 if _data_is_trashed(manager, exp_id, data_id):
                     return None
                 new_path = data_log_path(manager, exp_id, data_id)
             elif key.startswith("group:"):
                 _kind, exp_id, group_id = key.split(":", 2)
                 new_path = group_log_path(manager, exp_id, group_id)
-        except Exception:  # noqa: BLE001 - Path failure is not persisted.
+        except Exception:  # noqa: BLE001
             return None
         return new_path
 
@@ -118,7 +115,8 @@ class LogPanel(QWidget):
             path.parent.mkdir(parents=True, exist_ok=True)
             if not path.is_file():
                 path.write_text(
-                    "# NMRForge data log (report folder)\n", encoding="utf-8"
+                    "# NMRForge 数据日志(report 文件夹)\n",  # i18n: keep
+                    encoding="utf-8",  # i18n: keep
                 )
             with path.open("a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
@@ -127,7 +125,8 @@ class LogPanel(QWidget):
 
     def _seed_persisted(self, key: str) -> None:
         """Load the data history log when switching to single data scope (this session will not be
-        repeated if it already exists)."""
+        repeated if it already exists).
+        """
         if self._buffers.get(key):
             return
         path = self._record_path(key)
@@ -152,19 +151,19 @@ class LogPanel(QWidget):
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(
-                "# NMRForge data log (report folder)\n", encoding="utf-8"
+                "# NMRForge 数据日志(report 文件夹)\n",  # i18n: keep
+                encoding="utf-8",  # i18n: keep
             )
         except OSError:
             pass
 
     @staticmethod
-    def scope_key(
-        kind: str, exp_id: str, data_id: str = "", group_id: str = ""
-    ) -> str:
+    def scope_key(kind: str, exp_id: str, data_id: str = "", group_id: str = "") -> str:
         """Select the context -> log scope key. - Data group: the same group log
         (group:{exp}:{group}); - Single data: each data is independent (data:{exp}:{data}); -
         Experiment: experimental log (exp:{exp}); - Others (project/workspace/Not selected):
-        global."""
+        global.
+        """
         if kind == "group" and group_id:
             return f"group:{exp_id}:{group_id}"
         if kind == "data" and data_id:
@@ -173,11 +172,10 @@ class LogPanel(QWidget):
             return f"exp:{exp_id}"
         return "global"
 
-    def set_scope(
-        self, kind: str, exp_id: str, data_id: str = "", group_id: str = ""
-    ) -> None:
+    def set_scope(self, kind: str, exp_id: str, data_id: str = "", group_id: str = "") -> None:
         """Switch the current scope: display the existing log of this scope, and subsequent append
-        will fall here."""
+        will fall here.
+        """
         self._current_scope = self.scope_key(kind, exp_id, data_id, group_id)
         self._buffers.setdefault(self._current_scope, [])
         self.scope_label.setText(
@@ -186,7 +184,7 @@ class LogPanel(QWidget):
                 f"exp:{exp_id}": tr("experiment {p0}", p0=exp_id),
             }.get(self._current_scope, self._current_scope)
         )
-        # 0.2.199-patch29ga:Single data scope loading d_xxx/log.txt History.
+
         self._seed_persisted(self._current_scope)
         self._reload_text()
 
@@ -198,14 +196,14 @@ class LogPanel(QWidget):
         line = f"[{timestamp}] {message}"
         key = scope or self._current_scope
         self._buffers.setdefault(key, []).append(line)
-        # 0.2.199-patch29ga:data scope is mirrored to d_xxx/log.txt.
+
         self._persist_line(key, line)
         if key == self._current_scope:
             self._append_line(line)
 
     def clear(self) -> None:
         self._buffers[self._current_scope] = []
-        # 0.2.199-patch29ga: Single data scope is cleared synchronously d_xxx/log.txt.
+
         self._reset_persisted(self._current_scope)
         self._reload_text()
 
@@ -220,4 +218,3 @@ class LogPanel(QWidget):
             self.text.appendPlainText(line)
         scrollbar = self.text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
-

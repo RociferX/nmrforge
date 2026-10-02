@@ -2,29 +2,35 @@
 
 ## Directory
 
-- Backend/:nmrpipe_backend.py(process/reconstruct_nus/finalize_nus/conversion)
-  Script_generator.py(deterministic.com), bruker_workflow.py(fid.com patch).
-  memory_guard.py(0.2.112), runtime.py(CshRuntime), factory.py,
-  Base.py(ProcessingBackend Protocol,Shared), config.py(default parameter).
-  native_backend.py, nmrpipe_finder.py;
-- Workflow/:stepwise.py(three-step interface), phase_routes.py(unified_route)
-  memory_phase_search.py, import_workflow.py, pick_peaks.py, analyze.py,
-  batch.py, smile_optimize.py, param_optimize.py, baseline_optimize.py,
-  window_optimize.py, direct_diagnostics.py, manual.py, ucsf_export.py,
-  optimization_report.py;
-- core/:data(bruker_reader/nus_reader/pipe_io/internal_data_model[Shared]),
-  Experiment(classifier), experiments(registry + presets loading), processing.
-  planning, optimization, qc, reporting, peaks, project[Shared],
-  workspace.py[Shared].
+- `backend/`: `nmrpipe_backend.py` (conversion, processing, NUS reconstruction and finalisation),
+  `script_generator.py` (deterministic scripts), `bruker_workflow.py` (Bruker conversion
+  handling), `memory_guard.py`, `runtime.py`, `factory.py`, `base.py` (the shared
+  `ProcessingBackend` protocol), `config.py` and `nmrpipe_finder.py`.
+- `workflow/`: `stepwise.py`, `phase_routes.py`, `memory_phase_search.py`, `import_workflow.py`,
+  `pick_peaks.py`, `batch.py`, the optimisation modules, `direct_diagnostics.py`, `manual.py` and
+  `ucsf_export.py`.
+- `core/`: data readers and models, experiment classification, planning, processing, optimisation,
+  QC, peak handling, project management and workspace management.
 
 ## Critical flow
 
-Read_dataset -> Experiment -> convert_to_fid(3D NUS:acqu3s TD Copy -> Slice.
-Fid/test%03d.fid) -> reconstruct_nus(SMILE, direct dimension 1 x TD, memory guard) ->.
-Finalize_nus(phase / baseline / zero filling) -> final spectrum;NMRPipe semantics only exist between backend/ and generated.
-Script.
+`read_dataset` → `Experiment` → `convert_to_fid` → `reconstruct_nus` when the sampling route
+requires SMILE → final phase, baseline and zero-fill processing → spectrum. NMRPipe command
+semantics stay in `backend/` and the generated scripts.
+
+Sampling uses a standard `nuslist` or a file explicitly named by `acqus.NUSLIST`. If an NUS
+schedule is missing or sample positions cannot be recovered, import fails instead of inventing a
+grid. A full-coverage schedule in standard order can use the uniform route; a full-coverage
+schedule in another order still requires schedule-based placement.
+
+Peak axes and reference coordinates follow the `FDDIMORDER` logical-axis mapping. Duplicate nuclei
+remain distinguishable by their F-axis identity. Noise, thresholds, peak heights and S/N use a
+global median background without changing the spectrum. Peak localisation uses only a three-point
+parabola. Low-quality or ambiguous reference alignment preserves the candidates rather than
+deleting them.
 
 ## Interface
 
-ProcessingBackend returns stable keys (success/message/logs/spectrum_path/metrics/.
-Effective_params);See docs/API_CONTRACT.md for details.
+`ProcessingBackend` returns `success`, `message`, `logs`, `spectrum_path`, `metrics` and
+`effective_params`. See the public [Python API documentation](../python-api.md) for the supported
+scripting boundary.

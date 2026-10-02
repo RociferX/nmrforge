@@ -16,10 +16,7 @@ def _manager_with_data(
 ) -> tuple[ProjectManager, str, list[str]]:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment(title="batch")
-    data_ids = [
-        manager.import_data(entry.id, source or f"/fake/{i}").id
-        for i in range(n)
-    ]
+    data_ids = [manager.import_data(entry.id, source or f"/fake/{i}").id for i in range(n)]
     manager.save()
     return manager, entry.id, data_ids
 
@@ -28,9 +25,7 @@ def test_group_model_roundtrip(tmp_path: Path) -> None:
     """DataGroupEntry serialization round trip + ExperimentEntry.groups persistence
     (schema 1.4)."""
     manager, exp_id, data_ids = _manager_with_data(tmp_path)
-    group = manager.create_data_group(
-        exp_id, title="HSQC 组", data_ids=data_ids[:2]
-    )
+    group = manager.create_data_group(exp_id, title="HSQC 组", data_ids=data_ids[:2])
     assert group.id == "G1"
     assert group.title == "HSQC 组"
     manager.save()
@@ -113,9 +108,7 @@ def test_delete_data_keeps_group_membership_for_restore(
     with pytest.raises(ProjectError):
         manager.data(exp_id, data_ids[0])
     # Accessible again after recovery
-    (manager.data_base(exp_id, data_ids[0]) / "raw").mkdir(
-        parents=True
-    )
+    (manager.data_base(exp_id, data_ids[0]) / "raw").mkdir(parents=True)
     manager.recover_trashed()
     assert manager.data(exp_id, data_ids[0]).id == data_ids[0]
 
@@ -133,7 +126,7 @@ class _FakeBackend:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"x")
 
-    def convert_to_fid(self, experiment, data_dir, progress=None) -> dict:
+    def convert_to_fid(self, experiment, data_dir, progress=None, params=None) -> dict:
         self.calls.append(("convert_to_fid", experiment.dataset_id))
         fid_path = Path(self.work_dir) / f"{experiment.dataset_id}.fid"
         self._touch(fid_path)
@@ -207,9 +200,7 @@ def test_run_batch_empty_group_raises(tmp_path: Path) -> None:
         run_batch(manager, exp_id, "G1", ["fid"], backend)
 
 
-def test_run_batch_reference_data_params(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_run_batch_reference_data_params(tmp_path: Path, bruker_dir: Path) -> None:
     """reference_data_id: the spectrum step reuses the effective parameters of the
     reference data's most recent successful run."""
     manager, exp_id, data_ids = _manager_with_data(
@@ -233,8 +224,7 @@ def test_run_batch_reference_data_params(
     ref_run = next(
         r
         for r in manager.project.workflow_runs
-        if (r.inputs or {}).get("data_id") == data_ids[0]
-        and r.workflow_ref == "process"
+        if (r.inputs or {}).get("data_id") == data_ids[0] and r.workflow_ref == "process"
     )
     assert ref_run.params.get("baseline") == "poly"
 
@@ -252,9 +242,7 @@ def test_run_batch_reference_data_params(
     assert backend.spectrum_params[data_ids[1]].get("baseline") == "poly"
 
 
-def test_run_batch_explicit_params_override_reference(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_run_batch_explicit_params_override_reference(tmp_path: Path, bruker_dir: Path) -> None:
     """Explicit params override the reference params (which serve as the base)."""
     manager, exp_id, data_ids = _manager_with_data(
         tmp_path, n=2, source=str(bruker_dir / "hsqc_2d")
@@ -282,9 +270,9 @@ def test_run_batch_explicit_params_override_reference(
     )
     assert result["summary"]["failed"] == 0
     assert backend.spectrum_params[data_ids[1]].get("baseline") == "manual"
-def test_delete_data_group_with_members(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+
+
+def test_delete_data_group_with_members(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Delete a group together with its data: members are soft-deleted into the trash,
     the group is removed and the audit records deleted_data_ids."""
     import shutil
@@ -322,13 +310,13 @@ def test_delete_data_group_with_members(
     assert hist
     assert hist[-1].fields.get("group_id") == "G1"
     assert hist[-1].fields.get("deleted_data_ids") == data_ids
+
+
 def test_migrate_legacy_default_titles(tmp_path: Path) -> None:
     """patch29hf: legacy automatic default titles (data group G1 / sample data d_001)
     migrate when opened; user-chosen names stay untouched."""
     manager, exp_id, data_ids = _manager_with_data(tmp_path, n=2)
-    manager.create_data_group(
-        exp_id, title="数据组 G1", data_ids=data_ids[:1]
-    )
+    manager.create_data_group(exp_id, title="数据组 G1", data_ids=data_ids[:1])
     group2 = manager.create_data_group(exp_id, title="对比组", data_ids=data_ids[1:2])
     manager.data(exp_id, data_ids[0]).title = f"样品数据 {data_ids[0]}"
     manager.save()
@@ -342,6 +330,8 @@ def test_migrate_legacy_default_titles(tmp_path: Path) -> None:
     reopened.save()
     again = ProjectManager.open_project(tmp_path / "proj")
     assert again.group(exp_id, "G1").title == "Group G1"
+
+
 def test_run_batch_on_data_done_per_data(tmp_path: Path) -> None:
     """patch29hf: on_data_done fires as each data item completes, carrying its final status."""
     manager, exp_id, data_ids = _manager_with_data(tmp_path, n=2)

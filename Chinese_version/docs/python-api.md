@@ -1,8 +1,8 @@
 # Python API
 
-> **Track B:仍在演进。** 这套接口还在改动:名称、默认值、写出的记录都可能随版本变化。
-> 请固定提交号,并在把一批数字当作可比之前核对 `nmrforge_api.compat_manifest()`
-> (`behavior_digest` / `compat_level` / `affected`)。图形界面(Track A)是成熟路径。
+> `nmrforge_api` 是公开、版本化且不依赖 Qt 的脚本接口(`API_VERSION = "1.0"`)。
+> 跨版本比较数值前，请核对 `nmrforge_api.compat_manifest()` 中的行为指纹、兼容级别与
+> 受影响步骤。已发布 AppImage 对应特定源码版本；更新源码不会自动更新该二进制。
 
 项目里有两套 Python 接口,稳定性承诺不同。
 
@@ -67,13 +67,10 @@ print(uncertainty_summary(position_uncertainty(by_run))["delta_std_ppm"])
 
 
 
-这次调用做了什么:冻结一份参考谱、参考脚本与参考峰表(除非你自己给峰,否则自动优化),
-
-运行每一个参数组合,并用选定的方法在每一张候选谱上定位同一批峰。每个组合都留下自己的脚本、
-
-候选谱(当前生效的谱不会被替换)、峰位与告警;研究目录里累积
-
-`manifest.json`、`runs.json`、`peak_positions.csv` 与 `uncertainty.csv`。
+这次调用先冻结参考谱、参考脚本与参考峰表(除非你提供峰表，否则自动选峰)，再运行每个参数组合，
+并在每张候选谱上独立选峰和用三点抛物线定位。候选谱不会替换当前生效谱。研究目录写入
+`manifest.json`、`runs.json` 与统一峰表 `peak_table_parabolic.csv`。峰位不确定度是独立统计辅助步骤，
+不会自动进入 `StudyResult.summary` 或处理产物。
 
 
 

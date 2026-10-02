@@ -7,12 +7,12 @@
 | uniform 1D/2D/3D 数据 | ✅ 组合执行 | 走 NMRPipe `process()`;研究以 2D 为主 |
 | NUS **2D** 数据 | ✅ 组合执行 | 走 `reconstruct_nus()`(SMILE),候选谱隔离输出;可扫 SMILE 参数 |
 | NUS 3D 数据 | ⚠️ 只能建参考谱 | 组合执行会抛 `SweepError`(见 9.2) |
-| 参考工作流(1 脚本 + 2 峰表) | ✅ | 参考只作基准,不声称全局最优 |
+| 参考工作流(1 脚本 + 1 峰表) | ✅ | 参考只作基准,不声称全局最优 |
 | workflow_id 批量执行 | ✅ | `W0001…`;两条件 A/B 同参数同峰身份 |
-| 峰定位:parabolic / 2D gaussian | ✅ | 同一 candidate 两法都跑,两张同结构峰表 |
+| 峰定位:三点抛物线 | ✅ | 唯一方法(2026-09-26 起二维高斯拟合算法已删除) |
 | 多条件(A/B) | ✅ | 每条件一份参考;峰身份与用户参数共享 |
 | **实际满采样但标注 NUS** | ✅ 按 uniform 处理 | `nuslist` 覆盖全格,或 2D `ser` 是「全格+零填充」且无零行 → 视为满采样,走常规 FT(不跑 SMILE),证据写入 `sampling_evidence` |
-| 峰重叠/去卷积 | ❌ | 只做窗口内极值 + 抛物线/单峰高斯 |
+| 峰重叠/去卷积 | ❌ | 只做窗口内极值 + 三点抛物线亚像素 |
 | Lorentzian / Voigt / 多峰分解 | ❌ | 路线图项 |
 | 并行/集群调度 | ❌ | 串行 + 断点续跑;按参数轴分片(见 8.4) |
 | 参数轴合法性校验 | 部分 | 锁定键报错、确定性/未知键提示;键名有效性以 notes 提示为主 |
@@ -49,7 +49,7 @@
 | 优先级 | 项 | 交付形态 |
 | --- | --- | --- |
 | 高 | 3D NUS 组合执行 | 切片流按 `workflow_id` 分目录 + finalize 输出隔离 |
-| 中 | 峰拟合扩展到 Lorentzian/Voigt/多峰分解 | 目前只有 2D 单峰高斯 |
+| 中 | 峰拟合扩展到 Lorentzian/Voigt/多峰分解 | 目前只有三点抛物线亚像素定位(二维高斯拟合已于 2026-09-26 删除) |
 | 中 | 参数键 schema 校验 | 报错而不是仅提示未知键 |
 | 中 | 进度文件 | 每组合更新 `records/progress.json`,便于外部监控 |
 | 中 | 3D 平面显式指定 | 峰表带固定维取值时按平面测量 |
@@ -69,7 +69,7 @@
 | 装有 NMRPipe 的机器上的全量测试 | `bash scripts/vm_test.sh`(与上一行**同一套**测试:引擎边界仍然打桩) | 测试日志;字节码与 ruff 缓存重定向到临时目录,工作副本保持干净 |
 | CI | `.github/workflows/ci.yml` 的 `static`(ruff)/ `tests`(3.12、3.13)/ `release-readiness` | GitHub Actions 日志 |
 | 装在 NMRPipe 的机器上的 CI 作业 | `external-engine`:在自托管 runner 上**再跑一遍同一套打桩测试**并上传日志;**不调用引擎** | **未武装就不跑**:只有注册了自托管 runner 且仓库变量 `NMRFORGE_SELF_HOSTED_CI` 为 `true` 时才执行;许可依赖不该成为 PR 的闸门,GitHub 托管 runner 上也没有 NMRPipe |
-| 真实引擎 API 冒烟 | 在装有 NMRPipe 的机器上 `python scripts/vm_api_smoke.py --data <Bruker 目录> [--data b …] [--fresh]` | study root 由 `--study` 指定(默认 `~/studies/nmrforge_api_smoke`,可用环境变量 `NMRFORGE_API_STUDY` 覆盖);结构就是普通研究根:`records/reference.json`、`records/manifest.json`、`workflows/W0001/<条件>/peak_table_{parabolic,gaussian}.csv`、`run.json`;stdout 末尾一行 `RESULT_JSON {…}`(逐 run 的 `peak_tables`/`peak_localization`/`window`/`detection` + `summary` + `records`) |
+| 真实引擎 API 冒烟 | 在装有 NMRPipe 的机器上 `python scripts/vm_api_smoke.py --data <Bruker 目录> [--data b …] [--fresh]` | study root 由 `--study` 指定(默认 `~/studies/nmrforge_api_smoke`,可用环境变量 `NMRFORGE_API_STUDY` 覆盖);结构就是普通研究根:`records/reference.json`、`records/manifest.json`、`workflows/W0001/<条件>/peak_table_parabolic.csv`、`run.json`;stdout 末尾一行 `RESULT_JSON {…}`(逐 run 的 `peak_tables`/`peak_localization`/`window`/`detection` + `summary` + `records`) |
 | 真实引擎靶向校验 | `scripts/vm_validate_zero_fill.py`、`vm_validate_nus_indirect_equiv.py`、`vm_validate_phase_score.py`、`vm_sample_regression.py`(配合 `vm_sample_compare.py`) | 直接打印逐项指标(填零 SI、内存/后端等价性相对差、相位评分余量、主峰与水峰方向);结论回填到 ../API_CONTRACT.md |
 
 真实引擎验收请**串行**跑:并发会争 CPU、互相覆盖日志,并报出与代码无关的失败。

@@ -40,11 +40,11 @@ from core.experiment.acquisition_mode_detector import (
 #: indirect dimension and is handled conservatively as Complex.
 EXPECTED_MODE = {
     0: "Complex",
-    1: "Real",          # QF:FT + MC
-    2: "Sequential",    # QSEQ:FT -bruk(= -alt -real)
-    3: "TPPI",          # TPPI:FT -real
-    4: "States",        # States: FT carries no flag
-    5: "States-TPPI",   # States-TPPI:FT -alt
+    1: "Real",  # QF:FT + MC
+    2: "Sequential",  # QSEQ:FT -bruk(= -alt -real)
+    3: "TPPI",  # TPPI:FT -real
+    4: "States",  # States: FT carries no flag
+    5: "States-TPPI",  # States-TPPI:FT -alt
     6: "Echo-AntiEcho",  # Echo-Antiecho: shuffled during conversion
 }
 
@@ -181,9 +181,7 @@ def test_mode_family_equivalence_writes_the_specific_keyword(bruker_dir: Path) -
 
     exp = _with_z_fnmode(read_dataset(bruker_dir / "hnca_3d"), 5)
     template = (
-        "bruk2pipe -in ./ser \\\n"
-        "  -xMODE DQD -yMODE Complex -zMODE Complex \\\n"
-        "  -out fid\\n"
+        "bruk2pipe -in ./ser \\\n  -xMODE DQD -yMODE Complex -zMODE Complex \\\n  -out fid\\n"
     )
     patched, warnings = patch_fid_com(template, exp)
     assert "-zMODE States-TPPI" in patched
@@ -200,17 +198,13 @@ def test_patch_fid_com_keeps_a_canonical_negated_mode(bruker_dir: Path) -> None:
     """
     exp = _with_z_fnmode(read_dataset(bruker_dir / "hnca_3d"), 5)
     template = (
-        "bruk2pipe -in ./ser \\\n"
-        "  -xMODE DQD -yMODE Complex -zMODE States-TPPI-N \\\n"
-        "  -out fid\\n"
+        "bruk2pipe -in ./ser \\\n  -xMODE DQD -yMODE Complex -zMODE States-TPPI-N \\\n  -out fid\\n"
     )
     patched, warnings = patch_fid_com(template, exp)
     assert "-zMODE States-TPPI-N" in patched
     assert not [w for w in warnings if w.startswith("zMODE:") and "->" in w]
     # Same family as the derived value => the cross-check no longer reports "script vs acqus"
-    assert not [
-        w for w in warnings if w.startswith("zMODE:") and "vs acqus" in w
-    ]
+    assert not [w for w in warnings if w.startswith("zMODE:") and "vs acqus" in w]
 
 
 def test_fallback_script_writes_full_precision(bruker_dir: Path) -> None:

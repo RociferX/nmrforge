@@ -243,9 +243,7 @@ class ProjectTreePanel(QWidget):
         self.tree.setAlternatingRowColors(True)
         # Readable column width: explicit width + minimum segment width (stretch override disabled).
         self.tree.header().setStretchLastSection(False)
-        self.tree.header().setSectionResizeMode(
-            QHeaderView.ResizeMode.Interactive
-        )
+        self.tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.tree.header().setMinimumSectionSize(80)
         self.tree.setColumnWidth(0, 220)
         self.tree.setColumnWidth(1, 90)
@@ -301,10 +299,7 @@ class ProjectTreePanel(QWidget):
 
         for project_dir in project_dirs:
             key = str(project_dir)
-            is_current = (
-                current_root is not None
-                and project_dir == Path(current_root).resolve()
-            )
+            is_current = current_root is not None and project_dir == Path(current_root).resolve()
             display_name = project_dir.name
             if is_current and self.manager.project is not None:
                 display_name = self.manager.project.name or project_dir.name
@@ -358,20 +353,20 @@ class ProjectTreePanel(QWidget):
             else:
                 self._update_experiment_item(exp_item, exp)
 
-    def _update_experiment_item(
-        self, exp_item: QTreeWidgetItem, exp
-    ) -> None:
+    def _update_experiment_item(self, exp_item: QTreeWidgetItem, exp) -> None:
         """Update the experimental node text and incrementally refresh the data group and ungrouped
         sample data nodes."""
         exp_item.setText(0, exp.title or exp.id)
         # 0.2.199-patch29dx(user): The experiment is consistent with the project -- The currently
         # selected experiment displays "current", otherwise it is empty.
         exp_item.setText(1, tr("current") if exp.id == self.current_experiment_id() else "")
-        exp_item.setToolTip(0, tr(
-            "{p0}Right click: import sample data / rename / "
-            "delete",
-            p0=exp.id,
-        ))
+        exp_item.setToolTip(
+            0,
+            tr(
+                "{p0}Right click: import sample data / rename / delete",
+                p0=exp.id,
+            ),
+        )
         existing_data: dict[str, QTreeWidgetItem] = {}
         existing_groups: dict[str, QTreeWidgetItem] = {}
         for index in range(exp_item.childCount()):
@@ -411,9 +406,7 @@ class ProjectTreePanel(QWidget):
             else:
                 self._update_data_item(data_item, exp, data_node)
 
-    def _update_group_item(
-        self, group_item: QTreeWidgetItem, exp, group
-    ) -> None:
+    def _update_group_item(self, group_item: QTreeWidgetItem, exp, group) -> None:
         """Update data group node text/Number of members, and incrementally refresh the sample data
         nodes in the group."""
         group_id = getattr(group, "id", "")
@@ -452,9 +445,7 @@ class ProjectTreePanel(QWidget):
             else:
                 self._update_data_item(data_item, exp, data_node)
 
-    def _update_data_item(
-        self, data_item: QTreeWidgetItem, exp, data_node
-    ) -> None:
+    def _update_data_item(self, data_item: QTreeWidgetItem, exp, data_node) -> None:
         """Update sample data node text/state, and refresh the subfolder file according to the
         directory fingerprint increment."""
         data_id = getattr(data_node, "id", exp.id)
@@ -498,16 +489,12 @@ class ProjectTreePanel(QWidget):
                     role["fingerprint"] = fingerprint
                     for index in range(folder_item.childCount() - 1, -1, -1):
                         folder_item.removeChild(folder_item.child(index))
-                    self._populate_folder_children(
-                        folder_item, exp.id, data_id, sub
-                    )
+                    self._populate_folder_children(folder_item, exp.id, data_id, sub)
         for sub in list(existing):
             if sub not in DATA_SUBFOLDERS:
                 data_item.removeChild(existing[sub])
 
-    def _folder_fingerprint(
-        self, exp_id: str, data_id: str, folder: str
-    ) -> str:
+    def _folder_fingerprint(self, exp_id: str, data_id: str, folder: str) -> str:
         """Directory fingerprint: dir mtime + (name, size, mtime) list to determine whether the
         subdirectory has changed."""
         path = self._folder_path(exp_id, data_id, folder)
@@ -518,9 +505,7 @@ class ProjectTreePanel(QWidget):
             for child in sorted(path.iterdir(), key=lambda p: p.name.lower()):
                 try:
                     cst = child.stat()
-                    parts.append(
-                        f"{child.name}:{cst.st_size}:{cst.st_mtime_ns}"
-                    )
+                    parts.append(f"{child.name}:{cst.st_size}:{cst.st_mtime_ns}")
                 except OSError:
                     continue
             return "|".join(parts)
@@ -563,11 +548,13 @@ class ProjectTreePanel(QWidget):
             [exp.title or exp.id, tr("current") if exp.id == self.current_experiment_id() else ""]
         )
         exp_item.setIcon(0, self._icon("experiment"))
-        exp_item.setToolTip(0, tr(
-            "{p0}Right click: import sample data / rename / "
-            "delete",
-            p0=exp.id,
-        ))
+        exp_item.setToolTip(
+            0,
+            tr(
+                "{p0}Right click: import sample data / rename / delete",
+                p0=exp.id,
+            ),
+        )
         exp_item.setData(0, Qt.ItemDataRole.UserRole, {"kind": "experiment", "exp_id": exp.id})
         for group in self._groups_of(exp):
             group_item = self._make_group_item(exp, group)
@@ -580,11 +567,7 @@ class ProjectTreePanel(QWidget):
 
     def _data_of(self, exp) -> list:
         """Sample data node under the experiment (soft deleted entries are not displayed)."""
-        return [
-            d
-            for d in (getattr(exp, "data", None) or [])
-            if not getattr(d, "trashed", False)
-        ]
+        return [d for d in (getattr(exp, "data", None) or []) if not getattr(d, "trashed", False)]
 
     def _groups_of(self, exp) -> list:
         """The data group node under the experiment (schema 1.4; empty returns an empty list)."""
@@ -647,19 +630,15 @@ class ProjectTreePanel(QWidget):
         data_item.setIcon(0, self._icon("data"))
         tooltip = tr("{p0}source: {p1}", p0=data_id, p1=source)
         if in_group:
-            tooltip += (
-                tr(
-                    "\nright click: remove this data from the group / open its folder / open in a "
-                    "terminal / rename / delete the sample "
-                    "data",
-                )
-            )
-        else:
-            tooltip += (
-                tr(
-                "Right click: open the directory / open in the terminal / rename / delete sample "
+            tooltip += tr(
+                "\nright click: remove this data from the group / open its folder / open in a "
+                "terminal / rename / delete the sample "
                 "data",
             )
+        else:
+            tooltip += tr(
+                "Right click: open the directory / open in the terminal / rename / delete sample "
+                "data",
             )
         data_item.setToolTip(0, tooltip)
         data_item.setData(
@@ -678,9 +657,7 @@ class ProjectTreePanel(QWidget):
                     "exp_id": exp.id,
                     "data_id": data_id,
                     "folder": sub,
-                    "fingerprint": self._folder_fingerprint(
-                        exp.id, data_id, sub
-                    ),
+                    "fingerprint": self._folder_fingerprint(exp.id, data_id, sub),
                 },
             )
             self._populate_folder_children(sub_item, exp.id, data_id, sub)
@@ -720,9 +697,7 @@ class ProjectTreePanel(QWidget):
         self._running.add((exp_id, data_id))
         self.refresh()
 
-    def clear_running(
-        self, exp_id: str | None = None, data_id: str | None = None
-    ) -> None:
+    def clear_running(self, exp_id: str | None = None, data_id: str | None = None) -> None:
         """Clear running flags (clear all by default)."""
         if exp_id is None and data_id is None:
             self._running.clear()
@@ -730,8 +705,7 @@ class ProjectTreePanel(QWidget):
             self._running = {
                 (e, d)
                 for (e, d) in self._running
-                if (exp_id is not None and e != exp_id)
-                or (data_id is not None and d != data_id)
+                if (exp_id is not None and e != exp_id) or (data_id is not None and d != data_id)
             }
         self.refresh()
 
@@ -760,13 +734,10 @@ class ProjectTreePanel(QWidget):
         same judgment with the Pipeline step status (ProjectManager.last_run_for_data +
         STEP_RUN_REFS) to avoid the drift of the two rules."""
         try:
-            run = self.manager.last_run_for_data(
-                exp_id, data_id, ALL_STEP_RUN_REFS
-            )
+            run = self.manager.last_run_for_data(exp_id, data_id, ALL_STEP_RUN_REFS)
         except Exception:  # noqa: BLE001 - If the judgment fails, it will be treated as not failed.
             return False
         return run is not None and str(getattr(run, "status", "")) == "failed"
-
 
     def _data_status(self, exp, data_node) -> str:
         """Infer sample data status by product file (0.2.199-patch29aa/patch29av): running ->
@@ -873,6 +844,7 @@ class ProjectTreePanel(QWidget):
         exp_item = self._find_experiment_item(exp_id)
         if exp_item is None:
             return
+
         def _find(target_item: QTreeWidgetItem) -> QTreeWidgetItem | None:
             for index in range(target_item.childCount()):
                 child = target_item.child(index)
@@ -945,11 +917,7 @@ class ProjectTreePanel(QWidget):
             return
         data = item.data(0, Qt.ItemDataRole.UserRole)
         kind = data.get("kind") if isinstance(data, dict) else ""
-        group_id = (
-            str(data.get("group_id", ""))
-            if isinstance(data, dict)
-            else ""
-        )
+        group_id = str(data.get("group_id", "")) if isinstance(data, dict) else ""
         self.selection_changed.emit(
             kind, self._experiment_id_of(item), self._data_id_of(item), group_id
         )
@@ -963,8 +931,7 @@ class ProjectTreePanel(QWidget):
         if not path:
             return
         is_current = (
-            self.manager.root is not None
-            and Path(str(path)) == Path(self.manager.root).resolve()
+            self.manager.root is not None and Path(str(path)) == Path(self.manager.root).resolve()
         )
         if not is_current:
             self.open_project_requested.emit(str(path))
@@ -985,20 +952,14 @@ class ProjectTreePanel(QWidget):
             # 0.2.199-patch29hz: 1D final spectrum is.ft1, which is already supported by the right
             # panel. Only matching.ft2/.ft3 will cause the 1D user to double-click the spectrum to
             # "open the directory where it is located".
-            if folder == "spectra" and name.lower().endswith(
-                (".ft1", ".ft2", ".ft3")
-            ):
+            if folder == "spectra" and name.lower().endswith((".ft1", ".ft2", ".ft3")):
                 path = self._folder_path_for_item(item)
                 if path is not None and path.is_file():
                     self.open_spectrum_requested.emit(str(path))
             else:
                 folder_path = self._folder_path_for_item(item)
                 if folder_path is not None:
-                    target = (
-                        folder_path.parent
-                        if not folder_path.is_dir()
-                        else folder_path
-                    )
+                    target = folder_path.parent if not folder_path.is_dir() else folder_path
                     self.open_path_requested.emit(str(target))
             return
         if kind in ("data", "folder"):
@@ -1024,33 +985,28 @@ class ProjectTreePanel(QWidget):
         if group is None:
             return
         grouped = self._grouped_ids(exp)
-        candidates = [
-            d
-            for d in self._data_of(exp)
-            if getattr(d, "id", "") not in grouped
-        ]
+        candidates = [d for d in self._data_of(exp) if getattr(d, "id", "") not in grouped]
         if not candidates:
             from gui.dialogs import InfoDialog
 
-            InfoDialog(self, tr(
-                "No data to "
-                "add",
-            ), (
+            InfoDialog(
+                self,
                 tr(
-                "There is no ungrouped sample data under "
-                "experiment",
-            )
-            )).exec()
+                    "No data to add",
+                ),
+                (
+                    tr(
+                        "There is no ungrouped sample data under experiment",
+                    )
+                ),
+            ).exec()
             return
         from gui.dialogs import MultiSelectDataDialog
 
         dialog = MultiSelectDataDialog(
             self,
             tr("Add other data to the group"),
-            [
-                (d.id, getattr(d, "title", "") or f"Data {d.id}")
-                for d in candidates
-            ],
+            [(d.id, getattr(d, "title", "") or f"Data {d.id}") for d in candidates],
         )
         if dialog.exec():
             self.group_add_data_requested.emit(exp_id, group_id, dialog.selected_ids())
@@ -1096,12 +1052,14 @@ class ProjectTreePanel(QWidget):
         if item is None:
             # Blank space: Create a new blank experiment (when the project is open).
             if self.manager.project is not None:
-                menu.addAction((
-                    tr(
-                    "Create a new blank "
-                    "experiment...",
+                menu.addAction(
+                    (
+                        tr(
+                            "Create a new blank experiment...",
+                        )
+                    ),
+                    self.create_experiment_requested.emit,
                 )
-                ), self.create_experiment_requested.emit)
         else:
             data = item.data(0, Qt.ItemDataRole.UserRole)
             kind = data.get("kind") if isinstance(data, dict) else None
@@ -1119,12 +1077,14 @@ class ProjectTreePanel(QWidget):
                         lambda p=str(data["path"]): self.open_project_requested.emit(p),
                     )
                 else:
-                    menu.addAction((
-                        tr(
-                        "Create a new blank "
-                        "experiment...",
+                    menu.addAction(
+                        (
+                            tr(
+                                "Create a new blank experiment...",
+                            )
+                        ),
+                        self.create_experiment_requested.emit,
                     )
-                    ), self.create_experiment_requested.emit)
                     menu.addAction(
                         tr("rename project..."),
                         lambda _checked=False: self._begin_rename("project", item, anchor),
@@ -1132,12 +1092,14 @@ class ProjectTreePanel(QWidget):
                     menu.addSeparator()
                     menu.addAction(tr("delete project..."), self.delete_project_requested.emit)
             elif kind == "experiment" and exp_id:
-                menu.addAction((
-                    tr(
-                    "import sample "
-                    "data...",
+                menu.addAction(
+                    (
+                        tr(
+                            "import sample data...",
+                        )
+                    ),
+                    lambda: self.import_data_requested.emit(exp_id),
                 )
-                ), lambda: self.import_data_requested.emit(exp_id))
                 menu.addAction(
                     tr("rename..."),
                     lambda _checked=False: self._begin_rename("experiment", item, anchor),
@@ -1164,9 +1126,7 @@ class ProjectTreePanel(QWidget):
                     )
                     menu.addAction(
                         tr("delete group (including data)..."),
-                        lambda: self.group_delete_with_members_requested.emit(
-                            exp_id, group_id
-                        ),
+                        lambda: self.group_delete_with_members_requested.emit(exp_id, group_id),
                     )
             elif kind == "data" and exp_id and data_id:
                 parent_item = item.parent()
@@ -1269,10 +1229,12 @@ class ProjectTreePanel(QWidget):
         item.setIcon(0, self._icon("experiment"))
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         item.setData(0, Qt.ItemDataRole.UserRole, {"kind": "pending_experiment"})
-        item.setToolTip(0, tr(
-            "Enter the experiment title and press Enter to create, Esc to "
-            "cancel",
-        ))
+        item.setToolTip(
+            0,
+            tr(
+                "Enter the experiment title and press Enter to create, Esc to cancel",
+            ),
+        )
         project_item.addChild(item)
         project_item.setExpanded(True)
         self.tree.setCurrentItem(item)
@@ -1375,9 +1337,7 @@ class ProjectTreePanel(QWidget):
         target: tuple | None = None
         if kind == "project":
             current = (
-                self.manager.project.name
-                if self.manager.project is not None
-                else item.text(0)
+                self.manager.project.name if self.manager.project is not None else item.text(0)
             )
             target = ("project",)
         elif kind == "experiment":
@@ -1407,14 +1367,10 @@ class ProjectTreePanel(QWidget):
         elif kind == "group":
             exp_id = exp_id or self._experiment_id_of(item)
             group_id = group_id or str(
-                (
-                    item.data(0, Qt.ItemDataRole.UserRole) or {}
-                ).get("group_id", "")
+                (item.data(0, Qt.ItemDataRole.UserRole) or {}).get("group_id", "")
             )
             group = (
-                self.manager.group(exp_id, group_id)
-                if self.manager.project is not None
-                else None
+                self.manager.group(exp_id, group_id) if self.manager.project is not None else None
             )
             current = getattr(group, "title", "") or ""
             target = ("group", exp_id, group_id)

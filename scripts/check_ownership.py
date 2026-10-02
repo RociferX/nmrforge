@@ -89,7 +89,7 @@ def owner_of(path: str) -> str:
 def _git(*args: str) -> subprocess.CompletedProcess:
     """Run one git command in the repository root (the caller checks the return code)."""
     return subprocess.run(
-        ["git", *args], cwd=ROOT, capture_output=True, text=True, check=False
+        ["git", *args], cwd=ROOT, capture_output=True, text=True, errors="replace", check=False
     )
 
 
@@ -104,12 +104,8 @@ def default_base() -> str:
     one name makes the "check before committing" command die with a git error in the other tree.
     """
     for rev in (
-        _git(
-            "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"
-        ).stdout.strip(),
-        _git(
-            "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"
-        ).stdout.strip(),
+        _git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}").stdout.strip(),
+        _git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD").stdout.strip(),
     ):
         if rev and _rev_exists(rev):
             return rev
@@ -142,9 +138,7 @@ def changed_files(base: str) -> list[str]:
     return sorted(set(files))
 
 
-def violations(
-    owner: str, base: str, allow_shared: bool = False
-) -> list[tuple[str, str]]:
+def violations(owner: str, base: str, allow_shared: bool = False) -> list[tuple[str, str]]:
     """Returns entries in (file, actual owner) that are not owned by owner."""
     result: list[tuple[str, str]] = []
     allowed = {owner}
@@ -169,9 +163,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--allow-shared",
         action="store_true",
-        help=
-            "Allow shared-contract documents (only when the corresponding contract change is "
-            "agreed)"
+        help="Allow shared-contract documents (only when the corresponding contract change is "
+        "agreed)",
     )
     args = parser.parse_args(argv)
 

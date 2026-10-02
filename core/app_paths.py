@@ -57,6 +57,7 @@ def resource_path(relative: str) -> Path:
     """Return a path inside the shipped data (for example config/nmrforge.yaml, presets)."""
     return resource_root() / relative
 
+
 def local_config_path(
     filename: str = "nmrforge.local.yaml", *, packaged: bool | None = None
 ) -> Path:

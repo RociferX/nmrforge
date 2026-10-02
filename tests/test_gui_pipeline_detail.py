@@ -95,7 +95,8 @@ def test_step_detail_uses_quality_record_not_recompute(
 
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path)
     runs = [
-        r for r in manager.project.workflow_runs
+        r
+        for r in manager.project.workflow_runs
         if r.experiment_id == exp_id and r.workflow_ref == "process"
     ]
     run = runs[-1]
@@ -112,6 +113,36 @@ def test_step_detail_uses_quality_record_not_recompute(
     panel._toggle_step_detail("spectrum")
     assert "良好" in panel._rows["spectrum"].detail_label.text()
     assert not called, "命中记录时不应重算报告"
+    panel.close()
+
+
+@pytest.mark.parametrize("step", ["fid", "spectrum"])
+@pytest.mark.parametrize("failed", [False, True])
+def test_step_detail_reports_manual_script_changes_even_without_quality(
+    tmp_path: Path, qapp: QApplication, step: str, failed: bool
+) -> None:
+    from workflow.script_audit import script_changes
+
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path)
+    run = manager.start_run(
+        exp_id,
+        workflow_ref="manual_fid" if step == "fid" else "manual_process",
+        inputs={"data_id": data_id},
+        params={
+            "mode": "manual",
+            "manual_script_changes": [
+                script_changes(
+                    "process.com", "nmrPipe -fn PS -p0 30", "nmrPipe -fn PS -p0 20", "old"
+                )
+            ],
+        },
+    )
+    manager.finish_run(run.run_id, "failed" if failed else "success")
+    panel = PipelinePanel(manager, _FakeController())
+    panel.set_selection("data", exp_id, data_id)
+    detail, _, is_failed = panel._step_detail(step)
+    assert "-p0" in detail and "20 → 30" in detail
+    assert is_failed == failed
     panel.close()
 
 
@@ -161,7 +192,8 @@ def test_quality_record_matches_on_the_spectrum_file_fingerprint(
 
     manager, exp_id, data_id = _manager_with_spectrum(tmp_path)
     runs = [
-        r for r in manager.project.workflow_runs
+        r
+        for r in manager.project.workflow_runs
         if r.experiment_id == exp_id and r.workflow_ref == "process"
     ]
     ft2 = _Path(runs[-1].outputs["spectrum_path"])
@@ -178,9 +210,7 @@ def test_quality_record_matches_on_the_spectrum_file_fingerprint(
     _Path(f"{ft2}.quality.json").write_text(
         json.dumps(record, ensure_ascii=False), encoding="utf-8"
     )
-    assert "报告A" in panel._cached_spectrum_report(
-        runs[-1].params, str(ft2)
-    )
+    assert "报告A" in panel._cached_spectrum_report(runs[-1].params, str(ft2))
 
     # Spectrum changed (regenerated elsewhere) -> the old record is void, prompt
     # to re-run
@@ -218,9 +248,8 @@ def test_step_detail_expands_with_params(tmp_path: Path, qapp: QApplication) -> 
     panel._toggle_step_detail("spectrum")
     assert not row.detail_frame.isHidden()
     text = row.detail_label.text()
-    assert "产物" in text and "参数" in text
-    # 0.2.155: simplified -- only the readable parameter report is kept;
-    # internal parameters such as ext_lo are no longer displayed
+    assert "结果文件" in text or "Result file" in text
+
     assert "ext_lo" not in text
     # 0.2.199-patch29e: with no quality record nothing is generated on the spot;
     # prompt to re-run
@@ -228,6 +257,20 @@ def test_step_detail_expands_with_params(tmp_path: Path, qapp: QApplication) -> 
     assert not hasattr(row, "manual_with_params_button")
     panel._toggle_step_detail("spectrum")
     assert row.detail_frame.isHidden()
+    panel.close()
+
+
+def test_step_detail_hides_internal_run_metadata(tmp_path: Path, qapp: QApplication) -> None:
+    "Regression coverage: test step detail hides internal run metadata."
+    manager, exp_id, data_id = _manager_with_spectrum(tmp_path)
+    run = manager.last_run_for_data(exp_id, data_id, ("process",))
+    assert run is not None
+    panel = PipelinePanel(manager, _FakeController())
+    panel.set_selection("data", exp_id, data_id)
+    text, _params, _failed = panel._step_detail("spectrum")
+    assert run.run_id not in text
+    assert run.workflow_ref not in text
+    assert "snapshot" not in text.lower()
     panel.close()
 
 
@@ -270,22 +313,20 @@ def test_view_log_signal(tmp_path: Path, qapp: QApplication) -> None:
     panel.close()
 
 
-def test_step_detail_light_background(qapp: QApplication) -> None:
-    """The step details panel has an explicit light background + dark text (still
-    readable under a dark system theme)."""
+def test_step_detail_uses_the_application_dark_theme(qapp: QApplication) -> None:
+    "Regression coverage: test step detail uses the application dark theme."
     from gui.pipeline_panel import PipelineStepRow
+    from ui_support.theme import SURFACE_ALT, TEXT_PRIMARY
 
     row = PipelineStepRow("spectrum", "生成谱图", "desc")
     style = row.detail_frame.styleSheet()
-    assert "background: #ffffff" in style
-    assert "color: #222" in row.detail_label.styleSheet()
+    assert f"background: {SURFACE_ALT}" in style
+    assert f"color: {TEXT_PRIMARY}" in row.detail_label.styleSheet()
+    assert row.detail_label.textInteractionFlags()
     row.close()
 
 
-
-def test_step_detail_refreshes_on_data_switch(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_step_detail_refreshes_on_data_switch(tmp_path: Path, qapp: QApplication) -> None:
     """0.2.161: when switching data, an already expanded step detail refreshes
     immediately to the new data's report."""
     manager = ProjectManager.create_project(tmp_path / "proj2", "demo")
@@ -316,3 +357,62 @@ def test_step_detail_refreshes_on_data_switch(
     assert text2 != first_text  # refreshed with the new data's run record
     assert "无报告记录" in text2
     panel.close()
+
+
+# ----------------------------------------------------------------------
+
+
+# ----------------------------------------------------------------------
+def test_format_params_prefers_the_readable_pick_report() -> None:
+    "Regression coverage: test format params prefers the readable pick report."
+    from gui.pipeline_panel import _format_params
+
+    params = {
+        "sigma": 4.0,
+        "localization": {"method": "parabolic", "n_boundary_hit": 2},
+        "peak_pick_report": "选峰汇总: 候选 120 / 接受 37\n定位方法: 三点抛物线",
+    }
+    text = _format_params(params)
+
+    assert "选峰汇总" in text
+    assert "三点抛物线" in text
+
+    assert "localization=" not in text
+    assert "'method'" not in text
+
+    assert "sigma=4.0" not in text
+
+
+def test_format_params_without_a_report_falls_back_to_flat_rendering() -> None:
+    "Regression coverage: test format params without a report falls back to flat rendering."
+    from gui.pipeline_panel import _format_params
+
+    text = _format_params({"sigma": 4.0, "localization": {"method": "parabolic"}})
+    assert "sigma=4.0" in text
+    assert "localization=" in text
+    assert _format_params({}) == ""
+
+
+def test_format_params_accepts_a_line_list_report() -> None:
+    "Regression coverage: test format params accepts a line list report."
+    from gui.pipeline_panel import _format_params
+
+    text = _format_params({"peak_pick_report": ["第一行", "", "第二行"], "localization": {"x": 1}})
+    assert "第一行" in text and "第二行" in text
+    assert "localization=" not in text
+
+
+def test_smile_report_does_not_dump_the_ranking_repr() -> None:
+    "Regression coverage: test smile report does not dump the ranking repr."
+    from gui.pipeline_panel import _smile_step_report
+
+    lines = _smile_step_report(
+        {
+            "n_combos": 16,
+            "ranking": [{"rank": 1, "nsigma": 5.0, "thresh": 0.25, "stable_count": 42}],
+        },
+        {"csv": "ranking.csv"},
+    )
+    text = "\n".join(lines)
+    assert "16" in text and "1" in text and "42" in text
+    assert "{'rank'" not in text and "[{" not in text

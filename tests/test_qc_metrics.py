@@ -41,9 +41,7 @@ def test_peak_detection_subpixel_position() -> None:
     shape = (128, 256)
     yy, xx = np.mgrid[0:128, 0:256]
     rng = np.random.default_rng(3)
-    real = np.exp(
-        -(((yy - 50.4) ** 2) / (2 * 1.2 ** 2) + ((xx - 120.7) ** 2) / (2 * 1.2 ** 2))
-    )
+    real = np.exp(-(((yy - 50.4) ** 2) / (2 * 1.2**2) + ((xx - 120.7) ** 2) / (2 * 1.2**2)))
     real = real + rng.normal(0, 0.01, size=shape)
     peaks = peak_detection.detect(real)
     top = max(peaks, key=lambda p: p.height)
@@ -75,9 +73,8 @@ def test_phase_quality_good_vs_bad() -> None:
     assert phase_quality.evaluate(good).absorption_fraction > 0.9
     assert phase_quality.evaluate(bad).absorption_fraction < 0.2
 
-def _phase_sweep_spectrum(
-    n: int = 2048, seed: int = 3, noise: float = 0.1
-) -> np.ndarray:
+
+def _phase_sweep_spectrum(n: int = 2048, seed: int = 3, noise: float = 0.1) -> np.ndarray:
     """Complex Lorentzian multi-peak spectrum (the real part is absorptive at phase=0) with noise
     added to the real part.
 
@@ -119,6 +116,27 @@ def test_phase_quality_continuous_metrics() -> None:
     assert metrics[3].score - metrics[4].score > 0.01
 
 
+@pytest.mark.parametrize("offset", [10.0, 100.0, -100.0])
+def test_phase_window_selection_uses_baseline_relative_peak_height(offset: float) -> None:
+    spectrum = _synthetic_spectrum()
+    before = phase_quality.evaluate(spectrum)
+    after = phase_quality.evaluate(spectrum + offset)
+    assert after.score == pytest.approx(before.score, abs=1e-8)
+    assert phase_quality.profile_symmetry_axis(spectrum + offset, 0) == pytest.approx(
+        phase_quality.profile_symmetry_axis(spectrum, 0),
+        abs=1e-8,
+    )
+
+
+def test_quality_nonfinite_imaginary_component_returns_invalid_not_exception() -> None:
+    spectrum = _synthetic_spectrum().astype(complex)
+    spectrum[0, 0] = complex(1.0, float("nan"))
+    result = spectrum_quality.evaluate(spectrum)
+    assert result.decision is spectrum_quality.QcDecision.ROLLBACK
+    assert result.score.overall == 0
+    assert result.reasons
+
+
 def test_phase_quality_180_inversion_penalty() -> None:
     """180° inversion (the whole spectrum is negated) is penalised by both the negative area and
     negative peaks; the score is far below the positive phase."""
@@ -132,6 +150,86 @@ def test_phase_quality_180_inversion_penalty() -> None:
     assert good.score > bad.score + 20
     assert bad.negative_area_fraction > good.negative_area_fraction
     assert bad.entropy > good.entropy
+
+
+def _negative_lobe_spectrum(
+    lobes: list[tuple[tuple[int, int], float]],
+    *,
+    shape: tuple[int, int] = (128, 256),
+    noise_level: float = 1.0,
+    seed: int = 5,
+    main_peak: float = 80.0,
+) -> np.ndarray:
+    "Regression coverage:  negative lobe spectrum."
+    rng = np.random.default_rng(seed)
+    real = rng.normal(0.0, noise_level, size=shape)
+    yy, xx = np.mgrid[0 : shape[0], 0 : shape[1]]
+
+    def _clear_noise(cy: int, cx: int, radius: int = 2) -> None:
+        real[(yy - cy) ** 2 + (xx - cx) ** 2 <= radius * radius] = 0.0
+
+    _clear_noise(60, 180)
+    real[60, 180] = main_peak * noise_level
+    for (cy, cx), multiple in lobes:
+        _clear_noise(cy, cx)
+        real += (
+            multiple
+            * noise_level
+            * np.exp(-(((yy - cy) ** 2 + (xx - cx) ** 2) / (2.0 * 1.6 * 1.6)))
+        )
+    return real
+
+
+def test_phase_quality_negative_peak_counts_only_significant_lobes() -> None:
+    "Regression coverage: test phase quality negative peak counts only significant lobes."
+    five_sigma = _negative_lobe_spectrum([((70, 120), -5.0)])
+    thirteen_sigma = _negative_lobe_spectrum([((70, 120), -13.0)])
+    both = _negative_lobe_spectrum([((70, 120), -5.0), ((40, 90), -13.0)])
+
+    sigma = float(noise.estimate(five_sigma).global_sigma)
+    assert sigma == pytest.approx(1.0, abs=0.1)
+
+    detected = peak_detection.detect(-np.real(five_sigma))
+    assert any(abs(float(p.height)) == pytest.approx(5.0, abs=0.5) for p in detected)
+
+    small_only = phase_quality.evaluate(five_sigma)
+    assert small_only.negative_peak_fraction == 0.0
+    assert small_only.negative_peak_sigma == phase_quality.NEGATIVE_PEAK_SIGMA == 12.0
+    assert small_only.noise_sigma > 0.0
+
+    big_only = phase_quality.evaluate(thirteen_sigma)
+    assert big_only.negative_peak_fraction > 0.0
+
+    assert phase_quality.evaluate(both).negative_peak_fraction == pytest.approx(
+        big_only.negative_peak_fraction
+    )
+    assert big_only.negative_peak_fraction > small_only.negative_peak_fraction
+
+
+def test_phase_quality_inverted_spectrum_keeps_a_high_negative_ratio() -> None:
+    "Regression coverage: test phase quality inverted spectrum keeps a high negative ratio."
+    positive = _negative_lobe_spectrum([((70, 120), 13.0), ((40, 90), 13.0)])
+    inverted = -positive
+    assert phase_quality.evaluate(inverted).negative_peak_fraction > 0.9
+
+
+def test_spectrum_quality_no_longer_reports_a_negative_peak_reason() -> None:
+    "Regression coverage: test spectrum quality no longer reports a negative peak reason."
+
+    spec = _strong_spectrum([((60, 180), -100), ((70, 120), -70), ((40, 90), 45)])
+    result = spectrum_quality.evaluate(spec, sign_mode="uniform")
+    assert not any("负峰比例偏高" in r for r in result.reasons)
+
+    assert phase_quality.evaluate(spec).negative_peak_fraction > 0.15
+
+
+def test_spectrum_quality_weak_noise_peaks_do_not_raise_the_negative_ratio() -> None:
+    "Regression coverage: test spectrum quality weak noise peaks do not raise the negative ratio."
+    weak = _synthetic_spectrum()
+    phase = phase_quality.evaluate(weak)
+    assert phase.negative_peak_fraction == 0.0
+    result = spectrum_quality.evaluate(weak, sign_mode="uniform")
+    assert not any("负峰比例偏高" in r for r in result.reasons)
 
 
 def test_baseline_quality_flags_ramp() -> None:
@@ -179,6 +277,7 @@ def test_spectrum_quality_decision() -> None:
     assert result.score.overall > 0
     assert result.score.components.snr > 0
 
+
 # ---------------------------------------------- QC sign convention and invalid input (2026-09-20)
 def _all_negative(shape: tuple[int, int] = (128, 256), seed: int = 7) -> np.ndarray:
     """Negate the whole "phased" synthetic spectrum -- the reproduction recipe reported
@@ -203,9 +302,7 @@ def test_spectrum_quality_mixed_snr_ignores_overall_sign() -> None:
     spec = _synthetic_spectrum()
     positive = spectrum_quality.evaluate(spec, sign_mode="mixed")
     negative = spectrum_quality.evaluate(-spec, sign_mode="mixed")
-    assert positive.score.components.snr == pytest.approx(
-        negative.score.components.snr
-    )
+    assert positive.score.components.snr == pytest.approx(negative.score.components.snr)
     assert positive.score.components.snr > 0
 
 
@@ -234,9 +331,7 @@ def test_spectrum_quality_mixed_is_sign_symmetric() -> None:
         # The phase component is not strictly symmetric at the ~1e-4 level (peak windows /
         # normalisation details); the S/N component is asserted bit-for-bit in the test above,
         # so the overall score gets a 0.01 margin here.
-        assert positive.score.overall == pytest.approx(
-            negative.score.overall, abs=0.01
-        )
+        assert positive.score.overall == pytest.approx(negative.score.overall, abs=0.01)
 
 
 def test_spectrum_quality_uses_sign_aware_peaks_for_snr() -> None:
@@ -246,16 +341,12 @@ def test_spectrum_quality_uses_sign_aware_peaks_for_snr() -> None:
     sigma = noise.estimate(spec).global_sigma
     with_sign = snr.compute(
         spec,
-        peak_detection.detect(
-            spec, peak_detection.PeakDetectionParams(sign_mode="both")
-        ),
+        peak_detection.detect(spec, peak_detection.PeakDetectionParams(sign_mode="both")),
         sigma,
     ).global_snr
     positive_only = snr.compute(
         spec,
-        peak_detection.detect(
-            spec, peak_detection.PeakDetectionParams(sign_mode="positive")
-        ),
+        peak_detection.detect(spec, peak_detection.PeakDetectionParams(sign_mode="positive")),
         sigma,
     ).global_snr
     assert with_sign > positive_only * 1.4  # including the negative peaks is a factor apart
@@ -313,6 +404,7 @@ def test_spectrum_quality_invalid_input_reasons_are_specific() -> None:
     assert "常数谱" in zeros
     assert "NaN" in nan
     assert len({empty, zeros, nan}) == 3
+
 
 def _strong_spectrum(
     peaks: list[tuple[tuple[int, int], float]],

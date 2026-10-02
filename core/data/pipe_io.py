@@ -18,13 +18,13 @@ from ui_support.i18n import tr
 
 def _unpack_interleaved(arr: np.ndarray) -> np.ndarray:
     """Unpack the real/imaginary interleaved first axis into complex (even rows are the real
-    part, odd rows the imaginary part)."""
+    part, odd rows the imaginary part).
+    """
     if arr.shape[0] % 2 != 0:
         raise ValueError(
             tr(
-            "the first axis length is odd; the data is not interleaved complex "
-            "storage",
-        )
+                "the first axis length is odd; the data is not interleaved complex storage",
+            )
         )
     return arr[0::2] + 1j * arr[1::2]
 

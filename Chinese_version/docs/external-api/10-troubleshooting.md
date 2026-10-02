@@ -8,7 +8,7 @@
 | `DatasetError: 条件标签 'A' 已被 … 占用` | 同一条件标签绑了两份数据 | 换标签(B/C…)或另建研究根 |
 | `ReferenceError: 参考谱产物缺失,请重建(force=True)` | `study/reference/<key>/` 被移动/删除 | 删掉该目录或 `build_reference(..., force=True)` |
 | `ReferenceError: 非主条件的参考峰身份需要主条件先选峰` | 只给 B 选峰,主条件 A 还没选 | 先对主条件(A)调用 `ensure_reference_peaks` |
-| `MeasurementError: Gaussian peak fitting is currently supported only for 2D spectra.` | 非 2D 直接调用 `measure_peak_positions(refine="gaussian")` | 参数组合执行里不报错(写 fallback 的 Gaussian 表);直接调用请用 `refine="parabolic"` |
+| `MeasurementError: unknown refine: 'gaussian' …(the Gaussian fit was removed)` | 还在用 `refine="gaussian"` | 高斯拟合算法已于 2026-09-26 删除:改用 `refine="parabolic"`(默认)或 `refine="none"`;参数组合执行里请求 `localization="gaussian"`/`"both"` 抛 `SweepError` |
 | `SweepError: …超过上限 max_runs` | 组合数超限 | 减网格/显式提高 `max_runs`,或分批 |
 | `SweepError: 网格里的 'phases'/'direct_phase' 会破坏相位锁定` | 直接写相位字典 | 改用 `phase_delta.<轴>.p0|p1` 或 `phase.<轴>.p0|p1` |
 | `SweepError: 当前只支持 2D NUS 参数组合` | 3D NUS | 先只建参考;组合执行待 roadmap |
@@ -22,15 +22,17 @@
 | 码 | 处理建议 |
 | --- | --- |
 | `peak_count_zero` | 该组合在锁定阈值下一个峰都没检出:确认该组合的谱没坏,或重建参考改阈值 |
-| `gaussian_fallback` | 看 `fallback_reason`(roi_too_small / not_converged / center_at_boundary / sigma_at_bound …);调大 ROI 或接受抛物线回退 |
-| `gaussian_boundary_hit` | 峰太宽/太窄或 ROI 不合适;调 ROI 半径 |
+| `boundary_hit` | 有峰的三点抛物线顶点贴在 ±0.5 点边界(真峰顶可能落在三点模板之外):核对谱/窗口,或接受该定位并看 `n_boundary_hit` 计数 |
+| `duplicate_localization` | 同表出现同坐标(ppm 1e-6)的重复行:参考表在独占邻域修复后属分辨率极限,组合表还有亚格点精修把相邻检出峰收进同一格的情形;下游不要把重复行当成两个独立观测 |
+| `direct_range_override` | 本批用了 `--allow-ext-override`/`allow_ext_override=True`,脚本直接维范围与参考冻结范围不一致:确认这是有意为之 |
 | (已移除) | `peak_not_detected` / `peak_window_edge` / `peak_out_of_range` / `window_points_fallback`:2026-09-14 起组合模式独立选峰,不再产出 |
+| (已移除) | `gaussian_fallback` / `gaussian_unsupported_ndim`:2026-09-26 起二维高斯拟合算法整体删除,边界警告改为与算法无关的 `boundary_hit` |
 
 ## 10.3 断点续跑与重跑
 
 成功运行只有在执行指纹一致时才会复用。指纹包括条件数据集、参数组合与实际
-参数、锁定相位、参考脚本/谱/峰表哈希,以及**锁定阈值、精修方式
-(`localization`)与选峰边距**、Gaussian ROI 选项；旧版无指纹记录或任一输入
+参数、锁定相位、参考脚本/谱/峰表哈希,以及**锁定阈值、定位方式
+(`localization`,只有 `parabolic`)与选峰边距**、目标峰列表；旧版无指纹记录或任一输入
 改变都会安全重跑。缩短组合表后，活动计划
 之外的旧 `Wxxxx` 目录可以保留作历史，但不会再进入当前汇总记录。
 

@@ -56,7 +56,7 @@ def test_estimate_smile_peak_mb_calibrated() -> None:
     assert 600 <= m600 <= 680, m600
     m2048 = estimate_smile_peak_mb(3, 2048, [80, 50])
     assert 2100 <= m2048 <= 2350, m2048
-    # sampleK reference point: 168 points, NusTD(292,290) → matches SMILE's 2.8GB
+    # data/102 reference point: 168 points, NusTD(292,290) → matches SMILE's 2.8GB
     # self-report
     ref = estimate_smile_peak_mb(3, 168, [292, 290])
     assert 2700 <= ref <= 3000, ref
@@ -69,7 +69,7 @@ def test_dev_smile_memory_ceiling() -> None:
     constraint).
 
     The dev VM (16GB, unstable 32GB host) has a verified safe peak of ≈2.8GB
-    (zero-fill 1024, sampleK, SMILE self-reported Memory Used); ≥5.6GB (zero-fill
+    (zero-fill 1024, data/102, SMILE self-reported Memory Used); ≥5.6GB (zero-fill
     2048, direct dimension doubled) triggers an unexpected host power-off. Test data
     and reruns must keep the estimated peak ≤ 2.8GB.
     """

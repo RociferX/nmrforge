@@ -128,8 +128,11 @@ ph31=0 2 2 0
 """
 
 #: same family but a 2D E/A version **without** a 3D second indirect dimension
-#: (a HSQC echo/antiecho fragment).
-HSQC_EA_PULSEPROGRAM = """# 1 "/opt/topspin/exp/stan/nmr/lists/pp/""" + "hsqc_ea_fixture" + """"
+#: (an HSQC echo/antiecho fragment).
+HSQC_EA_PULSEPROGRAM = (
+    """# 1 "/opt/topspin/exp/stan/nmr/lists/pp/"""
+    + "hsqc_ea_fixture"
+    + """"
 1 ze
 2 MCWRK  * 2 do:f3
 LBLSTS1, MCWRK  * 4
@@ -144,6 +147,7 @@ ph5=1 1 3 3
 ph6=0
 ph31=0 2 2 0
 """
+)
 
 
 def _experiment(bruker_dir: Path, name: str = "hnca_3d"):
@@ -247,9 +251,7 @@ def test_cbcaconh_facts_match_the_data_owners_script_but_no_neg_is_guessed(
     assert (f1.handedness, f2.handedness) == (HANDEDNESS_UNKNOWN, HANDEDNESS_UNKNOWN)
     assert ft_neg_for(exp, 5, "F1") is False
     assert ft_neg_for(exp, 5, "F2") is False
-    script = generate_process_script(
-        exp, select_method(exp), in_file="t.fid", out_file="o.ft3"
-    )
+    script = generate_process_script(exp, select_method(exp), in_file="t.fid", out_file="o.ft3")
     assert "-neg" not in script
     assert "| nmrPipe -fn FT -alt \\" in script  # -alt is still decided by FnMODE (States-TPPI)
     # same sequence but the acquisition mode is changed to E/A (contradicting the F2PH
@@ -260,9 +262,7 @@ def test_cbcaconh_facts_match_the_data_owners_script_but_no_neg_is_guessed(
     assert ft_neg_for(exp, 6, "F2") is False
     # switch to a genuinely E/A-acquired pulse-program fragment (F2EA clause)
     # ⇒ F1EA ⇒ unknown ⇒ no -neg
-    (exp.source_path / "pulseprogram").write_text(
-        HNCACB_EA_CLAUSE, encoding="utf-8"
-    )
+    (exp.source_path / "pulseprogram").write_text(HNCACB_EA_CLAUSE, encoding="utf-8")
     assert handedness_for(exp, "F2", fnmode=6).reason == "f1ea"
     assert ft_neg_for(exp, 6, "F2") is False
 
@@ -477,41 +477,29 @@ def test_alt_is_decided_by_fnmode_only() -> None:
 def test_qseq_uses_bruk_and_tppi_uses_real(bruker_dir: Path) -> None:
     """QSEQ(2)→``FT -bruk``; TPPI(3)→``FT -real``; QF(1)→``FT`` + ``MC``."""
     exp = _set_fnmode(_experiment(bruker_dir, "hsqc_2d"), "F1", 2)
-    script = generate_process_script(
-        exp, select_method(exp), in_file="t.fid", out_file="o.ft2"
-    )
+    script = generate_process_script(exp, select_method(exp), in_file="t.fid", out_file="o.ft2")
     assert "| nmrPipe -fn FT -bruk \\" in script
     assert "| nmrPipe -fn FT -alt" not in script
 
     exp = _set_fnmode(_experiment(bruker_dir, "hsqc_2d"), "F1", 3)
-    script = generate_process_script(
-        exp, select_method(exp), in_file="t.fid", out_file="o.ft2"
-    )
+    script = generate_process_script(exp, select_method(exp), in_file="t.fid", out_file="o.ft2")
     assert "| nmrPipe -fn FT -real \\" in script
     assert "| nmrPipe -fn FT -alt" not in script
 
     exp = _set_fnmode(_experiment(bruker_dir, "hsqc_2d"), "F1", 1)
-    script = generate_process_script(
-        exp, select_method(exp), in_file="t.fid", out_file="o.ft2"
-    )
+    script = generate_process_script(exp, select_method(exp), in_file="t.fid", out_file="o.ft2")
     assert "| nmrPipe -fn MC \\" in script
 
 
 def test_echo_antiecho_gets_no_alt(bruker_dir: Path, tmp_path: Path) -> None:
     """E/A data (FnMODE=6) gets no ``-alt`` — alternating gradients alone must not
     add it mechanically."""
-    exp = _with_pulseprogram(
-        _experiment(bruker_dir, "hsqc_2d"), tmp_path, HSQC_EA_PULSEPROGRAM
-    )
+    exp = _with_pulseprogram(_experiment(bruker_dir, "hsqc_2d"), tmp_path, HSQC_EA_PULSEPROGRAM)
     _set_fnmode(exp, "F1", 6)
-    script = generate_process_script(
-        exp, select_method(exp), in_file="t.fid", out_file="o.ft2"
-    )
+    script = generate_process_script(exp, select_method(exp), in_file="t.fid", out_file="o.ft2")
     assert "| nmrPipe -fn FT -alt" not in script
     assert "| nmrPipe -fn FT -neg" not in script
-    assert generate_convert_script(exp, direct_points=2048).find(
-        "-yMODE Echo-AntiEcho"
-    ) > 0
+    assert generate_convert_script(exp, direct_points=2048).find("-yMODE Echo-AntiEcho") > 0
 
 
 # --------------------------------------------------------------------------- #
@@ -555,9 +543,7 @@ def test_hnco_facts_are_read_from_content_and_pathway_is_unsolved(
     assert lines[0].startswith("zMODE")
 
 
-def test_verdict_does_not_depend_on_the_sequence_name(
-    bruker_dir: Path, tmp_path: Path
-) -> None:
+def test_verdict_does_not_depend_on_the_sequence_name(bruker_dir: Path, tmp_path: Path) -> None:
     """**Renaming does not affect the verdict**: replace the sequence name in the pulse
     program with any name and the facts read and the conclusion must stay the same.
 
@@ -618,20 +604,24 @@ def test_explicit_override_reaches_ft_neg_once_layer_a_is_determined(
     assert "aqseq=" in decision.storage
     # the automatic criterion applies by default: F1's FT line carries -neg directly
     # (the hnca_3d fixture's F1 is FnMODE=4 ⇒ only -neg, no -alt)
-    plain = generate_process_script(
-        exp, select_method(exp), in_file="t.fid", out_file="o.ft3"
-    )
+    plain = generate_process_script(exp, select_method(exp), in_file="t.fid", out_file="o.ft3")
     assert "| nmrPipe -fn FT -neg \\" in plain
     # the user has the final say: flip_f1=False (force off) removes the automatically
     # added -neg
     forced_off = generate_process_script(
-        exp, select_method(exp), in_file="t.fid", out_file="o.ft3",
+        exp,
+        select_method(exp),
+        in_file="t.fid",
+        out_file="o.ft3",
         sampling={"flip_f1": False},
     )
     assert "-neg" not in forced_off
     # an explicit True agrees with the automatic conclusion (idempotent)
     flipped = generate_process_script(
-        exp, select_method(exp), in_file="t.fid", out_file="o.ft3",
+        exp,
+        select_method(exp),
+        in_file="t.fid",
+        out_file="o.ft3",
         sampling={"flip_f1": True},
     )
     assert "| nmrPipe -fn FT -neg \\" in flipped
@@ -640,18 +630,14 @@ def test_explicit_override_reaches_ft_neg_once_layer_a_is_determined(
 def test_f1ea_never_gets_neg(bruker_dir: Path, tmp_path: Path) -> None:
     """``F1EA(...)`` is always unknown: the raw E/A pair is shuffled first, so the
     handedness depends on the encoding."""
-    exp = _with_pulseprogram(
-        _experiment(bruker_dir, "hsqc_2d"), tmp_path, HSQC_EA_PULSEPROGRAM
-    )
+    exp = _with_pulseprogram(_experiment(bruker_dir, "hsqc_2d"), tmp_path, HSQC_EA_PULSEPROGRAM)
     result = handedness_for(exp, "F1", fnmode=6)
     assert result.handedness == HANDEDNESS_UNKNOWN
     assert result.reason == "f1ea"
     assert ft_neg_for(exp, 6, "F1") is False
 
 
-def test_missing_pulseprogram_is_unknown_with_reminder(
-    bruker_dir: Path, tmp_path: Path
-) -> None:
+def test_missing_pulseprogram_is_unknown_with_reminder(bruker_dir: Path, tmp_path: Path) -> None:
     """No pulse program ⇒ unknown (not a "guess") + a reminder to review manually."""
     from ui_support.i18n import tr
 
@@ -696,9 +682,7 @@ def test_sequence_outside_the_table_is_unknown(bruker_dir: Path, tmp_path: Path)
 def test_2d_states_is_left_undecided_with_a_notice(bruker_dir: Path, tmp_path: Path) -> None:
     """A 2D States/States-TPPI indirect dimension: pathway unsolved ⇒ ``unknown`` + a
     reminder (no ``-neg``)."""
-    exp = _with_pulseprogram(
-        _experiment(bruker_dir, "hsqc_2d"), tmp_path, CBCACONH_PULSEPROGRAM
-    )
+    exp = _with_pulseprogram(_experiment(bruker_dir, "hsqc_2d"), tmp_path, CBCACONH_PULSEPROGRAM)
     _set_fnmode(exp, "F1", 5)
     result = handedness_for(exp, "F1", fnmode=5)
     assert result.handedness == HANDEDNESS_UNKNOWN
@@ -758,9 +742,7 @@ def test_acquisition_loop_model_is_deterministic(bruker_dir: Path, tmp_path: Pat
     assert [level.kind for level in model.levels].count("pair") == 2
 
 
-def test_aqseq_312_swaps_y_z_and_flags_a_conflict(
-    bruker_dir: Path, tmp_path: Path
-) -> None:
+def test_aqseq_312_swaps_y_z_and_flags_a_conflict(bruker_dir: Path, tmp_path: Path) -> None:
     """``AQSEQ=312``: the y axis should be logical F1; if the pulse program's mc order
     contradicts this ⇒ no confirmation + a notice."""
     from core.experiment.acquisition_loop import acquisition_model
@@ -777,16 +759,12 @@ def test_aqseq_312_swaps_y_z_and_flags_a_conflict(
     assert model.notes and any("312" in note for note in model.notes)
 
 
-def test_acquisition_loop_on_a_real_2d_pulseprogram(
-    bruker_dir: Path, tmp_path: Path
-) -> None:
+def test_acquisition_loop_on_a_real_2d_pulseprogram(bruker_dir: Path, tmp_path: Path) -> None:
     """2D: only one indirect dimension (logical F1), the y axis is always F1 and the
     partners are adjacent; no 3D AQSEQ cross-check."""
     from core.experiment.acquisition_loop import acquisition_model
 
-    exp = _with_pulseprogram(
-        _experiment(bruker_dir, "hsqc_2d"), tmp_path, HSQC_EA_PULSEPROGRAM
-    )
+    exp = _with_pulseprogram(_experiment(bruker_dir, "hsqc_2d"), tmp_path, HSQC_EA_PULSEPROGRAM)
     exp.acquisition_parameters["acqus"]["AQSEQ"] = 0
     model = acquisition_model(exp)
     assert (model.y_axis, model.z_axis) == ("F1", None)
@@ -831,9 +809,7 @@ def test_canonical_negated_keywords() -> None:
 # --------------------------------------------------------------------------- #
 # 4. The same text in three places (import warning / conversion log / step report)
 # --------------------------------------------------------------------------- #
-def test_review_line_text_is_shared_by_every_reader(
-    bruker_dir: Path, tmp_path: Path
-) -> None:
+def test_review_line_text_is_shared_by_every_reader(bruker_dir: Path, tmp_path: Path) -> None:
     """The sentence written into the fid.com correction list during conversion ==
     ``mode_symbol_audit``'s lines."""
     exp = _with_pulseprogram(_experiment(bruker_dir), tmp_path, HNCO_PULSEPROGRAM)

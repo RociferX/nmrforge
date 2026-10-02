@@ -18,13 +18,31 @@ from typing import Any
 
 from ui_support.i18n import tr
 
-_PHASE_ROUTE_LABELS = {"unified": tr(
-    "Unified automatic "
-    "processing",
-), "none": tr(
-    "None(escape "
-    "hatch)",
-)}
+_PHASE_ROUTE_LABELS = {
+    "unified": tr("Automatic optimisation"),
+    "none": tr("Direct processing (automatic optimisation off)"),
+}
+
+
+def format_phase_degrees(value: Any) -> str:
+    """Format a user-visible phase angle with two decimal places."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return f"{number:.2f}"
+
+
+class _PhaseAngle(float):
+    """Keep existing translated log templates while forcing their degree format to two decimals."""
+
+    def __format__(self, format_spec: str) -> str:
+        return f"{float(self):.2f}"
+
+
+def phase_angle_value(value: Any) -> float:
+    """Number compatible with legacy ``:g`` translation templates, displayed to two decimals."""
+    return _PhaseAngle(float(value))
 
 
 def format_phase_pair(value: Any) -> str:
@@ -32,18 +50,19 @@ def format_phase_pair(value: Any) -> str:
     if isinstance(value, dict):
         p0 = value.get("p0", "")
         p1 = value.get("p1", "")
-        text = f"p0={p0}° p1={p1}°"
+        text = f"p0={format_phase_degrees(p0)}° p1={format_phase_degrees(p1)}°"
         if value.get("source"):
             text += " (" + str(value.get("source")) + ")"
         return text
     if isinstance(value, (tuple, list)) and len(value) >= 2:
-        return f"p0={value[0]}° p1={value[1]}°"
+        return f"p0={format_phase_degrees(value[0])}° p1={format_phase_degrees(value[1])}°"
     return str(value)
 
 
 def format_opt_mode_map(cfg: Any) -> str:
     """{axis: {mode/type/size...}} -> 'F1=auto F2=none' compact text; non-dict values (old format
-    integers, etc.) are returned unchanged."""
+    integers, etc.) are returned unchanged.
+    """
     if not isinstance(cfg, dict):
         return str(cfg)
     parts: list[str] = []
@@ -69,7 +88,7 @@ def spectrum_report_title() -> str:
     this function. The language is taken at call time (an import-time constant would mismatch
     after a UI language switch).
     """
-    return tr("== spectrum quality report ==")
+    return tr("== spectrum report ==")
 
 
 def report_text_from_logs(logs: list[str]) -> str | None:
@@ -83,8 +102,7 @@ def report_text_from_logs(logs: list[str]) -> str | None:
     """
     marks = (
         spectrum_report_title(),
-        # Old title (before 2026-09-23 the data quality section was part of this report):
-        # tolerated when extracting.
+        tr("== spectrum quality report =="),
         tr("== spectrum quality and data quality report =="),
     )
     for i, line in enumerate(logs):
@@ -156,13 +174,21 @@ def spectrum_quality_report_lines(
     import numpy as np
 
     def _grade(score: float) -> str:
-        return tr(
-            "Good",
-        ) if score >= 75.0 else (tr(
-            "Needs attention",
-        ) if score >= 50.0 else tr(
-            "Poor",
-        ))
+        return (
+            tr(
+                "Good",
+            )
+            if score >= 75.0
+            else (
+                tr(
+                    "Needs attention",
+                )
+                if score >= 50.0
+                else tr(
+                    "Poor",
+                )
+            )
+        )
 
     try:
         import nmrglue as ng
@@ -173,14 +199,14 @@ def spectrum_quality_report_lines(
         # final run the user can see what is currently being evaluated instead of a long
         # stretch without logs)
         if progress is not None:
-            progress(tr("spectrum quality assessment: reading final spectrum"))
+            progress(tr("Quality check: reading the final spectrum"))
         _dic, data = ng.pipe.read(str(spectrum_path))
         arr = np.asarray(data)
         if progress is not None:
-            progress(tr("spectrum quality evaluation: scoring SNR / phase / baseline / artefacts"))
+            progress(tr("Quality check: scoring S/N, phase, baseline and artefacts"))
         q = spectrum_quality.evaluate(arr, sign_mode=sign_mode)
         if progress is not None:
-            progress(tr("spectrum quality assessment: baseline worst axis analysis in progress"))
+            progress(tr("Quality check: finding the least even baseline"))
         comps = q.score.components
         # 0.2.199-patch29z: the baseline score matches the optimisation -- use the per-axis score
         # of the configuration selected in the optimisation grid (the worst axis represents it)
@@ -200,13 +226,14 @@ def spectrum_quality_report_lines(
             "warning": tr("⚠ Warning"),
             "rollback": tr("✗ Unqualified"),
         }.get(str(q.decision.value), str(q.decision.value))
-        lines = [tr("◆ Final spectrum image quality (evaluation after processing is completed)")]
-        lines.append(tr(
-            " Comprehensive judgment: {p0}(Comprehensive score "
-            "{p1:.1f})",
-            p0=decision_label,
-            p1=q.score.overall,
-        ))
+        lines = [tr("◆ final spectrum quality")]
+        lines.append(
+            tr(
+                "   Overall: {p0} (score {p1:.1f}/100)",
+                p0=decision_label,
+                p1=q.score.overall,
+            )
+        )
         for label, key in (
             (tr("signal-to-noise ratio"), "snr"),
             (tr("phase"), "phase"),
@@ -214,13 +241,14 @@ def spectrum_quality_report_lines(
             (tr("artifact"), "artifact"),
         ):
             score = float(getattr(comps, key))
-            lines.append(tr(
-                "   - {p0}: {p1}({p2:.0f} "
-                "point)",
-                p0=label,
-                p1=_grade(score),
-                p2=score,
-            ))
+            lines.append(
+                tr(
+                    "   - {p0}: {p1} ({p2:.0f}/100)",
+                    p0=label,
+                    p1=_grade(score),
+                    p2=score,
+                )
+            )
         worst_idx, bm = baseline_quality.worst_axis(arr)
         axis_label = ""
         if axis_names and 0 <= worst_idx < len(axis_names):
@@ -229,9 +257,8 @@ def spectrum_quality_report_lines(
             axis_label = tr("(Worst storage axis #{p0})", p0=worst_idx + 1)
         lines.append(
             tr(
-                " Baseline indicators{p0}: slope {p1:.1f}%  offset {p2:.1f}%  curvature {p3:.1f}%  "
-                "striping "
-                "{p4:.2f}",
+                "   Baseline indicators {p0}: slope {p1:.1f}%, offset {p2:.1f}%, "
+                "curvature {p3:.1f}%, striping {p4:.2f}",
                 p0=axis_label,
                 p1=bm.slope * 100,
                 p2=bm.offset * 100,
@@ -240,33 +267,20 @@ def spectrum_quality_report_lines(
             )
         )
         if q.reasons:
-            lines.append(tr(" Inspection instructions:"))
+            lines.append(tr("   What to check:"))
             for reason in q.reasons:
                 lines.append(f"     · {reason}")
         if bm.needs_correction:
-            opt_lines = [
-                line
-                for line in (optimization_logs or [])
-                if tr("baseline").lower() in line.lower() or line[:3] in ("F1:", "F2:", "F3:")
-            ]
-            opt_summary = ";".join(opt_lines) if opt_lines else tr(
-                "No baseline optimisation "
-                "record",
-            )
             lines.append(
-                tr(" Reasons for uneven baseline: ") + opt_summary
-                + tr(
-                    "; the quality evaluation uses the final spectrum while the baseline "
-                    "optimisation uses the per-axis in-memory score of the joint spectrum, so the "
-                    "two baselines differ; windowing / zero-filling change the baseline shape, and "
-                    "the optimisation stays off (no correction) when the candidate gain is <=0.5 "
-                    "or the striping check vetoes "
-                    "it.",
+                tr(
+                    "   Baseline needs attention {p0}. Review this axis in the final spectrum; "
+                    "windowing and zero filling can change the final baseline.",
+                    p0=axis_label,
                 )
             )
         return lines
-    except Exception as exc:  # noqa: BLE001 - a failed quality evaluation must not block the report
-        return [tr("◆ Final spectrum image quality: evaluation skipped ({p0})", p0=exc)]
+    except Exception as exc:
+        return [tr("◆ final spectrum quality: evaluation skipped ({p0})", p0=exc)]
 
 
 def format_optimization_report(params: dict) -> list[str]:
@@ -274,39 +288,28 @@ def format_optimization_report(params: dict) -> list[str]:
     lines: list[str] = []
     route = params.get("phase_route")
     if route is not None:
-        lines.append(
-            tr(" phase optimisation approach: {p0}", p0=_PHASE_ROUTE_LABELS.get(str(route), route))
-        )
+        lines.append(tr("   Optimisation: {p0}", p0=_PHASE_ROUTE_LABELS.get(str(route), route)))
     direct = params.get("direct_phase")
     if direct is not None:
-        lines.append(tr(" direct dimension phase: {p0}", p0=format_phase_pair(direct)))
-    # 0.2.162-patch15: shown when the user sets the direct-dimension range of the final run
-    # (an empty end shows the default)
+        lines.append(tr("   Direct-dimension phase: {p0}", p0=format_phase_pair(direct)))
     final_lo = params.get("final_ext_lo")
     final_hi = params.get("final_ext_hi")
     if final_lo is not None or final_hi is not None:
         lo = str(final_lo) if final_lo not in (None, "") else tr("default")
         hi = str(final_hi) if final_hi not in (None, "") else tr("default")
-        lines.append(tr(" direct dimension range (final run): {p0} - {p1} ppm", p0=lo, p1=hi))
+        lines.append(tr("   Direct-dimension range: {p0}–{p1} ppm", p0=lo, p1=hi))
     phases = params.get("phases") or {}
     if phases:
-        lines.append(tr(" Phase per dimension:"))
+        lines.append(tr("   Phase by dimension:"))
         for axis, pair in sorted(phases.items()):
             lines.append(f"    {axis}: {format_phase_pair(pair)}")
     baseline = params.get("baseline")
     if baseline:
-        lines.append(tr(" Baseline: {p0}", p0=format_opt_mode_map(baseline)))
+        lines.append(tr("   Baseline: {p0}", p0=format_opt_mode_map(baseline)))
     window = params.get("window")
     if window:
-        lines.append(tr(" Window function: {p0}", p0=format_opt_mode_map(window)))
+        lines.append(tr("   Window function: {p0}", p0=format_opt_mode_map(window)))
     zero_fill = params.get("zero_fill")
     if zero_fill:
-        lines.append(tr(" zero filling: {p0}", p0=format_opt_mode_map(zero_fill)))
-    # 2026-09-24: the whole ``diagnostics`` block is **not rendered here** -- the FID-layer
-    # diagnosis belongs to the "Generate FID" step (``run.params`` really does carry
-    # diagnostics, but no caller should display that stage's conclusions in the spectrum
-    # report). The historical line "Data quality diagnosis: None" is gone with it.
-    runs = params.get("backend_runs")
-    if runs is not None:
-        lines.append(tr(" Number of backend runs: {p0}", p0=runs))
+        lines.append(tr("   Zero filling: {p0}", p0=format_opt_mode_map(zero_fill)))
     return lines

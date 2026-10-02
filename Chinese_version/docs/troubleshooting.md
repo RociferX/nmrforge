@@ -51,21 +51,28 @@ nmrForge 在开始前先估算峰值,并把显式的 `-maxMem` 传下去;估算�
 
 ## 采样分类给出 `uncertain`,处理拒绝启动
 
-这是安全闸门,不是 bug。它表示元数据自相矛盾 —— 最常见的是 `nuslist` 或脉冲序列声称是 NUS,
-而实际采到的点覆盖了完整网格,或者采样表里有重复/越界坐标。
+这是拒绝猜测的关卡。请看具体证据，不要把所有错误都归为同一种“采样冲突”。
+满网格且标准顺序的合法表可走 uniform；满覆盖但乱序仍需要表归位，不能直接 FT。
+明确 NUS 而采样表缺失时导入会报缺少采样表，不会通过“猜 nuslist”补救。
 
 1. 看日志里的采样证据行:它们会说明触发了哪条规则、用的是哪些数字;
-2. 如果数据确实是完整采样,数据集会自动改判为 `uniform`;若仍是 `uncertain`,说明参数确实
-   不一致,需要人来判断;
+2. 核对 `nuslist` 或 `acqus.NUSLIST` 明确指名的文件是否完整、有效、与本次数据对应；
+   `NusAMOUNT=100` 和 `ser` 行数相等本身不证明正确的网格顺序；
 3. 修正分类比看上去重要:uniform 与 NUS 会改变每个处理参数的含义,所以没有「照样处理」的开关。
 
-## 提示「Gaussian peak fitting is currently supported only for 2D spectra.」
+## 提示「Gaussian peak fitting … was removed」/「The Gaussian peak-fitting method was removed」
 
-Gaussian 定位是二维模型,所以对 1D/3D 谱直接报错,而不是静默退回抛物线精修。请用
-`localization: parabolic`,或只处理 2D 平面。
+二维高斯峰拟合算法已于 2026-09-26(用户需求⑦)**整体删除**:峰定位只剩三点抛物线。
+所以 `localization="gaussian"|"both"`、`localize_peaks={"gaussian": …}`、
+组合表键 `localization.targets.gaussian` 会报 `SweepError`;`refine="gaussian"` 报
+`MeasurementError`;参考层直接抛 `LocalizationError`。这不是缺功能开关,而是没有
+高斯路径可选 —— 请改回 `parabolic`(缺省),并把脚本里的
+`localization_method=` / `gaussian_roi_*` / `roi_f1_ppm` / `roi_f2_ppm` /
+`method=` 参数删掉(2026-09-26 起它们不存在)。
 
-如果某个峰的 Gaussian 拟合失败,该峰单独退回抛物线,原因记录在 `<峰表>.localization.json`
-与 run 参数里。
+定位 QC 仍在:三点抛物线给 `fit_success`/`FWHM_H`/`FWHM_N`/`boundary_hit`
+(顶点贴 ±0.5 点 = 边界命中),逐峰记录在 `<峰表>.localization.json` 与 run 参数里;
+`fallback`/`fallback_reason` 保留在 schema 里(抛物线是闭式解,正常不触发)。
 
 ## AppImage 起不来
 

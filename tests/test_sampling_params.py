@@ -207,9 +207,7 @@ def test_default_neg_rule_reaches_the_3d_nus_script_and_smile(
     from backend.script_generator import generate_3d_nus_script
 
     exp = _three_d("nus_3d", bruker_dir, 0)
-    script = generate_3d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3"
-    )
+    script = generate_3d_nus_script(exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3")
     ft = _ft_lines(script)
     assert len(ft) == 3  # step1 direct dimension + step3's F2/F1
     assert "-neg" not in ft[0]
@@ -230,13 +228,11 @@ def test_global_ft_neg_outranks_the_per_axis_flip() -> None:
     from backend.script_generator import _ft_flags
 
     # Global off + per-axis on -> global wins (not added)
-    assert _ft_flags(
-        False, False, sampling={"ft_neg": False, "flip_f1": True}, axis="F1"
-    ) == []
+    assert _ft_flags(False, False, sampling={"ft_neg": False, "flip_f1": True}, axis="F1") == []
     # Global on + per-axis off -> global wins (added)
-    assert _ft_flags(
-        False, False, sampling={"ft_neg": True, "flip_f1": False}, axis="F1"
-    ) == ["-neg"]
+    assert _ft_flags(False, False, sampling={"ft_neg": True, "flip_f1": False}, axis="F1") == [
+        "-neg"
+    ]
     # Global not given (None) -> per-axis applies as usual
     assert _ft_flags(False, False, sampling={"flip_f1": True}, axis="F1") == ["-neg"]
     assert _ft_flags(False, False, sampling={"flip_f1": False}, axis="F1") == []
@@ -247,9 +243,7 @@ def test_global_ft_neg_off_also_beats_the_automatic_rule() -> None:
     (the automatic conclusion) is true."""
     from backend.script_generator import _ft_flags
 
-    assert _ft_flags(
-        False, False, sampling={"ft_neg": False}, axis="F1", force_neg=True
-    ) == []
+    assert _ft_flags(False, False, sampling={"ft_neg": False}, axis="F1", force_neg=True) == []
     # When the global value is not given, the automatic criterion still applies
     assert _ft_flags(False, False, sampling={}, axis="F1", force_neg=True) == ["-neg"]
 
@@ -407,9 +401,7 @@ def test_neg_rule_is_wired_in_all_four_paths(bruker_dir: Path) -> None:
     assert "-neg" not in ft[0] and "-neg" in ft[1] and "-neg" not in ft[2]
     # 2D NUS: no add by default, only explicit (also synced to the SMILE flags via _ft_flags)
     exp2n = read_dataset(bruker_dir / "nus_2d")
-    base = generate_2d_nus_script(
-        exp2n, in_file="e.fid", nuslist="nuslist", out_file="e.ft2"
-    )
+    base = generate_2d_nus_script(exp2n, in_file="e.fid", nuslist="nuslist", out_file="e.ft2")
     assert "-neg" not in base
     forced = generate_2d_nus_script(
         exp2n,

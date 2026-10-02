@@ -28,8 +28,7 @@ def test_presets_single_source_all_registered() -> None:
 
     presets_dir = resource_path("presets")
     yaml_names = {
-        yaml.safe_load(p.read_text(encoding="utf-8"))["name"]
-        for p in presets_dir.glob("*.yaml")
+        yaml.safe_load(p.read_text(encoding="utf-8"))["name"] for p in presets_dir.glob("*.yaml")
     }
     names = {t.name for t in REGISTRY.values()}
     assert yaml_names <= names

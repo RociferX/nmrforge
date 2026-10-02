@@ -24,9 +24,9 @@ def test_every_test_file_is_registered(test_categories) -> None:
 def test_categories_are_valid_and_non_empty(test_categories) -> None:
     assert set(test_categories.CATEGORIES.values()) <= set(test_categories.CATEGORY_MARKERS)
     for category in test_categories.CATEGORY_MARKERS:
-        assert any(
-            value == category for value in test_categories.CATEGORIES.values()
-        ), f"没有任何 {category} 类测试"
+        assert any(value == category for value in test_categories.CATEGORIES.values()), (
+            f"没有任何 {category} 类测试"
+        )
 
 
 @pytest.mark.parametrize("category", ["unit", "integration", "regression"])

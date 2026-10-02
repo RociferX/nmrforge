@@ -73,16 +73,12 @@ def test_optimize_direct_window_noise_resolution_trend() -> None:
     res = optimize_direct_window(_synth_fid())
     fwhm_by_label = {s["label"]: s["fwhm"] for s in res.scores}
     none_fwhm = fwhm_by_label["无窗(线性)"]
-    sp_fwhms = [
-        v for k, v in fwhm_by_label.items() if k.startswith("SP ")
-    ]
+    sp_fwhms = [v for k, v in fwhm_by_label.items() if k.startswith("SP ")]
     assert sp_fwhms
     assert none_fwhm <= max(sp_fwhms) * 1.5
 
 
-def test_optimize_direct_window_from_work_missing_fid(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_optimize_direct_window_from_work_missing_fid(tmp_path: Path, bruker_dir: Path) -> None:
     """Skipped when the work directory has no converted .fid, without blocking the automatic
     path."""
     from core.data.bruker_reader import read_dataset
@@ -106,20 +102,16 @@ def test_window_line_explicit_none_and_render(
 
     assert _window_line({"type": "none"}) is None
     exp = read_dataset(bruker_dir / "nus_3d")
-    base = dict(in_file="e.fid", nuslist="nuslist", out_file="e.ft3",
-                nuslist_count=4)
+    base = dict(in_file="e.fid", nuslist="nuslist", out_file="e.ft3", nuslist_count=4)
     default = generate_3d_nus_script(exp, **base)
     assert "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5" in default
-    none_script = generate_3d_nus_script(
-        exp, window={"F3": {"type": "none"}}, **base
-    )
+    none_script = generate_3d_nus_script(exp, window={"F3": {"type": "none"}}, **base)
     # 0.2.199-patch11: the direct dimension keeps a fixed SP, type=none no longer makes step1
     # windowless
     assert "| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5" in none_script
     custom = generate_3d_nus_script(
         exp,
-        window={"F3": {"type": "sine_bell", "off": 0.30, "end": 0.98,
-                       "pow": 2, "c": 0.5}},
+        window={"F3": {"type": "sine_bell", "off": 0.30, "end": 0.98, "pow": 2, "c": 0.5}},
         **base,
     )
     assert "| nmrPipe -fn SP -off 0.3 -end 0.98 -pow 2 -c 0.5" in custom
@@ -131,10 +123,7 @@ def test_window_candidates_include_none() -> None:
     assert {"type": "none"} in DEFAULT_CANDIDATES
     assert {"type": "none"} in INDIRECT_CANDIDATES
     # The direct candidates keep the user's preferred 0.5-0.98 combination (0.2.189)
-    assert (
-        {"type": "sine_bell", "off": 0.50, "end": 0.98, "pow": 2, "c": 0.5}
-        in DEFAULT_CANDIDATES
-    )
+    assert {"type": "sine_bell", "off": 0.50, "end": 0.98, "pow": 2, "c": 0.5} in DEFAULT_CANDIDATES
 
 
 def test_indirect_windows_selects_none_for_decayed_fid() -> None:
@@ -175,9 +164,7 @@ def test_indirect_windows_picks_window_for_truncated_fid() -> None:
     assert res.per_axis["F1"].choice.get("type") != "none"
 
 
-def test_indirect_windows_missing_recon_skips(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_indirect_windows_missing_recon_skips(tmp_path: Path, bruker_dir: Path) -> None:
     """Indirect-dimension window optimisation is skipped when the work directory has no SMILE
     reconstructed plane, without blocking."""
     from core.data.bruker_reader import read_dataset
@@ -188,9 +175,7 @@ def test_indirect_windows_missing_recon_skips(
     assert any("跳过" in log for log in res.logs)
 
 
-def test_indirect_windows_missing_fid_skips(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_indirect_windows_missing_fid_skips(tmp_path: Path, bruker_dir: Path) -> None:
     """Uniform indirect-dimension window optimisation is skipped when the work directory has no
     converted fid, without blocking."""
     from core.data.bruker_reader import read_dataset

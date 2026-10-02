@@ -67,9 +67,7 @@ def _make_segment_container(tmp_path: Path, bruker_dir: Path, n: int = 2) -> Pat
     return container
 
 
-def test_import_segmented_container_single_entry(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_import_segmented_container_single_entry(tmp_path: Path, bruker_dir: Path) -> None:
     """Container import: several segments merge into one DataEntry (clearly distinct
     from a batch import of many entries)."""
     from workflow.import_workflow import import_segmented_dataset
@@ -86,17 +84,41 @@ def test_import_segmented_container_single_entry(
     raw_dir = manager.data_dir("exp_001", "d_001", "raw")
     assert (raw_dir / "segments" / "01" / "acqus").is_file()
     assert (raw_dir / "segments" / "02" / "acqus").is_file()
-    meta = json.loads(
-        manager.data_metadata_path("exp_001", "d_001").read_text(encoding="utf-8")
-    )
+    meta = json.loads(manager.data_metadata_path("exp_001", "d_001").read_text(encoding="utf-8"))
     assert len(meta["segments"]) == 2
     assert meta["segment_kind"] == "repeat_uniform"  # hsqc_2d traditional sampling
     assert "重复实验叠加" in meta["segment_kind_label"]
 
 
-def test_import_segmented_to_existing_experiment(
-    tmp_path: Path, bruker_dir: Path
+def test_segmented_kinetics_is_blocked_before_container_sampling_detection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    "Regression coverage: test segmented kinetics is blocked before container sampling detection."
+    from workflow.import_workflow import KineticsUnsupportedError, import_segmented_dataset
+
+    container = tmp_path / "segmented_kinetics"
+    for index in (1, 2):
+        segment = container / f"s{index:02d}"
+        segment.mkdir(parents=True)
+        (segment / "acqus").write_text(
+            "##$PULPROG= <XH2D_N_T1rho_180Hdec_top4.shex>\n##$VDLIST= <NCP_15NT1rho>\n",
+            encoding="utf-8",
+        )
+
+    def _must_not_read(_path: Path) -> None:
+        raise AssertionError("container sampling detection must not run for kinetics data")
+
+    monkeypatch.setattr("core.data.bruker_reader.read_dataset_container", _must_not_read)
+    manager = ProjectManager.create_project(tmp_path / "proj_kinetics", "demo")
+
+    with pytest.raises(KineticsUnsupportedError, match="不支持导入"):
+        import_segmented_dataset(manager, container, title="T1rho")
+
+    assert manager.project is not None
+    assert manager.project.experiments == []
+
+
+def test_import_segmented_to_existing_experiment(tmp_path: Path, bruker_dir: Path) -> None:
     """G2B-011: with exp_id given, import into the current experiment type, no new type."""
     from workflow.import_workflow import import_segmented_dataset
 
@@ -112,9 +134,7 @@ def test_import_segmented_to_existing_experiment(
     assert len(updated.data[0].segments) == 2
 
 
-def test_import_segmented_invalid_exp_id_raises(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_import_segmented_invalid_exp_id_raises(tmp_path: Path, bruker_dir: Path) -> None:
     """G2B-011: an invalid exp_id raises; nothing new is created."""
     from workflow.import_workflow import ImportWorkflowError, import_segmented_dataset
 
@@ -125,9 +145,7 @@ def test_import_segmented_invalid_exp_id_raises(
     assert manager.project is not None and len(manager.project.experiments) == 0
 
 
-def test_import_container_rejected_unless_segmented(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_import_container_rejected_unless_segmented(tmp_path: Path, bruker_dir: Path) -> None:
     """A container directory is not a single Bruker dataset: plain import must report
     an error instead of guessing segments/batch."""
     from workflow.import_workflow import ImportWorkflowError, import_data
@@ -137,6 +155,79 @@ def test_import_container_rejected_unless_segmented(
     container = _make_segment_container(tmp_path, bruker_dir)
     with pytest.raises(ImportWorkflowError):
         import_data(manager, entry.id, container)
+
+
+def test_import_rejects_3d_nus_without_schedule_before_registration(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    "Regression coverage: test import rejects 3d nus without schedule before registration."
+    src = tmp_path / "three_d_nus_without_schedule"
+    shutil.copytree(bruker_dir / "nus_3d", src)
+    (src / "nuslist").unlink()
+    manager = ProjectManager.create_project(tmp_path / "proj_missing_schedule", "demo")
+    entry = manager.create_experiment(title="HNCO")
+
+    with pytest.raises(ImportWorkflowError):
+        import_data(manager, entry.id, src)
+
+    assert entry.data == []
+    assert not manager.data_dir(entry.id, "d_001", "raw").exists()
+
+
+def test_import_wrapper_rolls_back_empty_experiment_for_missing_3d_schedule(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    "Regression coverage: test import wrapper rolls back empty experiment for missing 3d schedule."
+    src = tmp_path / "three_d_nus_without_schedule"
+    shutil.copytree(bruker_dir / "nus_3d", src)
+    (src / "nuslist").unlink()
+    manager = ProjectManager.create_project(tmp_path / "proj_missing_schedule", "demo")
+
+    with pytest.raises(ImportWorkflowError):
+        import_bruker_dataset(manager, src, title="HNCO")
+
+    assert manager.project is not None
+    assert manager.project.experiments == []
+
+
+def test_import_rejects_2d_nus_without_schedule_even_at_100_percent(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    "Regression coverage: test import rejects 2d nus without schedule even at 100 percent."
+    src = tmp_path / "two_d_nus_without_schedule"
+    shutil.copytree(bruker_dir / "nus_2d", src)
+    (src / "nuslist").unlink()
+    with (src / "acqus").open("a", encoding="utf-8") as handle:
+        handle.write("##$FnTYPE= 2\n##$NusAMOUNT= 100\n")
+    manager = ProjectManager.create_project(tmp_path / "proj_missing_2d_schedule", "demo")
+    entry = manager.create_experiment(title="HSQC")
+
+    with pytest.raises(ImportWorkflowError):
+        import_data(manager, entry.id, src)
+
+    assert entry.data == []
+    assert not manager.data_dir(entry.id, "d_001", "raw").exists()
+
+
+def test_import_rejects_segmented_nus_when_any_segment_lacks_schedule(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    "Regression coverage: test import rejects segmented nus when any segment lacks schedule."
+    from workflow.import_workflow import ImportWorkflowError, import_segmented_dataset
+
+    container = tmp_path / "segmented_nus_missing_schedule"
+    shutil.copytree(bruker_dir / "nus_2d", container / "s01")
+    shutil.copytree(bruker_dir / "nus_2d", container / "s02")
+    (container / "s02" / "nuslist").unlink()
+    manager = ProjectManager.create_project(tmp_path / "proj_segmented_missing", "demo")
+
+    with pytest.raises(ImportWorkflowError):
+        import_segmented_dataset(manager, container, title="segmented NUS")
+
+    assert manager.project is not None
+    assert manager.project.experiments == []
+
+
 def test_import_links_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     result = import_bruker_dataset(manager, _source(bruker_dir), title="HSQC")
@@ -206,9 +297,7 @@ def test_import_links_and_registers(tmp_path: Path, bruker_dir: Path) -> None:
     assert reopened.project.run(result.run_id) is not None
 
 
-def test_import_data_into_existing_experiment(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_import_data_into_existing_experiment(tmp_path: Path, bruker_dir: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment(title="骨架")
     assert entry.status == ExperimentStatus.REGISTERED.value
@@ -259,9 +348,7 @@ def test_import_no_copy_references_source(tmp_path: Path, bruker_dir: Path) -> N
     assert manager.project.run(result.run_id).status == "success"
 
 
-def test_import_source_inside_project_skips_copy(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_import_source_inside_project_skips_copy(tmp_path: Path, bruker_dir: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     in_project_src = tmp_path / "proj" / "data_src"
     shutil.copytree(_source(bruker_dir), in_project_src)
@@ -279,9 +366,7 @@ def test_import_source_inside_project_skips_copy(
 def test_import_segments_are_linked(tmp_path: Path, bruker_dir: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     segment = bruker_dir / "nus_2d"
-    result = import_bruker_dataset(
-        manager, _source(bruker_dir), segments=[segment]
-    )
+    result = import_bruker_dataset(manager, _source(bruker_dir), segments=[segment])
     assert manager.project is not None
     entry = manager.project.experiment("exp_001")
     assert entry is not None
@@ -324,9 +409,7 @@ def test_import_failure_rolls_back(
     def _boom(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("metadata 写盘失败")
 
-    monkeypatch.setattr(
-        "workflow.import_workflow.atomic_write_json", _boom
-    )
+    monkeypatch.setattr("workflow.import_workflow.atomic_write_json", _boom)
     with pytest.raises(RuntimeError, match="写盘失败"):
         import_bruker_dataset(manager, _source(bruker_dir))
 
@@ -349,18 +432,14 @@ def test_import_data_failure_keeps_experiment(
     def _boom(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("metadata 写盘失败")
 
-    monkeypatch.setattr(
-        "workflow.import_workflow.atomic_write_json", _boom
-    )
+    monkeypatch.setattr("workflow.import_workflow.atomic_write_json", _boom)
     with pytest.raises(RuntimeError, match="写盘失败"):
         import_data(manager, entry.id, _source(bruker_dir))
     assert manager.project.experiment(entry.id) is entry
     assert entry.data == []
 
 
-def test_import_twice_creates_separate_entries(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_import_twice_creates_separate_entries(tmp_path: Path, bruker_dir: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     first = import_bruker_dataset(manager, _source(bruker_dir))
     second = import_bruker_dataset(manager, _source(bruker_dir))
@@ -372,9 +451,7 @@ def test_import_twice_creates_separate_entries(
     assert manager.data_dir("exp_002", "d_001", "raw").is_dir()
 
 
-def test_nus_import_records_nuslist_checksum(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_nus_import_records_nuslist_checksum(tmp_path: Path, bruker_dir: Path) -> None:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     result = import_bruker_dataset(manager, bruker_dir / "nus_2d")
     assert "nuslist" in result.checksums
@@ -384,9 +461,30 @@ def test_nus_import_records_nuslist_checksum(
     assert run.inputs.get("sha256:nuslist") == result.checksums["nuslist"]
 
 
-def test_import_writable_raw_names_copied_not_linked(
+def test_nus_import_records_explicit_schedule_checksum_and_metadata(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
+    "Regression coverage: test nus import records explicit schedule checksum and metadata."
+    src = tmp_path / "named_schedule"
+    shutil.copytree(bruker_dir / "nus_2d", src)
+    (src / "nuslist").replace(src / "CANH")
+    with (src / "acqus").open("a", encoding="utf-8") as handle:
+        handle.write("##$NUSLIST= <CANH>\n")
+    manager = ProjectManager.create_project(tmp_path / "proj_named", "demo")
+
+    result = import_bruker_dataset(manager, src)
+    metadata = json.loads(result.metadata_path.read_text(encoding="utf-8"))
+    run = manager.project.run(result.run_id)
+
+    assert "CANH" in result.checksums
+    assert run is not None
+    assert run.inputs["sha256:CANH"] == result.checksums["CANH"]
+    assert metadata["dataset"]["sampling"]["schedule_file"] == "CANH"
+    assert metadata["dataset"]["sampling"]["schedule_source"]
+    assert metadata["dataset"]["sampling"]["evidence"]
+
+
+def test_import_writable_raw_names_copied_not_linked(tmp_path: Path, bruker_dir: Path) -> None:
     """fid.com/profY.dat/profYZ.dat are backend-writable/touched files: copied for
     real, not linked, so edits do not pollute the source."""
     src = tmp_path / "src_with_fid"
@@ -420,15 +518,10 @@ def test_import_writable_raw_names_copied_not_linked(
     run = manager.project.run(result.run_id)
     assert run is not None
     assert run.params["link_stats"]["writable"] == 3
-    assert (
-        run.params["link_stats"]["symlink"] > 0
-        or run.params["link_stats"]["hardlink"] > 0
-    )
+    assert run.params["link_stats"]["symlink"] > 0 or run.params["link_stats"]["hardlink"] > 0
 
 
-def test_import_records_link_stats(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_import_records_link_stats(tmp_path: Path, bruker_dir: Path) -> None:
     """WorkflowRun params record link_stats (hard link/symlink/copy/writable)."""
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     result = import_bruker_dataset(manager, _source(bruker_dir))
@@ -470,9 +563,7 @@ def test_user_experiment_type_write_failure_keeps_traceback(tmp_path, monkeypatc
     assert record.exc_info[0] is PermissionError
 
 
-def test_import_warns_about_a_stale_indirect_sweep_width(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_import_warns_about_a_stale_indirect_sweep_width(tmp_path: Path, bruker_dir: Path) -> None:
     """Report the sweep-width decision already at import time (when acqus SW_h
     contradicts SW×SFO1)."""
     src = tmp_path / "stale_sw"
@@ -493,3 +584,71 @@ def test_import_warns_about_a_stale_indirect_sweep_width(
     manager2 = ProjectManager.create_project(tmp_path / "proj_ok", "demo")
     clean = import_bruker_dataset(manager2, _source(bruker_dir))
     assert _other_warnings(clean.warnings, _source(bruker_dir)) == []
+
+
+def _label(key: str) -> str:
+    "Regression coverage:  label."
+    from ui_support.i18n import tr
+
+    return tr(key).split("{")[0]
+
+
+def test_import_streams_stage_lines_before_completion(tmp_path: Path, bruker_dir: Path) -> None:
+    "Regression coverage: test import streams stage lines before completion."
+    manager = ProjectManager.create_project(tmp_path / "proj_progress", "demo")
+    source = tmp_path / "with_ser"
+    shutil.copytree(_source(bruker_dir), source)
+    (source / "ser").write_bytes(b"\x00" * 4096)
+    metadata_path = manager.data_metadata_path("exp_001", "d_001")
+    seen: list[tuple[str, bool]] = []
+
+    def on_progress(message: str) -> None:
+        seen.append((message, metadata_path.is_file()))
+
+    result = import_bruker_dataset(manager, source, title="HSQC", progress=on_progress)
+    lines = [message for message, _ in seen]
+
+    assert lines[0].startswith(_label("== import start: {p0} → {p1} =="))
+    assert lines[-1].startswith(_label("== import completed: {p0} ({p1} file(s), {p2}) =="))
+    assert result.data_id in lines[-1]
+
+    middle = lines[1:-1]
+    assert len(middle) >= 2
+    for key in (
+        "◆ parameters: {p0}",
+        "◆ data: {p0} {p1}",
+        "◆ raw: {p0} file(s) → {p1} ({p2})",
+        "◆ fingerprints: {p0} key file(s), manifest {p1} file(s) / {p2}",
+        "◆ import record: {p0} (run {p1})",
+    ):
+        assert any(line.startswith(_label(key)) for line in middle), key
+
+    raw_prefix = _label("◆ raw: {p0} file(s) → {p1} ({p2})")
+    raw_index = next(i for i, line in enumerate(lines) if line.startswith(raw_prefix))
+    record_index = next(
+        i
+        for i, line in enumerate(lines)
+        if line.startswith(_label("◆ import record: {p0} (run {p1})"))
+    )
+    assert record_index > raw_index
+    assert seen[raw_index][1] is False
+    assert seen[record_index][1] is True
+    assert seen[-1][1] is True
+
+
+def test_segmented_import_reports_segment_count(tmp_path: Path, bruker_dir: Path) -> None:
+    "Regression coverage: test segmented import reports segment count."
+    from ui_support.i18n import tr
+    from workflow.import_workflow import import_segmented_dataset
+
+    manager = ProjectManager.create_project(tmp_path / "proj_seg_progress", "demo")
+    container = _make_segment_container(tmp_path, bruker_dir)
+    lines: list[str] = []
+    result = import_segmented_dataset(manager, container, title="seg", progress=lines.append)
+
+    assert lines[0].startswith(_label("== import start: {p0} → {p1} =="))
+    segments_line = next(line for line in lines if line.startswith(_label("◆ segments: {p0}")))
+    assert "2" in segments_line
+    assert tr("Repeat-experiment overlay (uniform, identical parameters)") in segments_line
+    assert lines[-1].startswith(_label("== import completed: {p0} ({p1} file(s), {p2}) =="))
+    assert result.data_id in lines[-1]

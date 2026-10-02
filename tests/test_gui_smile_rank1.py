@@ -28,9 +28,7 @@ def _manager(tmp_path: Path):
     return manager, exp, data
 
 
-def test_rank1_button_visible_only_after_success(
-    tmp_path: Path, qapp: QApplication
-) -> None:
+def test_rank1_button_visible_only_after_success(tmp_path: Path, qapp: QApplication) -> None:
     """The "Rerun by Rank1" button appears only after the SMILE step succeeds (plan B:
     optimisation does not emit a spectrum automatically)."""
     from qtcompat.QtWidgets import QWidget
@@ -59,6 +57,7 @@ def test_rerun_rank1_requires_script(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="Rank1"):
         controller.rerun_smile_rank1(exp.id, data.id)
 
+
 def test_rerun_rank1_refreshes_companions_and_provenance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -79,9 +78,7 @@ def test_rerun_rank1_refreshes_companions_and_provenance(
         json.dumps({"rows": [{"rank": 1, "nsigma": 3.0, "thresh": 0.5}]}),
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        controller, "_read_experiment", lambda *args: SimpleNamespace(ndim=2)
-    )
+    monkeypatch.setattr(controller, "_read_experiment", lambda *args: SimpleNamespace(ndim=2))
 
     class _Runtime:
         def run(self, argv, *, cwd, timeout):
@@ -125,6 +122,7 @@ def test_rank1_run_ref_is_a_spectrum_run() -> None:
 
     assert "smile_optimize_rank1" in STEP_RUN_REFS["spectrum"]
 
+
 def test_rerun_rank1_failure_keeps_failed_run_and_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -137,9 +135,7 @@ def test_rerun_rank1_failure_keeps_failed_run_and_snapshot(
     process.mkdir(parents=True, exist_ok=True)
     script = process / f"{data.id}_nus_rank1.com"
     script.write_text("#!/bin/csh\nexit 1\n", encoding="utf-8")
-    monkeypatch.setattr(
-        controller, "_read_experiment", lambda *args: SimpleNamespace(ndim=2)
-    )
+    monkeypatch.setattr(controller, "_read_experiment", lambda *args: SimpleNamespace(ndim=2))
 
     class _Runtime:
         def run(self, argv, *, cwd, timeout):

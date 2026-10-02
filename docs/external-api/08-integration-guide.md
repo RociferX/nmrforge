@@ -8,12 +8,12 @@ products according to the following contract.
 
 | What to read for your analysis | |
 | --- | --- |
-| Peak position of each parameter combination (two algorithms) | `study/records/peak_table_parabolic.csv` / `peak_table_gaussian.csv` (long table), or workflow by workflow `study/workflows/<id>/<condition>/peak_table_*.csv` |
+| Peak position of each parameter combination | `study/records/peak_table_parabolic.csv` (long table), or workflow by workflow `study/workflows/<id>/<condition>/peak_table_parabolic.csv` |
 | Peak identity | Reference peak table: `reference_peak_id`(R0001...); **The matching of the combined peak table is on your side** (In the combined mode, peaks are selected independently, `reference_peak_id`/`assignment` in the table are left blank, and `H_ppm`/`N_ppm` are used for matching) |
 | condition A/B | `condition` / `dataset` column (or group by directory / condition) |
 | parameter with automatic parameter actual value | `workflows/<id>/workflow.json` with `runs.json` of `parameters_requested`/`parameters_used`/`parameters_resolved` |
 | Availability of peaks | `SNR`, `fit_success`, `boundary_hit`, `fallback` (the combined mode peak table only contains detected peaks; the reference peak table also contains the reserved rows of `detected=false`) |
-| Reference | `records/manifest.json` of `references`(script /Spectrum/Two peak table hashes) and `peak_identity` |
+| Reference | `records/manifest.json` of `references` (script/spectrum/peak-table hashes) and `peak_identity` |
 | Recalculation and citation | script / spectrum SHA-256, `grid_sha256`, `versions`, complete `log.txt` |
 
 ## 8.2 Minimum read example (read only, not calculated)
@@ -24,12 +24,8 @@ from pathlib import Path
 
 records = Path("~/studies/hsqc_params/study/records").expanduser()
 
-def load(method: str) -> list[dict]:
-    with (records / f"peak_table_{method}.csv").open(encoding="utf-8") as fh:
-        return list(csv.DictReader(fh))
-
-parabolic = load("parabolic")      # columns: workflow_id, condition, peak_id,
-gaussian = load("gaussian")        #     reference_peak_id, H_ppm, N_ppm, intensity, ...
+with (records / "peak_table_parabolic.csv").open(encoding="utf-8") as fh:
+    parabolic = list(csv.DictReader(fh))  # workflow_id, condition, peak_id, H_ppm, N_ppm, ...
 
 # example: take every combination's peak positions for condition A (combination mode: the peak table only holds detected peaks)
 values = [
@@ -50,9 +46,8 @@ print(len(values), values[:3])
 1. **Peak Alignment**: Peak table in combined mode **None** `reference_peak_id` (independent peak selection) -- Press.
    The `H_ppm`/`N_ppm` tolerance matches the peaks of each combination back to `reference_peak_id` of the reference peak table.
    (or your own designation), and clearly record the matching tolerance, unmatched peaks and number of peaks;
-2. **Algorithm selection**: parabolic and gaussian are two sets of independent observations; when comparing the differences between the two.
-   The Gaussian side should exclude `fit_success=false` (or treat them as missing).
-   And retain `fallback_reason` as an audit trail;
+2. **Localization**: the supported method is three-point parabolic localization. Treat legacy
+   Gaussian tables as historical outputs and keep them separate from current records;
 3. **weight/Missing**: When a certain combination does not match a certain reference peak **Do not delete silently** -- Clearly mark it in the analysis.
    (The missing mechanism may be related to the scanned parameter; the `detected=false` row in the reference peak table is also retained);
 4. **Recalculable**: Attached to the analysis product are the script/spectral hashes in `records/manifest.json` and.

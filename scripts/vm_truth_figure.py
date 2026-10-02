@@ -222,18 +222,49 @@ def _draw_spectrum(
             else:
                 missing.append(point)
         if tight:
-            ax.plot([p[0] for p in tight], [p[1] for p in tight], "o", ms=4.2,
-                    mfc="#e53e3e", mec="white", mew=0.4, label="deposited peak, tight match")
+            ax.plot(
+                [p[0] for p in tight],
+                [p[1] for p in tight],
+                "o",
+                ms=4.2,
+                mfc="#e53e3e",
+                mec="white",
+                mew=0.4,
+                label="deposited peak, tight match",
+            )
         if loose:
-            ax.plot([p[0] for p in loose], [p[1] for p in loose], "o", ms=4.6,
-                    mfc="#dd6b20", mec="white", mew=0.4, label="deposited peak, loose match only")
+            ax.plot(
+                [p[0] for p in loose],
+                [p[1] for p in loose],
+                "o",
+                ms=4.6,
+                mfc="#dd6b20",
+                mec="white",
+                mew=0.4,
+                label="deposited peak, loose match only",
+            )
         if coarse:
-            ax.plot([p[0] for p in coarse], [p[1] for p in coarse], "o", ms=4.6,
-                    mfc="#718096", mec="white", mew=0.4,
-                    label="deposited peak, coarse match only")
+            ax.plot(
+                [p[0] for p in coarse],
+                [p[1] for p in coarse],
+                "o",
+                ms=4.6,
+                mfc="#718096",
+                mec="white",
+                mew=0.4,
+                label="deposited peak, coarse match only",
+            )
         if missing:
-            ax.plot([p[0] for p in missing], [p[1] for p in missing], "s", ms=5.0,
-                    mfc="none", mec="#1a202c", mew=0.9, label="deposited peak, not detected")
+            ax.plot(
+                [p[0] for p in missing],
+                [p[1] for p in missing],
+                "s",
+                ms=5.0,
+                mfc="none",
+                mec="#1a202c",
+                mew=0.9,
+                label="deposited peak, not detected",
+            )
     ax.set_xlim(10.5, 6.5)
     ax.set_ylim(144.0, 92.0)
     ax.set_xlabel("1H (ppm)")
@@ -384,8 +415,10 @@ def main(argv: list[str] | None = None) -> int:
         label, spectrum, expected, matches, report = parts
         spec = _load_spectrum(Path(spectrum))
         report_json = json.loads(Path(report).read_text(encoding="utf-8"))
-        offset = (report_json["thresholds"][0]["evaluation"]["calibration"]["dH"],
-                  report_json["thresholds"][0]["evaluation"]["calibration"]["dN"])
+        offset = (
+            report_json["thresholds"][0]["evaluation"]["calibration"]["dH"],
+            report_json["thresholds"][0]["evaluation"]["calibration"]["dN"],
+        )
         cases.append(
             {
                 "label": label,
@@ -399,10 +432,16 @@ def main(argv: list[str] | None = None) -> int:
 
     fig, axes = plt.subplots(2, 2, figsize=(10.5, 9.0))
     for ax, case in zip(axes[0], cases):
-        _draw_spectrum(ax, case["spec"], case["expected"], case["matches"], case["offset"],
-                       f"{case['label']} - automatic processing, peaks vs published shifts")
+        _draw_spectrum(
+            ax,
+            case["spec"],
+            case["expected"],
+            case["matches"],
+            case["offset"],
+            f"{case['label']} - automatic processing, peaks vs published shifts",
+        )
     # With a single case, switch off the leftover top-row axes instead of leaving empty panels.
-    for ax in list(axes[0])[len(cases):]:
+    for ax in list(axes[0])[len(cases) :]:
         ax.axis("off")
 
     ax = axes[1][0]
@@ -428,17 +467,39 @@ def main(argv: list[str] | None = None) -> int:
             if coarse_hit.get("status") == "matched" and coarse_hit.get("dH") not in (None, ""):
                 ch.append(float(coarse_hit["dH"]))
                 cn.append(float(coarse_hit["dN"]))
-        ax.plot(dh, dn, "o", ms=3.0, alpha=0.75, color=colour,
-                label=f"{case['label']} tight match (n={len(dh)})")
+        ax.plot(
+            dh,
+            dn,
+            "o",
+            ms=3.0,
+            alpha=0.75,
+            color=colour,
+            label=f"{case['label']} tight match (n={len(dh)})",
+        )
         if lh:
             # Open circles = peaks outside the tight tier but inside the loose one: just outside
             # the box.
-            ax.plot(lh, ln, "o", ms=3.6, alpha=0.9, mfc="none", mec=colour,
-                    label=f"{case['label']} loose match only (n={len(lh)})")
+            ax.plot(
+                lh,
+                ln,
+                "o",
+                ms=3.6,
+                alpha=0.9,
+                mfc="none",
+                mec=colour,
+                label=f"{case['label']} loose match only (n={len(lh)})",
+            )
         if ch:
             # Crosses = peaks that needed the coarse tier as well: a larger shift.
-            ax.plot(ch, cn, "x", ms=4.2, alpha=0.9, color="#718096",
-                    label=f"{case['label']} coarse match only (n={len(ch)})")
+            ax.plot(
+                ch,
+                cn,
+                "x",
+                ms=4.2,
+                alpha=0.9,
+                color="#718096",
+                label=f"{case['label']} coarse match only (n={len(ch)})",
+            )
     ax.axvline(0.01, color="grey", ls="--", lw=0.7)
     ax.axvline(-0.01, color="grey", ls="--", lw=0.7)
     ax.axhline(0.05, color="grey", ls="--", lw=0.7)
@@ -460,10 +521,21 @@ def main(argv: list[str] | None = None) -> int:
         rates = [100.0 * float(level["calibrated"]["recall"]) for level in levels]
         chance = [100.0 * float(level["chance_per_peak_decoy"]["mean"]) for level in levels]
         xs = np.arange(len(levels)) + (index - 0.5) * width
-        ax.bar(xs, rates, width=width, color=("#e53e3e" if index == 0 else "#2b6cb0"),
-               label=f"{case['label']} recovery")
-        ax.bar(xs, chance, width=width * 0.55, color="#4a5568", alpha=0.75,
-               label=f"{case['label']} chance (per-peak decoy)")
+        ax.bar(
+            xs,
+            rates,
+            width=width,
+            color=("#e53e3e" if index == 0 else "#2b6cb0"),
+            label=f"{case['label']} recovery",
+        )
+        ax.bar(
+            xs,
+            chance,
+            width=width * 0.55,
+            color="#4a5568",
+            alpha=0.75,
+            label=f"{case['label']} chance (per-peak decoy)",
+        )
         ax.set_xticks(np.arange(len(levels)))
         ax.set_xticklabels([f"{level['tol_h']}/{level['tol_n']}" for level in levels], fontsize=8)
     ax.set_xlabel("tolerance 1H / 15N (ppm)")
@@ -490,17 +562,28 @@ def main(argv: list[str] | None = None) -> int:
             elif args.align == "envelope-theirs":
                 shift_theirs += envelope
             _draw_spectrum(
-                axes2[row][0], case["spec"], case["expected"], case["matches"], case["offset"],
+                axes2[row][0],
+                case["spec"],
+                case["expected"],
+                case["matches"],
+                case["offset"],
                 f"{case['label']} - automatic processing (this software)"
                 + (f" [15N shifted by {shift:+.2f} ppm for inspection]" if shift else ""),
                 shift_n=shift,
                 show_peaks=False,
             )
             _draw_spectrum(
-                axes2[row][1], theirs, case["expected"], case["matches"], case["offset"],
+                axes2[row][1],
+                theirs,
+                case["expected"],
+                case["matches"],
+                case["offset"],
                 f"{case['label']} - processed spectrum shipped with the data (pdata/1)"
-                + (f" [15N shifted by {shift_theirs:+.2f} ppm for inspection]"
-                   if shift_theirs else ""),
+                + (
+                    f" [15N shifted by {shift_theirs:+.2f} ppm for inspection]"
+                    if shift_theirs
+                    else ""
+                ),
                 shift_n=shift_theirs,
                 show_peaks=False,
             )

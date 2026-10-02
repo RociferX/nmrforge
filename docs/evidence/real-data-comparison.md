@@ -1,10 +1,15 @@
 # Real-data evidence (public data)
 
+> Historical measurement snapshot: every figure and number on this page comes from the run dated
+> 2026-09-22. It is not a revalidation of the current source tree. The localisation and edge-screening
+> descriptions below explain that snapshot's methods; current behaviour is described in
+> [Peak picking](../peak-picking.md), [Processing model](../processing-model.md) and
+> [QC system](../qc-system.md). The recorded evidence values have not been recalculated.
+
 This page uses **one public data set only**: the raw Bruker data `15n-hsqc` from BMRB timedomain entry
-**53374** - the C-terminal domain of the rabies virus P protein (CVS-11 strain). The raw data are
-publicly downloadable, so **anyone can recompute these numbers from the same input**; the expected
-peak positions come from the **backbone amide chemical shifts deposited with that entry** (the expected
-peak table itself is not committed - only its sha256).
+**53374** - the C-terminal domain of the rabies virus P protein (CVS-11 strain). The expected peak
+positions came from the **backbone amide chemical shifts deposited with that entry**. The numbers
+below document that historical run; this page does not provide a current-source reproduction recipe.
 
 ## 1. Spectrum comparison: automatic processing vs **the processed spectrum shipped with the data**
 
@@ -156,9 +161,8 @@ edges brings such peaks back.
 - **The 218 unmatched detections are not errors**: the deposited assignment covers backbone amides
   only, while the detection list also contains unassigned peaks, side-chain NH2 groups and weak maxima
   near the threshold. They are **not false peaks** and they **do not enter any recovery**.
-- Convention and scripts: matching and statistics live in `workflow/truth_benchmark.py`, the machine
-  run is `scripts/vm_truth_benchmark.py`, and the figures come from `scripts/vm_truth_figure.py`
-  (both figures come from that one script); the reproduction commands are in section 5.
+- Matching and statistics followed a one-to-one assignment against the deposited shifts. This
+  describes the historical snapshot, not a current-source validation.
 
 ## 3. QC scores (this data set)
 
@@ -206,32 +210,12 @@ only two things change**: (1) the direct-dimension window, `SP -off 0.45 -end 0.
 indirect window, zero filling, phase and the 1H window are unchanged.
 
 
-## 5. Repeatability and reproduction commands
+## 5. Repeatability and provenance
 
-```bash
-# repeatability / timing (3 independent repeats per data set, each with a fresh study root)
-python scripts/vm_realdata_report.py \
-    --dataset <Bruker dataset directory> --tag "Rabies P CTD (CVS-11)" --root <scratch root> --repeats 3
-
-# truth benchmark (section 2; aggregate numbers plus a per-peak match CSV, one block per tier)
-nmrforge/bin/python scripts/vm_truth_benchmark.py \
-    --dataset <Bruker dataset directory> --expected <expected peak CSV> --tag "Rabies P CTD (CVS-11)" \
-    --root <scratch root> --thresholds 12 --json <report JSON> --matches <match CSV>
-
-# both figures of section 1 (--pdata gives the shipped processed-spectrum directory, same order as
-# --case)
-nmrforge/bin/python scripts/vm_truth_figure.py \
-    --case "<tag>,<spectrum.ft2>,<expected CSV>,<match CSV>,<report JSON>" \
-    --pdata <pdata/1 directory> \
-    --out docs/evidence/truth_recovery_2026-09-22.png \
-    --compare-out docs/evidence/spectrum-compare_2026-09-22.png
-
-# QC scores (section 3): score any spectrum under the same convention; --h-window is the window of
-# the comparison figure
-nmrforge/bin/python scripts/vm_qc_score.py \
-    --spectrum <automatic spectrum.ft2 or the shipped pdata/1 directory> --label "<tag>" \
-    --h-window 6.5,10.5
-```
+The following table is the recorded result of three independent repeats from the dated snapshot.
+Its values are retained as historical evidence and have not been regenerated against the current
+source tree. Per-run files and the scripts used for that historical run are not part of this public
+documentation snapshot.
 
 | | Rabies virus P protein C-terminal domain (CVS-11 strain) |
 | --- | --- |
@@ -274,13 +258,5 @@ installed.
   business and has nothing to do with this software.
 - The software's own boundary: processing and records stay self-consistent, and it does not draw
   scientific conclusions for you.
-- **Further validation that cannot be published (maintainer statement)**: besides the public data set on
-  this page, the maintainer has validated the automatic processing on **a dozen or so data sets that
-  cannot be made public yet**, all reaching optimisation results comparable to manual processing. Those
-  runs are not part of this repository, so that paragraph is a maintainer statement that cannot be
-  recomputed from the snapshot alone; what can be recomputed are the numbers in sections 1-5
-  (`scripts/vm_truth_benchmark.py` + `scripts/vm_truth_figure.py` plus the published input hashes).
-- **Validation on more data types is being prepared for release**: 3D spectra, other experiment
-  types and sampling schemes (and processed spectra from more sources) are being written up and will
-  be added here in the same shape as this page - public data plus the scripts that reproduce the
-  numbers.
+- The evidence on this page is limited to the stated public data set and date. It does not establish
+  performance on other data sets, experiment types, sampling schemes, or current source revisions.

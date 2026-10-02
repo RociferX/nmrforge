@@ -20,12 +20,18 @@ def test_save_load_roundtrip(tmp_path: Path) -> None:
     path = tmp_path / "peaks.list"
     peaks = [
         {
-            "Peak_ID": 1, "H_shift": 8.464, "N_shift": 118.5,
-            "Intensity": 500.0, "label": "H1",
+            "Peak_ID": 1,
+            "H_shift": 8.464,
+            "N_shift": 118.5,
+            "Intensity": 500.0,
+            "label": "H1",
         },
         {
-            "Peak_ID": 2, "H_shift": 7.2, "N_shift": 120.1,
-            "Intensity": 350.0, "label": "",
+            "Peak_ID": 2,
+            "H_shift": 7.2,
+            "N_shift": 120.1,
+            "Intensity": 350.0,
+            "label": "",
         },
     ]
     save_peaks(path, peaks)
@@ -66,6 +72,25 @@ def test_save_peaks_auto_detect_3d(tmp_path: Path) -> None:
     assert first == "Assignment w1 w2 w3 Data Height Volume"
     loaded = load_peaks(path)
     assert loaded[0]["F3_shift"] == 8.5
+
+
+def test_save_empty_peaks_preserves_3d_from_nuclei(tmp_path: Path) -> None:
+    path = tmp_path / "empty3d.list"
+    save_peaks(path, [], nuclei=["15N", "1H", "13C"])
+    assert path.read_text(encoding="utf-8").splitlines() == [
+        "Assignment w1 w2 w3 Data Height Volume"
+    ]
+
+
+def test_save_empty_peaks_defaults_to_2d_and_validates_ndim(tmp_path: Path) -> None:
+    path = tmp_path / "empty2d.list"
+    save_peaks(path, [])
+    assert path.read_text(encoding="utf-8").splitlines() == ["Assignment w1 w2 Data Height Volume"]
+
+    import pytest
+
+    with pytest.raises(ValueError, match="ndim must be 2 or 3"):
+        save_peaks(tmp_path / "invalid.list", [], ndim=4)
 
 
 def test_export_poky_2d_format(tmp_path: Path) -> None:
@@ -174,7 +199,7 @@ def test_pick_peaks_columns_match_poky(tmp_path: Path) -> None:
     _write_ft2(ft2, spec)
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment()
-    data = manager.import_data(entry.id, "/sampleD")
+    data = manager.import_data(entry.id, "/data/1")
     manager.set_data_spectrum(entry.id, data.id, str(ft2))
     result = pick_peaks(manager, entry.id, data.id)
     assert Path(result["peak_path"]).suffix == ".list"
@@ -204,10 +229,10 @@ def test_save_peaks_extra_columns_ignored_in_list(tmp_path: Path) -> None:
 
 def test_normalize_poky_label() -> None:
     """0.2.199-patch29co: Poky assignments are segmented by dimension (2D two, 3D three)."""
-    assert normalize_poky_label("g1h-g1n") == "G1H-G1N"            # 2D
+    assert normalize_poky_label("g1h-g1n") == "G1H-G1N"  # 2D
     assert normalize_poky_label("c16h-k15cb-c16n", ndim=3) == "C16H-K15CB-C16N"
     assert normalize_poky_label("v32ca-k31h-v32n", ndim=3) == "V32CA-K31H-V32N"
-    assert normalize_poky_label("g1h-?") == "G1H-?"                # partly unassigned
+    assert normalize_poky_label("g1h-?") == "G1H-?"  # partly unassigned
     assert normalize_poky_label("?-?") == "?-?"
     assert normalize_poky_label("?-?-?", ndim=3) == "?-?-?"
     assert normalize_poky_label("") == ""
@@ -216,15 +241,16 @@ def test_normalize_poky_label() -> None:
 
 def test_poky_label_is_valid() -> None:
     """0.2.199-patch29co: only valid when the segment count matches the dimension."""
-    assert poky_label_is_valid("G1H-G1N")               # 2D, two segments
+    assert poky_label_is_valid("G1H-G1N")  # 2D, two segments
     assert poky_label_is_valid("G1H-?")
     assert poky_label_is_valid("?-?")
-    assert not poky_label_is_valid("G1H")               # 2D with a single segment
+    assert not poky_label_is_valid("G1H")  # 2D with a single segment
     assert poky_label_is_valid("G1H-G1N-G1CA", ndim=3)  # 3D, three segments
-    assert not poky_label_is_valid("G1H-G1N", ndim=3)   # 3D with only two segments
+    assert not poky_label_is_valid("G1H-G1N", ndim=3)  # 3D with only two segments
     assert poky_label_is_valid("?-?-?", ndim=3)
     assert not poky_label_is_valid("xyz")
     assert not poky_label_is_valid("1H-1N")
+
 
 def test_export_import_3d_external_nuclei_order(tmp_path: Path) -> None:
     """0.2.199-patch29dk: 3D .list export/import follows w1=15N/w2=13C/w3=1H."""
@@ -257,7 +283,6 @@ def test_export_import_3d_external_nuclei_order(tmp_path: Path) -> None:
     assert rows2[0]["F3_shift"] == 8.2
 
 
-
 def test_import_poky_lowercase_header_and_extra_columns(
     tmp_path: Path,
 ) -> None:
@@ -273,8 +298,7 @@ def test_import_poky_lowercase_header_and_extra_columns(
 
     p3 = tmp_path / "ref_min3d.list"
     p3.write_text(
-        "assignment w1 w2 w3\n"
-        "?-?-? 118.0 45.0 8.5 0 100 0 9.9 8.8\n",
+        "assignment w1 w2 w3\n?-?-? 118.0 45.0 8.5 0 100 0 9.9 8.8\n",
         encoding="utf-8",
     )
     rows3 = import_peaks_poky(p3)

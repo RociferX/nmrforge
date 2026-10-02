@@ -40,24 +40,19 @@ from nmrforge_api.sweep import (
 )
 from ui_support.i18n import tr
 
-WINDOW_POLICY = (
-    tr(
-        "Combination mode does not track reference peaks: each combination picks peaks on its own "
-        "candidate spectrum using the reference-locked detection threshold; edge peaks are "
-        "excluded by physical width (3x the linewidth in ppm by default, core.peaks.axis_units), "
-        "converted to points at run time: zero filling by k changes the point spacing, not the ppm "
-        "width covered",
-    )
+WINDOW_POLICY = tr(
+    "Combination mode does not track reference peaks: each combination picks peaks on its own "
+    "candidate spectrum using the reference-locked detection threshold; automatic axial "
+    "screening requires acquisition parameters and aligned narrow peaks at original edges. "
+    "Uncertain cases keep peaks; an explicit physical edge width is a manual override.",
 )
 
-BOUNDARY_STATEMENT = (
-    tr(
-        "This software only executes processing and writes spectra, peak tables and processing "
-        "records (provenance + QC). CSP, robustness, statistical analysis, significance testing "
-        "and scientific conclusions are out of scope; downstream analysis does that from the "
-        "unified peak "
-        "table.",
-    )
+BOUNDARY_STATEMENT = tr(
+    "This software only executes processing and writes spectra, peak tables and processing "
+    "records (provenance + QC). CSP, robustness, statistical analysis, significance testing "
+    "and scientific conclusions are out of scope; downstream analysis does that from the "
+    "unified peak "
+    "table.",
 )
 
 
@@ -114,12 +109,11 @@ def measurement_record(
 
     Combination mode picks independently since 2026-09-14: ``window_by_axis`` is the last
     **edge-exclusion margin actually used**, expressed as a physical width;
-    ``window_points_seen`` lists every point count each axis saw, so the same physical width under
+    ``window_points_seen`` lists every point count each axis saw, so the same physical width
+    under
     1x/2x/4x zero filling is visibly the same ppm width at different point counts.
     """
-    refs = list(references.values()) if isinstance(references, Mapping) else list(
-        references
-    )
+    refs = list(references.values()) if isinstance(references, Mapping) else list(references)
     by_axis: dict[str, dict[str, Any]] = {}
     seen: dict[str, dict[str, Any]] = {}
     for run in runs:
@@ -143,7 +137,7 @@ def measurement_record(
                 if value is not None and value not in bucket[field]:
                     bucket[field].append(value)
     localization: dict[str, Any] = {}
-    for method in ("parabolic", "gaussian"):
+    for method in ("parabolic",):
         totals = {"n_peaks": 0, "n_detected": 0, "n_fallback": 0, "n_boundary_hit": 0}
         reasons: dict[str, int] = {}
         for run in runs:
@@ -156,12 +150,7 @@ def measurement_record(
     return {
         "peak_position_method": {
             "parabolic": tr(
-                "|intensity| extremum in the window plus a three-point parabolic sub-pixel "
-                "refine",
-            ),
-            "gaussian": tr(
-                "2D Gaussian least squares on the same candidate (2D only; falls back and records "
-                "why)",
+                "|intensity| extremum in the window plus a three-point parabolic sub-pixel refine",
             ),
         },
         "window_policy": WINDOW_POLICY,
@@ -179,9 +168,7 @@ def measurement_record(
     }
 
 
-def combined_peak_table(
-    runs: Sequence[SweepRun], method: str
-) -> list[dict[str, Any]]:
+def combined_peak_table(runs: Sequence[SweepRun], method: str) -> list[dict[str, Any]]:
     """Concatenate the per-workflow/condition peak tables into one long table."""
     rows: list[dict[str, Any]] = []
     for run in runs:
@@ -207,11 +194,7 @@ def write_reference_records(
     """
     out_dir = session.records_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    refs = (
-        list(references.values())
-        if isinstance(references, Mapping)
-        else list(references)
-    )
+    refs = list(references.values()) if isinstance(references, Mapping) else list(references)
     payload = {
         "api_version": API_VERSION,
         "created": now_iso(),
@@ -243,9 +226,7 @@ def _reference_spec_on_disk(session: StudySession) -> str:
 
 def refresh_reference_records(
     session: StudySession,
-    references: (
-        Mapping[str, ReferenceSpectrum] | Sequence[ReferenceSpectrum] | None
-    ) = None,
+    references: (Mapping[str, ReferenceSpectrum] | Sequence[ReferenceSpectrum] | None) = None,
 ) -> dict[str, str]:
     """Refresh the study-level ``records/reference.json`` from what is on disk (2026-09-19).
 
@@ -338,8 +319,7 @@ def write_records(
         },
         "peak_identity": {
             "reference_peak_id_scheme": tr(
-                "R0001... (reference-table row order; only in the reference "
-                "table)",
+                "R0001... (reference-table row order; only in the reference table)",
             ),
             "matching": tr(
                 "external: combination tables leave reference_peak_id/assignment empty and "
@@ -372,23 +352,16 @@ def write_records(
         "measurement": measurement_record(ref_list, runs),
     }
     written["manifest"] = str(_write_json(out_dir / "manifest.json", manifest))
-    written["sweep_plan"] = str(
-        _write_json(out_dir / "sweep_plan.json", plan.to_dict())
-    )
-    written["runs"] = str(
-        _write_json(out_dir / "runs.json", [run.to_dict() for run in runs])
-    )
-    written["measurement"] = str(
-        _write_json(out_dir / "measurement.json", manifest["measurement"])
-    )
+    written["sweep_plan"] = str(_write_json(out_dir / "sweep_plan.json", plan.to_dict()))
+    written["runs"] = str(_write_json(out_dir / "runs.json", [run.to_dict() for run in runs]))
+    written["measurement"] = str(_write_json(out_dir / "measurement.json", manifest["measurement"]))
     stored = load_workflows(session)
     written["workflows"] = str(
         _write_json(
             out_dir / "workflows.json",
             stored
             or [
-                _workflow_record_from_runs(runs, workflow_id)
-                for workflow_id in _workflow_ids(runs)
+                _workflow_record_from_runs(runs, workflow_id) for workflow_id in _workflow_ids(runs)
             ],
         )
     )
@@ -418,9 +391,7 @@ def _workflow_ids(runs: Sequence[SweepRun]) -> list[str]:
     return seen
 
 
-def _workflow_record_from_runs(
-    runs: Sequence[SweepRun], workflow_id: str
-) -> dict[str, Any]:
+def _workflow_record_from_runs(runs: Sequence[SweepRun], workflow_id: str) -> dict[str, Any]:
     """Group by workflow (workflow.json on disk is authoritative; this is a summary copy)."""
     from nmrforge_api.sweep import _workflow_record
 

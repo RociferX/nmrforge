@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,37 @@ def _manager_with_experiment(tmp_path: Path) -> ProjectManager:
     manager.add_experiment("/fake/bruker/1", title="HSQC")
     manager.save()
     return manager
+
+
+def test_processing_controller_uses_one_backend_per_worker_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    "Regression coverage: test processing controller uses one backend per worker thread."
+    created: list[object] = []
+
+    def create_backend(_config):
+        backend = object()
+        created.append(backend)
+        return backend
+
+    monkeypatch.setattr("backend.factory.create_backend", create_backend)
+    monkeypatch.setattr("backend.config.load_config", lambda: {})
+    controller = ProcessingController()
+    barrier = threading.Barrier(2)
+
+    def get_backend():
+        barrier.wait()
+        backend = controller._backend_instance()
+        assert controller._backend_instance() is backend
+        return backend
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(get_backend)
+        second = pool.submit(get_backend)
+        backends = (first.result(), second.result())
+
+    assert backends[0] is not backends[1]
+    assert len(created) == 2
 
 
 def test_is_segmented_container(tmp_path: Path) -> None:
@@ -65,9 +98,7 @@ def test_import_segmented_dataset_passthrough(
         )
         return _Result()
 
-    monkeypatch.setattr(
-        "workflow.import_workflow.import_segmented_dataset", fake
-    )
+    monkeypatch.setattr("workflow.import_workflow.import_segmented_dataset", fake)
     result = controller.import_segmented_dataset(
         "/data/container", exp_id="exp_001", title="seg", copy=False
     )
@@ -92,9 +123,7 @@ def test_generate_spectrum_passes_phase_route_params(
         captured.update(kwargs)
         return "/tmp/x.ft2"
 
-    monkeypatch.setattr(
-        "workflow.stepwise.generate_spectrum", fake_spectrum
-    )
+    monkeypatch.setattr("workflow.stepwise.generate_spectrum", fake_spectrum)
 
     path = controller.generate_spectrum(
         None,
@@ -119,9 +148,7 @@ def test_generate_spectrum_phase_route_none_skips_optimize(
         captured.update(kwargs)
         return "/tmp/x.ft2"
 
-    monkeypatch.setattr(
-        "workflow.stepwise.generate_spectrum", fake_spectrum
-    )
+    monkeypatch.setattr("workflow.stepwise.generate_spectrum", fake_spectrum)
 
     path = controller.generate_spectrum(
         None,
@@ -183,20 +210,14 @@ def test_save_peaks_manual_writes_list_and_registers_run(
             "label": "A2",
         },
     ]
-    list_path = controller.save_peaks_manual(
-        None, peaks, exp_id="exp_001", data_id="d_001"
-    )
+    list_path = controller.save_peaks_manual(None, peaks, exp_id="exp_001", data_id="d_001")
     assert Path(list_path).suffix == ".list"
     assert Path(list_path).is_file()
     assert not sidecar.exists()  # old auto-localization diagnostics must be invalidated
     content = Path(list_path).read_text(encoding="utf-8")
     assert "Assignment w1 w2" in content
     assert "G1" in content and "8.0" in content and "118.0" in content
-    runs = [
-        run
-        for run in manager.project.workflow_runs
-        if run.workflow_ref == "manual_peaks"
-    ]
+    runs = [run for run in manager.project.workflow_runs if run.workflow_ref == "manual_peaks"]
     assert len(runs) == 1
     assert runs[0].status == "success"
     assert runs[0].outputs.get("peaks") == str(list_path)
@@ -223,9 +244,9 @@ def test_generate_spectrum_reports_progress(
     )
     assert path == "/tmp/x.ft2"
     assert messages
-    assert any("读取数据" in msg for msg in messages)
-    assert any("生成谱图完成" in msg for msg in messages)
-    assert any("相位途径" in msg for msg in messages)
+    assert any("准备生成谱图" in msg for msg in messages)
+    assert any("谱图生成完成" in msg for msg in messages)
+    assert any("自动优化" in msg for msg in messages)
     assert not any("相位优化完成" in msg for msg in messages)
 
 
@@ -250,7 +271,7 @@ def test_generate_spectrum_phase_optimize_disabled(
         phase_optimize=False,
     )
     assert path == "/tmp/x.ft2"
-    assert any("生成谱图完成" in msg for msg in messages)
+    assert any("谱图生成完成" in msg for msg in messages)
     assert not any("相位优化完成" in msg for msg in messages)
 
 
@@ -275,9 +296,7 @@ def test_generate_spectrum_wires_linewidth_from_settings(
             SimpleNamespace(logical_axis="F1", nucleus="15N"),
         ],
     )
-    monkeypatch.setattr(
-        controller, "_read_experiment", lambda exp_id, data_id: fake_exp
-    )
+    monkeypatch.setattr(controller, "_read_experiment", lambda exp_id, data_id: fake_exp)
     monkeypatch.setattr(
         "gui.settings.load_settings",
         lambda: {"linewidth_hz": {"1H": 10.0, "15N": 12.0, "13C": 14.0}},
@@ -317,9 +336,7 @@ def test_generate_spectrum_explicit_linewidth_wins(
         sampling=SimpleNamespace(mode=SamplingMode.UNIFORM),
         dimensions=[SimpleNamespace(logical_axis="F2", nucleus="1H")],
     )
-    monkeypatch.setattr(
-        controller, "_read_experiment", lambda exp_id, data_id: fake_exp
-    )
+    monkeypatch.setattr(controller, "_read_experiment", lambda exp_id, data_id: fake_exp)
     monkeypatch.setattr(
         "gui.settings.load_settings",
         lambda: {"linewidth_hz": {"1H": 10.0}},
@@ -339,9 +356,10 @@ def test_generate_spectrum_explicit_linewidth_wins(
     params = captured.get("params") or {}
     assert params["linewidth_hz"] == {"F2": 99.0}
 
+
 def test_resolve_import_source(tmp_path: Path) -> None:
-    '''Task F: ignore non-data subdirectories when resolving the import source
-    (dataset/segmented/single/no data).'''
+    """Task F: ignore non-data subdirectories when resolving the import source
+    (dataset/segmented/single/no data)."""
     from gui.processing import resolve_import_source
     from workflow.import_workflow import ImportWorkflowError
 
@@ -360,8 +378,14 @@ def test_resolve_import_source(tmp_path: Path) -> None:
         (d / "acqus").write_text("x", encoding="utf-8")
     (container / "notes").mkdir()
     (container / "notes" / "readme.txt").write_text("x", encoding="utf-8")
-    src, seg = resolve_import_source(container)
-    assert seg is True
+
+    try:
+        resolve_import_source(container)
+        raise AssertionError("多个数据子目录时单个导入入口应拒绝")
+    except ImportWorkflowError as exc:
+        text = str(exc)
+        assert "segA" in text and "segB" in text
+        assert "分段" in text or "segmented" in text.lower()
 
     one = tmp_path / "one"
     one.mkdir()

@@ -24,9 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
         (OSError("disk gone"), "文件/系统操作失败"),
     ],
 )
-def test_describe_exception_maps_user_fixable_failures(
-    exc: BaseException, expected: str
-) -> None:
+def test_describe_exception_maps_user_fixable_failures(exc: BaseException, expected: str) -> None:
     """The failure classes a user can fix -> one actionable Chinese sentence."""
     message = describe_exception(exc)
     assert expected in message

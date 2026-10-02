@@ -8,7 +8,8 @@ step 30° (p1=0) -> 1/3 Decrease refinement to 5° (p1 fixed) -> Platform circle
 degree refinement -> +/-90° symmetry disambiguation -> End p1 {0,+/-22.5}; - gate: scoring
 margin <0.05 -> Reproducibility (odd and even subsampling) -> three-level fallback; - joint
 review: p1 +/-5° combination of each axis + all zeros, fixed trace score for each axis and
-averaged."""
+averaged.
+"""
 
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ui_support.i18n import tr
+from workflow.optimization_report import phase_angle_value
 
 # Phase scoring constants and grid helper functions (0.2.164 migrated from workflow.phase_optimize;
 # the old brute-force optimisation module has been removed, memory search is the only
@@ -39,7 +41,8 @@ PAIR_ARBITER_NET_GATE = 95.0
 
 def _axis_traces(real: np.ndarray, axis: int) -> np.ndarray:
     """Expand the spectrum along the axis into (n_trace, axis_len), which is applicable to any
-    dimension."""
+    dimension.
+    """
     moved = np.moveaxis(np.asarray(real, dtype=float), axis, -1)
     return moved.reshape(-1, moved.shape[-1])
 
@@ -48,7 +51,8 @@ def _trace_indices_fixed(
     real: np.ndarray, axis: int, threshold: float = 0.0
 ) -> tuple[list[int], list[int]]:
     """Return the signal trace index and strongest point position along axis (patch29ff
-    vectorization, consistent results)."""
+    vectorization, consistent results).
+    """
     traces = _axis_traces(real, axis)
     mag = np.abs(traces)
     peaks = np.argmax(mag, axis=-1)
@@ -60,18 +64,18 @@ def _trace_indices_fixed(
 
 def _grid_step(values: tuple[float, ...]) -> float:
     """The step size of the equidistant grid (the median of adjacent differences); less than 2
-    points returns 0."""
+    points returns 0.
+    """
     if len(values) < 2:
         return 0.0
-    diffs = sorted(
-        float(values[i + 1]) - float(values[i]) for i in range(len(values) - 1)
-    )
+    diffs = sorted(float(values[i + 1]) - float(values[i]) for i in range(len(values) - 1))
     return float(diffs[len(diffs) // 2])
 
 
 def _refine_steps(coarse_step: float, final_step: float) -> list[float]:
     """A sequence of refinements from coarse step size to target step size (approximately 1/3
-    decreasing, with the last level being the target step size)."""
+    decreasing, with the last level being the target step size).
+    """
     steps: list[float] = []
     s = float(coarse_step)
     while True:
@@ -91,12 +95,11 @@ def _refine_window(center: float, prev_step: float, new_step: float) -> list[flo
     return [center + k * new_step for k in range(-n, n + 1)]
 
 
-def rotate_real(
-    complex_arr: np.ndarray, axis: int, p0: float, p1: float
-) -> np.ndarray:
+def rotate_real(complex_arr: np.ndarray, axis: int, p0: float, p1: float) -> np.ndarray:
     """Memory frequency domain rotation takes the real part, the same convention as nmrPipe PS:
     phase(k) = p0 + p1·k/(n-1), point-by-point complex multiplication exp(i·phase), takes the
-    real part (= -di semantics)."""
+    real part (= -di semantics).
+    """
     arr = np.asarray(complex_arr, dtype=np.complex128)
     # 0.2.199-patch29dp: When p1=0, phase has nothing to do with k, scalar rotation (avoiding the
     # point-by-point complex multiplication of the entire axis ramp array -- 3D NUS The main
@@ -117,7 +120,8 @@ def _gather_slices(
     rows: np.ndarray, starts: np.ndarray, ends: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
     """Each row [start,end) slices are collected into an equal-width matrix (patch29ff, out-of-
-    bounds NaN mask)."""
+    bounds NaN mask).
+    """
     n_rows, width = rows.shape
     maxlen = int(np.max(ends - starts)) if n_rows else 0
     if maxlen <= 0:
@@ -131,7 +135,8 @@ def _gather_slices(
 
 def _median_rows(gathered: np.ndarray, valid: np.ndarray) -> np.ndarray:
     """Median number of valid values by row (equivalent to np.median row by row, the last digit
-    is allowed to be 1e-16)."""
+    is allowed to be 1e-16).
+    """
     counts = valid.sum(axis=1)
     if counts.size == 0:
         return np.zeros(0)
@@ -160,7 +165,8 @@ def _window_nets(
     behaviour; normalisation by line width/resolution (high resolution window is larger) can
     eliminate "+/-5 points covering too large line width at low resolution, resulting in phase
     optimal offset" (sampleI F1 at 431 points preview 105°, 1024 points final spectrum optimal
-    90°)."""
+    90°).
+    """
     hw = 5 if half_width is None else max(int(half_width), 1)
     moved = np.moveaxis(real, axis, -1)
     traces = moved.reshape(-1, moved.shape[-1])
@@ -170,13 +176,9 @@ def _window_nets(
             continue
         n = traces.shape[1]
         left_base = traces[index, max(0, peak - 3 * hw - 3) : max(0, peak - hw - 1)]
-        right_base = traces[
-            index, min(n, peak + hw + 2) : min(n, peak + 3 * hw + 4)
-        ]
+        right_base = traces[index, min(n, peak + hw + 2) : min(n, peak + 3 * hw + 4)]
         if left_base.size >= 4 and right_base.size >= 4:
-            baseline = 0.5 * (
-                float(np.median(left_base)) + float(np.median(right_base))
-            )
+            baseline = 0.5 * (float(np.median(left_base)) + float(np.median(right_base)))
         else:
             baseline = float(np.median(traces[index]))
         profile = traces[index, max(0, peak - hw) : peak + hw + 1]
@@ -200,7 +202,8 @@ def _window_nets_from_rows(
 ) -> list[float]:
     """Lock the net absorption of each trace line (patch29ff vectorization, equivalent rewriting;
     baseline translation only acts on valid points within the peak window, out-of-boundary zero
-    filling does not participate in translation)."""
+    filling does not participate in translation).
+    """
     hw = 5 if half_width is None else max(int(half_width), 1)
     n_rows = rows.shape[0]
     if n_rows == 0:
@@ -227,10 +230,7 @@ def _window_nets_from_rows(
     pmat, pvalid = _gather_slices(rows, ps, pe)
     profile = np.where(pvalid, pmat, 0.0)
     peak_h = np.max(np.abs(profile), axis=1)
-    cond = (
-        (peak_h > 1e-12)
-        & (np.abs(baseline) / np.maximum(peak_h, 1e-30) >= 0.01)
-    )
+    cond = (peak_h > 1e-12) & (np.abs(baseline) / np.maximum(peak_h, 1e-30) >= 0.01)
     shifted = np.where(pvalid, pmat - baseline[:, None], 0.0)
     profile = np.where(cond[:, None], shifted, profile)
     positive = np.clip(profile, 0.0, None).sum(axis=1)
@@ -251,11 +251,10 @@ def score_locked_memory(
 ) -> float:
     """Lock trace row scoring (0.2.199-patch29dp): only rotate the locked row, no longer perform a
     duplicate rotation on the entire array for each candidate (3D NUS (256,256,586) Each axis
-    search 23-25s -> sub-second level)."""
+    search 23-25s -> sub-second level).
+    """
     real = rotate_real(rows, -1, p0, p1)
-    nets = _window_nets_from_rows(
-        real, positions, half_width=net_half_width
-    )
+    nets = _window_nets_from_rows(real, positions, half_width=net_half_width)
     if not nets:
         return 50.0
     if sign_mode == "mixed":
@@ -286,11 +285,10 @@ def score_axis_memory(
     peaks coexist): Absorption = the median of |net absorption of each window| -- Zhengfeng/Even
     negative peaks can get high scores; then require the coexistence of positive and negative
     strong and weak peaks (missing a symbol penalty (Positive peak preference resolves +/-180
-    ambiguities)."""
+    ambiguities).
+    """
     real = rotate_real(complex_arr, axis, p0, p1)
-    nets = _window_nets(
-        real, axis, indices, positions, half_width=net_half_width
-    )
+    nets = _window_nets(real, axis, indices, positions, half_width=net_half_width)
     if not nets:
         return 50.0
     if sign_mode == "mixed":
@@ -328,7 +326,8 @@ def _lock_discrete_traces(
     gradually lowered, and finally all traces are rolled back. This option is only used for
     mixed (HNCACB and other positive and negative coexistence) experiments --- Uniform spectrum
     can use the old lock (99.5 quantile of all strong traces), discrete filtering will change
-    the trace set to d103 and other band biases 180° (VM d103 regression calibration)."""
+    the trace set to d103 and other band biases 180° (VM d103 regression calibration).
+    """
     real0 = np.real(complex_arr)
     if not discrete:
         noise_old = float(np.std(real0[:80, :40])) if real0.size else 0.0
@@ -373,7 +372,8 @@ def _subsampled_score_memory(
 ) -> float:
     """Take a half-group subsampling of top-K strong traces with peak height along axis, and
     evaluate in-memory phase_quality (same index as the old scheme _subsampled_score, except
-    that the input is a memory array)."""
+    that the input is a memory array).
+    """
     from core.qc import phase_quality
 
     moved = np.moveaxis(real, axis, -1)
@@ -386,11 +386,10 @@ def _subsampled_score_memory(
     return float(phase_quality.evaluate(traces[selected]).score)
 
 
-def _subsampled_score_rows(
-    rows: np.ndarray, k: int = 500, group: str = "even"
-) -> float:
+def _subsampled_score_rows(rows: np.ndarray, k: int = 500, group: str = "even") -> float:
     """Locks the top-K half-set of subsampled scores for trace rows (0.2.199-patch29dp, row
-    variant)."""
+    variant).
+    """
     from core.qc import phase_quality
 
     peak_mag = np.max(np.abs(rows), axis=-1)
@@ -403,7 +402,8 @@ def _subsampled_score_rows(
 
 def _symmetry_memory(real: np.ndarray, axis: int) -> float:
     """+/-90° symmetry index for disambiguation (same as the old scheme
-    phase_quality.profile_symmetry_axis)."""
+    phase_quality.profile_symmetry_axis).
+    """
     from core.qc import phase_quality
 
     return float(phase_quality.profile_symmetry_axis(real, axis))
@@ -425,8 +425,11 @@ class MemoryAxisResult:
 
 
 def _opposite_pair_profiles(
-    real_rows: np.ndarray, positions: list[int],
-    *, window: int = 20, radius: int = 6,
+    real_rows: np.ndarray,
+    positions: list[int],
+    *,
+    window: int = 20,
+    radius: int = 6,
 ) -> list[np.ndarray]:
     """Extract the "adjacent positive and negative peak pairs" profile on the locked trace."""
     n = int(real_rows.shape[1])
@@ -460,7 +463,8 @@ def _opposite_pair_profiles(
 
 def _pair_similarity(real_rows: np.ndarray, positions: list[int]) -> float | None:
     """Median pairwise correlation of pairs of positive and negative peak profiles; log < 3 returns
-    None."""
+    None.
+    """
     profiles = _opposite_pair_profiles(real_rows, positions)
     if len(profiles) < 3:
         return None
@@ -495,7 +499,8 @@ def _pair_similarity(real_rows: np.ndarray, positions: list[int]) -> float | Non
 
 def _pair_arbiter_score(real_rows: np.ndarray, positions: list[int]) -> float:
     """0-100: The lower the similarity, the better (the real mixed positive and negative peaks are
-    different); No right/Insufficient logarithm=50."""
+    different); No right/Insufficient logarithm=50.
+    """
     sim = _pair_similarity(real_rows, positions)
     if sim is None:
         return 50.0
@@ -515,7 +520,8 @@ def search_axis_memory(
     cancel: Callable[[], bool] | None = None,
 ) -> MemoryAxisResult | None:
     """Perform in-memory phase search on the specified axis of the replica data (old algorithm
-    judgment criteria, zero backend)."""
+    judgment criteria, zero backend).
+    """
     _t_search0 = time.monotonic()
     arr = np.asarray(complex_arr, dtype=np.complex128)
     n = arr.shape[axis]
@@ -526,8 +532,12 @@ def search_axis_memory(
 
     def _score(p0: float, p1: float) -> float:
         return score_locked_memory(
-            locked_rows, trace_positions, p0, p1,
-            sign_mode=sign_mode, net_half_width=net_half_width,
+            locked_rows,
+            trace_positions,
+            p0,
+            p1,
+            sign_mode=sign_mode,
+            net_half_width=net_half_width,
         )
 
     # Baseline (0,0) lock trace: mixed (HNCACB, etc.) use discrete peak selection to filter the
@@ -535,13 +545,9 @@ def search_axis_memory(
     # discrete peaks are adjusted to F2=90°/F1≈0°); uniform is locked with the old (discrete
     # filtering will change the trace set, VM d103 was biased by 180°).
     use_discrete = (sign_mode == "mixed") if discrete is None else discrete
-    trace_indices, trace_positions = _lock_discrete_traces(
-        arr, axis, discrete=use_discrete
-    )
+    trace_indices, trace_positions = _lock_discrete_traces(arr, axis, discrete=use_discrete)
     if not trace_indices:
-        trace_indices, trace_positions = _trace_indices_fixed(
-            np.real(arr), axis, -1.0
-        )
+        trace_indices, trace_positions = _trace_indices_fixed(np.real(arr), axis, -1.0)
     if not trace_indices:
         return None
     # 0.2.199-patch29dp: Extract only locked trace lines; candidate scoring rotates only these
@@ -573,13 +579,10 @@ def search_axis_memory(
     p0_rivals = [
         s
         for p, s in scored.items()
-        if p in coarse_done
-        and abs((p[0] - coarse_best[0] + 180.0) % 360.0 - 180.0) > 1e-6
+        if p in coarse_done and abs((p[0] - coarse_best[0] + 180.0) % 360.0 - 180.0) > 1e-6
     ]
     coarse_margin = coarse_best_score - max(p0_rivals) if p0_rivals else 0.0
-    steps0 = (
-        _refine_steps(p0_step, final_step) if refine and p0_step > 0 else []
-    )
+    steps0 = _refine_steps(p0_step, final_step) if refine and p0_step > 0 else []
     levels = len(steps0)
     if levels:
         prev0 = p0_step
@@ -592,9 +595,7 @@ def search_axis_memory(
     best_phase = max(scored, key=lambda p: scored[p])
     best_score = scored[best_phase]
     neighbor_scores = [
-        s
-        for p, s in scored.items()
-        if p != best_phase and abs(p[1] - best_phase[1]) <= final_step
+        s for p, s in scored.items() if p != best_phase and abs(p[1] - best_phase[1]) <= final_step
     ]
     flat = False
     if neighbor_scores:
@@ -613,15 +614,13 @@ def search_axis_memory(
         else:
             logs.append(
                 tr(
-                "axis{p0}: phase scoring margin {p1:.2f} points, the optimal is "
-                "clearer",
-                p0=axis,
-                p1=margin,
-            ))
+                    "axis{p0}: phase scoring margin {p1:.2f} points, the optimal is clearer",
+                    p0=axis,
+                    p1=margin,
+                )
+            )
     if not flat:
-        neighbor_phases = [
-            p for p in scored if abs(p[1] - best_phase[1]) <= final_step
-        ]
+        neighbor_phases = [p for p in scored if abs(p[1] - best_phase[1]) <= final_step]
         if len(neighbor_phases) >= 2:
             p1s: list[float] = []
             for group in ("even", "odd"):
@@ -641,9 +640,9 @@ def search_axis_memory(
                         "{p1:g}/{p2:g}, difference>{p3:g}°),falling back to "
                         "(0,0)",
                         p0=axis,
-                        p1=p1s[0],
-                        p2=p1s[1],
-                        p3=PHASE_REPRODUCIBILITY_TOL,
+                        p1=phase_angle_value(p1s[0]),
+                        p2=phase_angle_value(p1s[1]),
+                        p3=phase_angle_value(PHASE_REPRODUCIBILITY_TOL),
                     )
                 )
     if flat:
@@ -656,19 +655,13 @@ def search_axis_memory(
         # finalize the decision.
         pair_tol = PHASE_SYMMETRY_TOL
         candidates = sorted(
-            (
-                p
-                for p, s in scored.items()
-                if s >= best_score - pair_tol and abs(p[1]) < 1e-9
-            ),
+            (p for p, s in scored.items() if s >= best_score - pair_tol and abs(p[1]) < 1e-9),
             key=lambda p: -scored[p],
         )
         if (0.0, 0.0) in scored and (0.0, 0.0) not in candidates:
             candidates.append((0.0, 0.0))
         arb_ok = (
-            sign_mode == "mixed"
-            and best_score < PAIR_ARBITER_NET_GATE
-            and len(candidates) >= 2
+            sign_mode == "mixed" and best_score < PAIR_ARBITER_NET_GATE and len(candidates) >= 2
         )
         # 0.2.199-patch29fs(user): Good spectra do not arbitrate -- only axes that are mixed and
         # have a net score difference (<95) are made to arbitrate for positive and negative peaks;
@@ -677,9 +670,7 @@ def search_axis_memory(
             pair_scores: list[tuple[float, tuple[float, float]]] = []
             for cand in candidates:
                 real_rows = rotate_real(locked_rows, -1, cand[0], cand[1])
-                pair_scores.append(
-                    (_pair_arbiter_score(real_rows, trace_positions), cand)
-                )
+                pair_scores.append((_pair_arbiter_score(real_rows, trace_positions), cand))
             # Patch29fo-Repair 2: Round the pair scores to 0.01 first and then compare them. If the
             # scores are the same, the net score will be used -- For large spectrum pairs, the total
             # is often close to 100. The floating point tail difference will make 355° accidentally
@@ -702,9 +693,7 @@ def search_axis_memory(
                         p4=scored[pair_best_cand],
                         p5=best_pair,
                     )
-                    + ", ".join(
-                        f"{c}=({scored[c]:.1f}/{q:.1f})" for q, c in pair_scores
-                    )
+                    + ", ".join(f"{c}=({scored[c]:.1f}/{q:.1f})" for q, c in pair_scores)
                 )
                 best_phase = pair_best_cand
                 best_score = scored[pair_best_cand]
@@ -745,16 +734,10 @@ def search_axis_memory(
         # 0.2.199-patch29dn: The flat surface does not fall back -- The median of the flat area will
         # drift (for example, the coarse grid optimal 90° of sampleI F1 is changed to 80°),
         # maintaining the coarse grid optimal.
-        plateau_p0 = [
-            p[0] for p, s in scored.items() if s >= best_score - PHASE_PLATEAU_TOL
-        ]
+        plateau_p0 = [p[0] for p, s in scored.items() if s >= best_score - PHASE_PLATEAU_TOL]
         if len(plateau_p0) >= 2:
             angles = np.deg2rad(plateau_p0)
-            center = float(
-                np.rad2deg(
-                    np.arctan2(np.mean(np.sin(angles)), np.mean(np.cos(angles)))
-                )
-            )
+            center = float(np.rad2deg(np.arctan2(np.mean(np.sin(angles)), np.mean(np.cos(angles)))))
             center = center % 360.0
             refined = (center, best_phase[1])
             if (
@@ -768,8 +751,7 @@ def search_axis_memory(
                     best_phase, best_score = refined, r_score
                     logs.append(
                         tr(
-                            "axis{p0}: Platform circle median p0 -> {p1:.2f}° "
-                            "(score={p2:.2f})",
+                            "axis{p0}: Platform circle median p0 -> {p1:.2f}° (score={p2:.2f})",
                             p0=axis,
                             p1=center,
                             p2=r_score,
@@ -785,17 +767,17 @@ def search_axis_memory(
             if cand in scored:
                 c_score = scored[cand]
                 if c_score >= best_score - PHASE_SYMMETRY_TOL:
-                    c_sym = _symmetry_memory(
-                        rotate_real(locked_rows, -1, cand[0], cand[1]), -1
-                    )
+                    c_sym = _symmetry_memory(rotate_real(locked_rows, -1, cand[0], cand[1]), -1)
                     if c_sym > best_sym + 0.05:
                         logs.append(
                             tr(
                                 "axis{p0}: +/-90° symmetry disambiguation {p1} → {p2} (sym "
                                 "{p3:.2f}→{p4:.2f})",
                                 p0=axis,
-                                p1=best_phase,
-                                p2=cand,
+                                p1=f"({phase_angle_value(best_phase[0])}°, "
+                                f"{phase_angle_value(best_phase[1])}°)",
+                                p2=f"({phase_angle_value(cand[0])}°, "
+                                f"{phase_angle_value(cand[1])}°)",
                                 p3=best_sym,
                                 p4=c_sym,
                             )
@@ -816,11 +798,10 @@ def search_axis_memory(
                 if c_score > best_score:
                     logs.append(
                         tr(
-                            "axis{p0}: p1 refinement {p1:g}° → {p2:g}° "
-                            "(score={p3:.2f})",
+                            "axis{p0}: p1 refinement {p1:g}° → {p2:g}° (score={p3:.2f})",
                             p0=axis,
-                            p1=best_phase[1],
-                            p2=p1,
+                            p1=phase_angle_value(best_phase[1]),
+                            p2=phase_angle_value(p1),
                             p3=c_score,
                         )
                     )
@@ -866,7 +847,8 @@ def joint_recheck_memory(
     (0.2.199-patch29fi row format, equivalent to the full array score bit by bit -- patch29ff
     Verified row format score = full array score; no longer rotate the entire volume complex
     array combination by combination). Return (optimal phases, optimal score, fixed combination
-    score, all-zero combination score)."""
+    score, all-zero combination score).
+    """
     import itertools
 
     search_axes = [a for a in fixed]
@@ -902,11 +884,7 @@ def joint_recheck_memory(
             if not idx or axis not in axis_rows:
                 continue
             p0, p1 = phases[axis]
-            vals.append(
-                score_locked_memory(
-                    axis_rows[axis], pos, p0, p1, sign_mode=sign_mode
-                )
-            )
+            vals.append(score_locked_memory(axis_rows[axis], pos, p0, p1, sign_mode=sign_mode))
         return float(np.mean(vals)) if vals else -1.0
 
     best_phases = dict(fixed)

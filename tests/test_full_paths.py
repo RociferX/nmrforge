@@ -74,16 +74,14 @@ class FakeBackend:
         return path
 
     def convert_to_fid(
-        self, experiment, data_dir, progress=None, fid_com_overrides=None
+        self, experiment, data_dir, progress=None, params=None, fid_com_overrides=None
     ) -> dict:
         """Write a real readable fid (readable by diagnostics/direct-dimension
         window optimisation) and fid.com (read manually)."""
         work = self.work
         dataset_id = experiment.dataset_id
         work.mkdir(parents=True, exist_ok=True)
-        (work / "fid.com").write_text(
-            "#!/bin/csh\n# auto fid.com\n", encoding="utf-8"
-        )
+        (work / "fid.com").write_text("#!/bin/csh\n# auto fid.com\n", encoding="utf-8")
         n_direct = 128
         n_traces = 64
         if experiment.ndim >= 3:
@@ -120,7 +118,7 @@ class FakeBackend:
         dic.update(
             {
                 "FDSIZE": n1,
-                "FDSPECNUM": n2 if ndim == 2 else n2 * n3,
+                "FDSPECNUM": 1 if ndim == 1 else n2,
                 "FDDIMCOUNT": ndim,
                 "FDF2SIZE": n1,
                 "FDF1SIZE": n2,
@@ -131,19 +129,28 @@ class FakeBackend:
                 "FDF1OBS": 60.0,
                 "FDF2CAR": 4.7,
                 "FDF1CAR": 118.0,
+                "FDF3SW": 11300.0,
+                "FDF3OBS": 150.0,
+                "FDF3CAR": 45.0,
                 "FDF2QUADFLAG": 1,
                 "FDF1QUADFLAG": 1,
+                "FDF3QUADFLAG": 1,
                 "FDF2APOD": 0.0,
                 "FDF1APOD": 0.0,
                 "FDF2FTFLAG": 1,
                 "FDF1FTFLAG": 1,
+                "FDF3FTFLAG": 1,
                 "FDTRANSPOSED": 0,
-                "FDPIPEFLAG": 0,
+                "FDPIPEFLAG": 1 if ndim == 3 else 0,
+                "FDQUADFLAG": 1,
+                "FDDIMORDER": [2.0, 1.0, 3.0, 4.0],
+                "FDDIMORDER1": 2.0,
+                "FDDIMORDER2": 1.0,
+                "FDDIMORDER3": 3.0,
+                "FDDIMORDER4": 4.0,
             }
         )
-        for i, lab in enumerate(
-            ("FDF2LABEL", "FDF1LABEL", "FDF3LABEL", "FDF4LABEL")
-        ):
+        for i, lab in enumerate(("FDF2LABEL", "FDF1LABEL", "FDF3LABEL", "FDF4LABEL")):
             dic[lab] = ("1H", "15N", "13C", "")[i]
         dic.update(
             {
@@ -152,20 +159,25 @@ class FakeBackend:
                 "FDCOMMENT": "test",
                 "FDOPERNAME": "test",
                 "FDSRCNAME": "test",
-                "FDDIMORDER1": 0.0,
             }
         )
-        if ndim == 2:
+        if ndim == 1:
+            data = np.zeros(n1, dtype="<f4")
+        elif ndim == 2:
             data = np.zeros((n2, n1), dtype="<f4")
         else:
-            data = np.zeros((n2, n3, n1), dtype="<f4")
-        # Put a few peaks
-        if ndim == 2:
+            # NMRPipe stream data is (FDF3SIZE, FDSPECNUM, FDSIZE).
+            data = np.zeros((n3, n2, n1), dtype="<f4")
+
+        if ndim == 1:
+            data[60] = 1000.0
+            data[70] = 600.0
+        elif ndim == 2:
             data[30, 60] = 1000.0
             data[20, 70] = 600.0
         else:
-            data[4, 10, 30] = 1000.0
-            data[6, 8, 50] = 600.0
+            data[4, 30, 60] = 1000.0
+            data[6, 20, 70] = 600.0
         ng.pipe.write(str(path), dic, np.ascontiguousarray(data), overwrite=True)
 
     def _write_fid_file(self, path: Path, n_traces: int, n_direct: int) -> None:
@@ -237,10 +249,8 @@ class FakeBackend:
         progress=None,
     ) -> dict:
         params = dict(params or {})
-        self.process_calls.append(
-            (experiment, plan, params, dict(direct_phase_override or {}))
-        )
-        ext = "ft3" if experiment.ndim >= 3 else "ft2"
+        self.process_calls.append((experiment, plan, params, dict(direct_phase_override or {})))
+        ext = {1: "ft1", 2: "ft2"}.get(experiment.ndim, "ft3")
         name = out_file or f"{experiment.dataset_id}.{ext}"
         path = self.work / name
         self._write_spectrum_file(path, ndim=experiment.ndim)
@@ -334,9 +344,7 @@ def _install_spectrum_mocks(monkeypatch: pytest.MonkeyPatch) -> None:
             return _preview_3d(0, 0.0)
         return _synthetic_preview(0, 0.0)
 
-    monkeypatch.setattr(
-        "core.data.pipe_io.read_pipe_complex", fake_read_pipe_complex
-    )
+    monkeypatch.setattr("core.data.pipe_io.read_pipe_complex", fake_read_pipe_complex)
     # Baseline/zero-fill scoring: the spectrum file bytes are unreadable ->
     # read the synthetic array directly
     import core.data.pipe_io
@@ -357,8 +365,11 @@ def _install_spectrum_mocks(monkeypatch: pytest.MonkeyPatch) -> None:
     ],
 )
 def test_auto_full_path(
-    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch,
-    dataset: str, exp_title: str,
+    tmp_path: Path,
+    bruker_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dataset: str,
+    exp_title: str,
 ) -> None:
     """Automatic path: import -> generate FID -> generate spectrum (unified,
     diagnostics + optimisation) -> peak picking.
@@ -368,9 +379,7 @@ def test_auto_full_path(
     from workflow.stepwise import generate_fid, generate_spectrum
 
     _install_spectrum_mocks(monkeypatch)
-    manager, exp_id, data_id, _raw = _manager_with_data(
-        tmp_path, bruker_dir, dataset, exp_title
-    )
+    manager, exp_id, data_id, _raw = _manager_with_data(tmp_path, bruker_dir, dataset, exp_title)
     backend = FakeBackend(manager.data_dir(exp_id, data_id, "process"))
     fid_path = generate_fid(manager, exp_id, data_id, backend)
     assert fid_path
@@ -397,8 +406,53 @@ def test_auto_full_path(
     )
 
 
+def test_auto_full_path_1d_generates_ft1(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    "Regression coverage: test auto full path 1d generates ft1."
+    from core.data.bruker_reader import read_dataset
+    from workflow.stepwise import generate_fid, generate_spectrum
+
+    raw = tmp_path / "src_1d"
+    raw.mkdir()
+    (raw / "acqus").write_text(
+        "\n".join(
+            (
+                "##$PARMODE= 0",
+                "##$TD= 1024",
+                "##$SW_h= 8000",
+                "##$SFO1= 600",
+                "##$O1= 2820",
+                "##$NUC1= <1H>",
+                "##$PULPROG= <zg30>",
+                "##$BYTORDA= 0",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    experiment = read_dataset(raw)
+    assert experiment.ndim == 1
+    assert experiment.sampling.mode.value == "uniform"
+
+    manager = ProjectManager.create_project(tmp_path / "proj_1d", "demo")
+    entry = manager.create_experiment("1H-1D")
+    data = manager.import_data(entry.id, str(raw))
+    manager.save()
+    backend = FakeBackend(manager.data_dir(entry.id, data.id, "process"))
+    _install_spectrum_mocks(monkeypatch)
+
+    assert generate_fid(manager, entry.id, data.id, backend)
+    spectrum = Path(generate_spectrum(manager, entry.id, data.id, backend))
+
+    assert spectrum.suffix == ".ft1"
+    assert spectrum.is_file()
+    assert backend.process_calls
+    assert backend.reconstruct_params == []
+
+
 def test_auto_uniform_runs_processing_optimization(
-    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    bruker_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """uniform processing parameter optimisation: diagnostics + baseline +
     direct-dimension window + zero filling/indirect window go into the final run."""
@@ -410,9 +464,7 @@ def test_auto_uniform_runs_processing_optimization(
     )
 
     _install_spectrum_mocks(monkeypatch)
-    manager, exp_id, data_id, _raw = _manager_with_data(
-        tmp_path, bruker_dir, "hsqc_2d"
-    )
+    manager, exp_id, data_id, _raw = _manager_with_data(tmp_path, bruker_dir, "hsqc_2d")
     backend = FakeBackend(manager.data_dir(exp_id, data_id, "process"))
     generate_fid(manager, exp_id, data_id, backend)
     monkeypatch.setattr(
@@ -456,7 +508,9 @@ def test_auto_uniform_runs_processing_optimization(
 # Manual path
 # ----------------------------------------------------------------------
 def test_manual_full_path_uniform(
-    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    bruker_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Manual path: manual_fid_com -> run_manual_fid_com -> manual_scripts ->
     run_manual_spectrum."""
@@ -481,9 +535,7 @@ def test_manual_full_path_uniform(
             return SimpleNamespace(returncode=0, stderr="", stdout="")
 
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: Runtime())
-    manager, exp_id, data_id, raw = _manager_with_data(
-        tmp_path, bruker_dir, "hsqc_2d"
-    )
+    manager, exp_id, data_id, raw = _manager_with_data(tmp_path, bruker_dir, "hsqc_2d")
     backend = FakeBackend(manager.data_dir(exp_id, data_id, "process"))
     # 0.2.199-patch29dm: the manual path must auto-generate the FID first
     # (fid.com written to disk) before it can be read
@@ -501,17 +553,13 @@ def test_manual_full_path_uniform(
     assert any(r.workflow_ref == "manual_process" for r in manager.project.workflow_runs)
 
 
-def test_manual_scripts_uses_data_id_for_single_fid(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_manual_scripts_uses_data_id_for_single_fid(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.163-patch10: for a 2D manual spectrum script, in_file uses the data_id
     (d_001) rather than the raw directory name (src_*), consistent with the
     generate_fid product."""
     from workflow.manual import manual_scripts
 
-    manager, exp_id, data_id, _raw = _manager_with_data(
-        tmp_path, bruker_dir, "hsqc_2d"
-    )
+    manager, exp_id, data_id, _raw = _manager_with_data(tmp_path, bruker_dir, "hsqc_2d")
     work = manager.data_dir(exp_id, data_id, "process")
     work.mkdir(parents=True, exist_ok=True)
     (work / f"{data_id}.fid").write_bytes(b"fid")
@@ -522,9 +570,7 @@ def test_manual_scripts_uses_data_id_for_single_fid(
     assert "src_hsqc_2d.fid" not in content
 
 
-def test_manual_reads_segmented_container(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_manual_reads_segmented_container(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.163-patch12: manual reading of a segmented acquisition container
     directory (without acqus) no longer raises an error."""
     from workflow.manual import manual_scripts
@@ -543,26 +589,20 @@ def test_manual_reads_segmented_container(
     manager.save()
     work = manager.data_dir(entry.id, data.id, "process")
     work.mkdir(parents=True, exist_ok=True)
-    (work / f"{data.id}_process.com").write_text(
-        "# existing script\n", encoding="utf-8"
-    )
+    (work / f"{data.id}_process.com").write_text("# existing script\n", encoding="utf-8")
     # manual_scripts prefers the existing script; if it can be read, no
     # acqus error is reported
     scripts = manual_scripts(manager, entry.id, data.id)
     assert f"{data.id}_process.com" in scripts
 
 
-def test_manual_scripts_slice_in_file(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_manual_scripts_slice_in_file(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.163-patch9: after the 3D uniform manual spectrum script detects the
     slice fid, the rendered in_file is rewritten to fid/test%03d.fid (otherwise
     the manual run fails)."""
     from workflow.manual import manual_scripts
 
-    manager, exp_id, data_id, _raw = _manager_with_data(
-        tmp_path, bruker_dir, "hnca_3d"
-    )
+    manager, exp_id, data_id, _raw = _manager_with_data(tmp_path, bruker_dir, "hnca_3d")
     work = manager.data_dir(exp_id, data_id, "process")
     slice_dir = work / "fid"
     slice_dir.mkdir(parents=True, exist_ok=True)
@@ -575,11 +615,7 @@ def test_manual_scripts_slice_in_file(
     assert "-in src_hnca_3d.fid" not in content
 
 
-
-
-def test_manual_scripts_merged_fid_in_file(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_manual_scripts_merged_fid_in_file(tmp_path: Path, bruker_dir: Path) -> None:
     """2026-09-24 (user): for multi-segment merged products (merged/...) the -in
     must be rewritten to the actual location.
 
@@ -589,9 +625,7 @@ def test_manual_scripts_merged_fid_in_file(
     """
     from workflow.manual import manual_scripts
 
-    manager, exp_id, data_id, _raw = _manager_with_data(
-        tmp_path, bruker_dir, "hnca_3d"
-    )
+    manager, exp_id, data_id, _raw = _manager_with_data(tmp_path, bruker_dir, "hnca_3d")
     work = manager.data_dir(exp_id, data_id, "process")
     merged = work / "merged" / "fid"
     merged.mkdir(parents=True, exist_ok=True)
@@ -602,16 +636,12 @@ def test_manual_scripts_merged_fid_in_file(
     assert "-in merged/fid/test%03d.fid" in content
 
 
-def test_manual_scripts_merged_single_fid_in_file(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_manual_scripts_merged_single_fid_in_file(tmp_path: Path, bruker_dir: Path) -> None:
     """2026-09-24: when merged into a single file, -in is written as
     merged/{dataset_id}.fid."""
     from workflow.manual import manual_scripts
 
-    manager, exp_id, data_id, _raw = _manager_with_data(
-        tmp_path, bruker_dir, "hnca_3d"
-    )
+    manager, exp_id, data_id, _raw = _manager_with_data(tmp_path, bruker_dir, "hnca_3d")
     work = manager.data_dir(exp_id, data_id, "process")
     (work / "merged").mkdir(parents=True, exist_ok=True)
     (work / "merged" / f"{data_id}.fid").write_bytes(b"fid")
@@ -621,7 +651,9 @@ def test_manual_scripts_merged_single_fid_in_file(
 
 
 def test_manual_spectrum_accepts_slice_fid(
-    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    bruker_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Manual spectrum run: a 3D slice fid (fid/test*.fid) is not misjudged as a
     missing fid."""
@@ -634,9 +666,7 @@ def test_manual_spectrum_accepts_slice_fid(
             return SimpleNamespace(returncode=0, stderr="", stdout="")
 
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: Runtime())
-    manager, exp_id, data_id, _raw = _manager_with_data(
-        tmp_path, bruker_dir, "hnca_3d"
-    )
+    manager, exp_id, data_id, _raw = _manager_with_data(tmp_path, bruker_dir, "hnca_3d")
     work = manager.data_dir(exp_id, data_id, "process")
     slice_dir = work / "fid"
     slice_dir.mkdir(parents=True, exist_ok=True)
@@ -654,7 +684,9 @@ def test_manual_spectrum_accepts_slice_fid(
 # Batch path
 # ----------------------------------------------------------------------
 def test_batch_full_path_group(
-    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    bruker_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Batch path: group import -> batch processing of the data group (reference
     data processing + optimisations in order)."""

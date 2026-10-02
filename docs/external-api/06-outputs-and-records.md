@@ -9,47 +9,43 @@
     study.json                    condition datasets + reference summary
     work/                         shared fid plus each run's scripts/candidate spectra
     reference/<exp>_<data>/
-        reference.json            reference state (parameters / hashes / two peak tables / versions)
+        reference.json            reference state (parameters / hashes / parabolic peak table / versions)
         process.com               the complete script the reference run actually executed
         reference.ft2             the frozen reference spectrum
         reference.list            reference peak **identity** table (Poky, with R0001...)
         reference_peak_table_parabolic.csv
-        reference_peak_table_gaussian.csv
     workflows/W0001/
         workflow.json             combination-level record (see 6.3)
         log.txt                   combination-level full log (the per-condition logs concatenated)
         <condition A|B>/
             process.com           the complete processing script this condition actually executed
             spectrum.ft2          candidate spectrum (does not replace the active spectrum)
-            peak_table_<selected method>.csv  only the method localization actually selected appears
+            peak_table_parabolic.csv
             log.txt               this condition's full run log (not just the tail)
             run.json              this condition's complete provenance record
     records/
-        reference.json            reference-mode products (reference spectrum / script / two peak tables / sampling / threshold)
+        reference.json            reference-mode products (reference spectrum / script / peak table / sampling / threshold)
         manifest.json             combination-mode products (data / reference / plan / peak identity / version)
         sweep_plan.json           workflow plan (with workflow_ids)
         runs.json                 flat record per (workflow, condition)
         workflows.json            summary record per workflow
         measurement.json          measurement conventions and localisation QC summary
-        peak_table_<selected method>.csv  long table of workflow × condition for each method actually used
+        peak_table_parabolic.csv  long table of workflow × condition
 ```
 
-## 6.2 Unified peak table fields (currently **29 columns**)
+## 6.2 Unified peak table fields (**27 columns**)
 
-Combination mode only writes `localization` the actual selected method. It will be deleted when rerunning with `resume=False`.
-Peak tables and positioning attachments for unselected methods in the previous round; `records/` will also delete old summaries of unselected methods. Old version.
-`peak_positions.csv` Aliases are no longer generated, and the residue will be cleared when the upgrade is run.
+The reference and combination modes use three-point parabolic localisation and write one peak table.
+Rerunning without resume replaces the corresponding run products. The table schema is declared by
+`nmrforge_api.peak_tables.PEAK_TABLE_COLUMNS`.
 
 ```text
 workflow_id, condition, dataset,
 peak_id, reference_peak_id, assignment,
-H_ppm, N_ppm, intensity,
-SNR, detected, localization_method,
-localization_requested, fallback, fallback_reason,
-fit_success, FWHM_H, FWHM_N,
-fit_rmse, boundary_hit, duplicate_localization,
-cell_low_H, cell_high_H, cell_low_N,
-cell_high_N, cell_edge, intensity_ratio_vs_picked,
+H_ppm, N_ppm, intensity, SNR, detected, localization_method,
+fallback, fallback_reason, fit_success, FWHM_H, FWHM_N,
+boundary_hit, duplicate_localization, cell_low_H, cell_high_H,
+cell_low_N, cell_high_N, cell_edge, intensity_ratio_vs_picked,
 shift_vs_picked_H, shift_vs_picked_N
 ```
 
@@ -71,10 +67,9 @@ i.e. the result of relocating records from the peak identity table:
 - `shift_vs_picked_H` / `shift_vs_picked_N` (float, ppm, sign = measured - picked, same
   axis and direction as `H_ppm`/`N_ppm`): the per-axis shift. The 15N ppm axis runs
   opposite to the data index, so do not read the sign backwards;
-- **combination (workflow) tables write `NaN` in all eight columns**: the sweep path
+- **combination (workflow) tables write `NaN` in all eight cell/identity columns**: the sweep path
   picks and localizes in one step, so there is no identity-then-relocate step and
-  writing 1.0/0 would be fabricated information (the same rule as the gaussian-only
-  columns in parabolic tables);
+  writing 1.0/0 would be fabricated information;
 - `duplicate_localization` (bool, P2-5, 2026-09-19): true when the row shares its
   coordinates with another row of the same table (ppm to 1e-6); every row of a
   duplicated group is flagged and no row is dropped or removed from the peak set.
@@ -89,14 +84,17 @@ i.e. the result of relocating records from the peak identity table:
   shared coordinates adds a `duplicate_localization` entry (code plus row count) to
   `run.json.warnings`.
 
-- **The table structures of the two algorithms are exactly the same (29 columns)**; only `fit_rmse` is still Gaussian-only and is written as `NaN` in a parabolic table
-  (not false/0) - since P3-7 (2026-09-19) `fit_success` / `FWHM_*` / `boundary_hit` carry real values from the three-point
-  parabola (the same linewidth wording as the Gaussian fit), so the two tables are directly comparable. The column
-  sequence is the sequence of the code block below, `nmrforge_api.peak_tables.PEAK_TABLE_COLUMNS`.
-- `localization_method` is the **actual** method used (`parabolic`/`gaussian`)
-  `localization_requested` is the **request** method; if the two are different, it means that a rollback has occurred.
-  The reason is `fallback`/`fallback_reason`;
-- **Targeted localization (2026-09-19)**: the combination table's `localization.targets` / the CLI `--localize-peaks` / the API `localize_peaks=` let only the listed peaks take that method's refinement; detection, row count and `peak_id` numbering are **unchanged**, unlisted peaks **stay** with the detection-stage three-point parabola estimate, and that method's QC columns are `NaN` (not fitted, not a failure); a per-peak failure still writes `fallback`/`fallback_reason` (never re-fitting another candidate). Recorded in `run.json.parameters_resolved.detection.localization_targets` (`scope`/`source`/`path`/`sha256`/`n_targets`/`peak_ids` plus the `by_method` detail; `scope` is `mixed` under the per-method form) and in `peak_localization.<method>.localization_scope`/`n_targeted`/`n_skipped`;
+- `localization_method` is `parabolic`, the only supported localisation method.
+- `fit_success` / `FWHM_*` / `boundary_hit` report three-point parabola QC. The equivalent
+  linewidth estimates local curvature; `fallback` / `fallback_reason` remain compatibility fields
+  for a failed or skipped localisation, not an algorithm switch.
+- **Targeted localization**: `localization.targets`, the CLI `--localize-peaks`, and the API
+  `localize_peaks=` select which detected peaks receive the three-point parabolic refinement.
+  Detection, row count and `peak_id` numbering are unchanged; unlisted peaks retain their
+  detection-stage coordinates and have unrun localization QC as `NaN`, not as a failure. A
+  per-peak failure is recorded in `fallback`/`fallback_reason`. The resolved targets are recorded
+  in `run.json.parameters_resolved.detection.localization_targets`; the method summary is under
+  `peak_localization.parabolic`;
 - **Condition granularity (2026-09-20)**: when the target list is written per condition (a CSV `condition` column or a condition mapping), the same `localization_targets` record keeps `path`/`sha256` for the **whole source** (whole-file hash) while `peak_ids`/`n_targets`/`n_skipped` describe **this run (this condition)**, adds `condition` (this run's condition) and `on_missing` (the missing-row policy), and gives per-condition detail in `by_condition` `{peak_ids, n_targets, line_ranges, path + sha256, from}`; without a `condition` column (shared by the batch) `by_condition` is `"all"`, and `peak_localization.<method>` counts stay **per run**;
 - `peak_id` is the peak number of **this spectrum** (the detection order of the spectrum of this combination);
 - `reference_peak_id`(`R0001`…) belongs to the **reference peak table** only; since 2026-09-14 the
@@ -107,14 +105,9 @@ i.e. the result of relocating records from the peak identity table:
 - `intensity` is the peak intensity (signed), `SNR = |intensity| / σ`, σ is the spectral noise
   (robust MAD of `core.qc.noise`),σ are written simultaneously.
   `run.json.parameters_resolved.spectrum_noise_sigma`;
-- Peak-by-peak positioning record (`<peak table>.localization.json`, `run.json` of `measurements[]`)
-  There are also fitting scale files: `roi_half_points`, `roi_half_points_uncapped`, `roi_capped`.
-  `roi_capped_axes`, `max_nfev` (used to explain "the same peak takes time to change on a finer grid");
-- Localization QC columns (the same wording for both algorithms): `fit_success` (whether the method this row actually
-  used succeeded), `FWHM_H` / `FWHM_N` (FWHM in ppm, mapped by **nucleus name**; the parabola reports an equivalent
-  linewidth), `boundary_hit` (Gaussian: centre/width hit the fitting bound; parabola: the vertex offset sits on the
-  +/-0.5 point limit), `fit_rmse` (residual RMS, Gaussian only - a parabolic table writes `NaN`);
-  `fallback` / `fallback_reason` record failures and fallbacks (never silently);
+- Per-peak localisation is recorded in `<peak table>.localization.json` and `run.json`.
+  `boundary_hit` marks a parabolic vertex at the ±0.5-point limit; `fit_success` indicates whether
+  finite equivalent linewidths could be calculated.
 - `duplicate_localization` (bool, P2-5): the row shares its coordinates with another row of the same table (ppm to
   1e-6) - the reference table can only collide when two records round to the same grid point, while the combination
   table also collides when the peak picker's sub-grid refinement pulls two detections into one cell. Every row of a
@@ -186,7 +179,7 @@ i.e. the result of relocating records from the peak identity table:
 
 | Status | Meaning |
 | --- | --- |
-| `success` | Processing + selected refinement method + corresponding peak tables are all completed without warning |
+| `success` | Processing and the parabolic peak table completed without warning |
 | `success_with_warning` | Completed but needing attention (see below, the results are available but need to be reviewed) |
 | `failed` | deal with/Measurement failed; reason for writing `message` and log, not silent |
 
@@ -195,17 +188,14 @@ i.e. the result of relocating records from the peak identity table:
 | `peak_count_zero` | This combination did not detect a single peak under the locking threshold (Check threshold/data) |
 | `processing_script_not_found` | The complete processing script of this workflow was not found (`process.com` is missing in the running directory); the processing results and peak tables are still valid, but the traceability of the script is incomplete. You need to check the back-end placement location |
 | `no_spectrum_change` | This combination does not change the spectrum under **this condition** (identical to the reference spectrum bit by bit): indicating that these parameters are ignored on the data (window type/gate mismatch, etc.) or have no effect; the formal plan should not regard this axis as a real disturbance |
-| `gaussian_fallback` | Gaussian fitting failed/retrace parabola(Peak-by-peak reason) |
-| `gaussian_boundary_hit` | Gaussian centre/Width hits fitting boundary |
 
 > Starting from 2026-09-14, the combined mode selects peaks independently (does not track the reference peak table), so it no longer outputs
 > `peak_not_detected` / `peak_window_edge` / `peak_out_of_range` /
-> `window_points_fallback`; non-2D Gaussian request directly reports an error (`MeasurementError`)
-> The `gaussian_unsupported_ndim` table will no longer be generated
+> `window_points_fallback`. Requests for removed localisation methods raise an explicit error.
 
 ## 6.5 `records/` and borders
 
-`manifest.json` (combination mode) summary: data conditions, condition-by-condition reference (script /Spectrum/Two peak table hashes).
+`manifest.json` (combination mode) summary: data conditions, condition-by-condition reference (script / spectrum / parabolic peak-table hashes).
 Explicitly specified reference writing (`reference_spec`) and `mode="combination"`, plan and grid.
 Hash, peak identity scheme (`peak_identity.matching`: matching of combined peaks to reference peaks **outside**).
 Workflow state count, software/rely/External tool version, and **boundary declaration**.
@@ -215,5 +205,5 @@ Analysis program is completed).
 The software **does not produce** any statistics or significance product: the old
 `uncertainty.csv`/`uncertainty_summary.json` have been removed from `records/`. The σ/Δδ summary
 code is kept as a **test/detection aid** (`nmrforge_api.uncertainty`; the processing chain does not
-call it), and downstream analysis reads `records/peak_table_*.csv` when needed, computing the
-summary itself or reusing the helper. See ../API_CONTRACT.md.
+call it), and downstream analysis reads `records/peak_table_parabolic.csv` when needed, computing
+the summary itself or reusing the helper. See [Methods and metrics](07-methods-and-metrics.md).

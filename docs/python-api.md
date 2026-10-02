@@ -1,9 +1,9 @@
 # Python API
 
-> **Track B - still changing.** This surface is under active development; names, defaults and the
-> records it writes can change between releases. Pin a commit and compare
-> `nmrforge_api.compat_manifest()` (`behavior_digest`, `compat_level`, `affected`) before treating
-> a set of numbers as comparable. The desktop application (Track A) is the mature path.
+> `nmrforge_api` is the public, versioned scripting interface (`API_VERSION = "1.0"`) and does not
+> depend on Qt. Before comparing numerical results across versions, check the behaviour digest,
+> compatibility level and affected steps in `nmrforge_api.compat_manifest()`. A released AppImage
+> corresponds to a specific source version; newer source changes do not update it automatically.
 
 Two Python surfaces exist, with different stability guarantees.
 
@@ -68,17 +68,13 @@ print(uncertainty_summary(position_uncertainty(by_run))["delta_std_ppm"])
 
 
 
-What the call does: freeze a reference spectrum, reference script and reference peak tables
-
-(optimised automatically unless you supply your own peaks), run every parameter combination, and
-
-localise the same peaks on every candidate spectrum with the chosen method. Each combination
-
-leaves behind its script, its candidate spectrum (the active spectrum is not replaced), its peak
-
-positions and its warnings; the study accumulates `manifest.json`, `runs.json`,
-
-`peak_positions.csv` and `uncertainty.csv`.
+What the call does: freeze a reference spectrum, reference script and reference peak table
+(automatically selected unless you provide peaks), run every parameter combination, then detect
+peaks independently on each candidate and refine them with three-point parabolic localisation.
+Each combination keeps its script, candidate spectrum (the active spectrum is not replaced), peak
+positions and warnings. The study accumulates `manifest.json`, `runs.json` and the unified
+`peak_table_parabolic.csv`. Position-uncertainty statistics are a separate analysis helper; they
+are not automatically included in `StudyResult.summary` or processing records.
 
 
 

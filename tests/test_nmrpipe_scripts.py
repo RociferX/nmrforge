@@ -51,7 +51,7 @@ def test_convert_script_nus3d_td1_uses_nustd(bruker_dir: Path) -> None:
     assert "-yN 48" in script
     assert "-ndim 3" in script
     assert "-yMODE States-TPPI" in script  # F2=acqu2s FnMODE=5
-    assert "-zMODE States" in script       # F1=acqu3s FnMODE=4
+    assert "-zMODE States" in script  # F1=acqu3s FnMODE=4
 
 
 def test_convert_script_echo_antiecho_mode(bruker_dir: Path) -> None:
@@ -68,9 +68,7 @@ def test_nus_direct_window_always_sp() -> None:
 
     assert "SP" in _nus_direct_window_line(None, 2)
     assert "SP" in _nus_direct_window_line({"type": "none"}, 2)
-    assert "SP" in _nus_direct_window_line(
-        {"type": "gaussian", "g1": 8.0, "g2": 15.0}, 2
-    )
+    assert "SP" in _nus_direct_window_line({"type": "gaussian", "g1": 8.0, "g2": 15.0}, 2)
     assert "SP" in _nus_direct_window_line({"type": "exp", "lb": 5.0}, 1)
     sb = _nus_direct_window_line(
         {"type": "sine_bell", "off": 0.5, "end": 0.98, "pow": 2, "c": 0.5},
@@ -102,9 +100,7 @@ def test_real_modes_nus_rejected(bruker_dir: Path) -> None:
     exp3 = read_dataset(bruker_dir / "nus_3d")
     exp3.acquisition_parameters["acqu3s"]["FnMODE"] = 1  # QF
     with pytest.raises(NotImplementedError, match="FnMODE=1"):
-        generate_3d_nus_script(
-            exp3, in_file="e.fid", nuslist="nuslist", out_file="e.ft3"
-        )
+        generate_3d_nus_script(exp3, in_file="e.fid", nuslist="nuslist", out_file="e.ft3")
 
 
 def test_real_modes_uniform_scripts(bruker_dir: Path) -> None:
@@ -127,9 +123,7 @@ def test_real_modes_uniform_scripts(bruker_dir: Path) -> None:
         td_y = int(exp.acquisition_parameters["acqu2s"]["TD"])
         exp.acquisition_parameters["acqu2s"]["FnMODE"] = mode
         plan = select_method(exp)
-        script = generate_process_script(
-            exp, plan, in_file="a.fid", out_file="a.ft2"
-        )
+        script = generate_process_script(exp, plan, in_file="a.fid", out_file="a.ft2")
         assert ft_line in script, (mode, ft_line)
         assert ("| nmrPipe -fn MC \\" in script) == has_mc, mode
         assert script.count("| nmrPipe -fn PS") == (1 if mode == 1 else 2)  # QF: direct dim only
@@ -262,13 +256,20 @@ def test_2d_nus_script(bruker_dir: Path) -> None:
     from backend.script_generator import generate_2d_nus_script
 
     script = generate_2d_nus_script(
-        exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft2",
-        nuslist_count=5, ext_lo="9.0", ext_hi="7.5", nsigma=7.0, thresh=0.85,
+        exp,
+        in_file="exp.fid",
+        nuslist="nuslist",
+        out_file="exp.ft2",
+        nuslist_count=5,
+        ext_lo="9.0",
+        ext_hi="7.5",
+        nsigma=7.0,
+        thresh=0.85,
     )
     assert script.startswith("#!/bin/csh")
     assert "nmrPipe -in exp.fid \\" in script
     assert "| nmrPipe -fn SMILE -nDim 2" in script
-    assert "-sample nuslist" in script   # pass the sampling list to SMILE when present
+    assert "-sample nuslist" in script  # pass the sampling list to SMILE when present
     assert "-sample None" in generate_2d_nus_script(
         exp, in_file="exp.fid", nuslist="", out_file="exp.ft2"
     )
@@ -283,6 +284,8 @@ def test_2d_nus_script(bruker_dir: Path) -> None:
     assert "  -out exp.ft2 -ov" in script
     assert "| pipe2xyz -out exp.ft2" not in script
     assert "\r" not in script
+
+
 def test_smile_max_iter_tiers() -> None:
     """0.2.137: SMILE -maxIter is tiered by sampling rate (>0.5->300, >0.3->600,
     >0.15->1000, otherwise 1500)."""
@@ -306,13 +309,9 @@ def test_smile_cross_term_args_only_by_ct(bruker_dir: Path) -> None:
     assert smile_cross_term_args(exp2) == ""  # not added for an ordinary 2D
     assert smile_cross_term_args(exp3) == ""  # not added for an ordinary 3D
     # constant-time: the indirect dimension explicitly disables cross terms
-    exp2.acquisition_parameters.setdefault("acqus", {})["PULPROG"] = (
-        "hsqcctetgpsp.2"
-    )
+    exp2.acquisition_parameters.setdefault("acqus", {})["PULPROG"] = "hsqcctetgpsp.2"
     assert smile_cross_term_args(exp2) == "-xCT 1 "
-    exp3.acquisition_parameters.setdefault("acqus", {})["PULPROG"] = (
-        "cthsqcetgp.2"
-    )
+    exp3.acquisition_parameters.setdefault("acqus", {})["PULPROG"] = "cthsqcetgp.2"
     assert smile_cross_term_args(exp3) == "-xCT 1 -yCT 1 "
 
 
@@ -329,14 +328,10 @@ def test_3d_nus_script_max_iter_by_sampling(bruker_dir: Path) -> None:
     hi = generate_3d_nus_script(exp, nuslist_count=int(grid * 0.6), **base)
     assert "-maxIter 300" in hi
     assert "-xCT" not in hi  # ordinary experiment (not CT): no cross-term arguments
-    lo = generate_3d_nus_script(
-        exp, nuslist_count=max(1, int(grid * 0.1)), **base
-    )
+    lo = generate_3d_nus_script(exp, nuslist_count=max(1, int(grid * 0.1)), **base)
     assert "-maxIter 1500" in lo
     assert "-xCT" not in lo  # ordinary experiment (not CT): no cross-term arguments
-    exp.acquisition_parameters.setdefault("acqus", {})["PULPROG"] = (
-        "cthsqcetgp.2"
-    )
+    exp.acquisition_parameters.setdefault("acqus", {})["PULPROG"] = "cthsqcetgp.2"
     ct = generate_3d_nus_script(exp, nuslist_count=int(grid * 0.8), **base)
     assert "-xCT 1 -yCT 1 -thresh" in ct  # CT experiments disable cross terms even at high sampling
 
@@ -367,9 +362,7 @@ def test_nus_finalize_script_2d(bruker_dir: Path) -> None:
     exp = read_dataset(bruker_dir / "nus_2d")
     from backend.script_generator import generate_nus_finalize_script
 
-    script = generate_nus_finalize_script(
-        exp, planes="nus2d/recon.ft1", out_file="e.ft2"
-    )
+    script = generate_nus_finalize_script(exp, planes="nus2d/recon.ft1", out_file="e.ft2")
     assert "nmrPipe -in nus2d/recon.ft1 \\" in script
     assert "| nmrPipe -fn FT -alt \\" in script
     assert "| nmrPipe -fn PS -p0 0 -p1 0 -di" in script
@@ -377,17 +370,23 @@ def test_nus_finalize_script_2d(bruker_dir: Path) -> None:
     assert "  -out e.ft2 -ov" in script
     assert "| nmrPipe -fn SMILE" not in script  # does not re-run SMILE
     phased = generate_nus_finalize_script(
-        exp, planes="nus2d/recon.ft1", out_file="e.ft2",
+        exp,
+        planes="nus2d/recon.ft1",
+        out_file="e.ft2",
         phases={"F1": (12.0, -3.0)},
     )
     assert "| nmrPipe -fn PS -p0 12 -p1 -3 -di" in phased
     assert "-neg" not in phased  # 2D indirect dim (F1) gets no -neg (unlike 3D F2)
+
+
 def test_nus_finalize_script_3d(bruker_dir: Path) -> None:
     exp = read_dataset(bruker_dir / "nus_3d")
     from backend.script_generator import generate_nus_finalize_script
 
     phased = generate_nus_finalize_script(
-        exp, planes="nus3d_rc/test%04d.ft1", out_file="e.ft3",
+        exp,
+        planes="nus3d_rc/test%04d.ft1",
+        out_file="e.ft3",
         phases={"F2": (12.0, -3.0), "F1": (5.0, 2.0)},
     )
     assert "xyz2pipe -in nus3d_rc/test%04d.ft1 -x" in phased
@@ -406,13 +405,14 @@ def test_2d_nus_script_extract_off(bruker_dir: Path) -> None:
     exp = read_dataset(bruker_dir / "nus_2d")
     from backend.script_generator import generate_2d_nus_script
 
-    on = generate_2d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2"
-    )
+    on = generate_2d_nus_script(exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2")
     assert "| nmrPipe -fn EXT" in on
     assert "-x1 10.5ppm -xn 6.5ppm" in on
     off = generate_2d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2",
+        exp,
+        in_file="e.fid",
+        nuslist="nuslist",
+        out_file="e.ft2",
         extract=False,
     )
     assert "| nmrPipe -fn EXT" not in off
@@ -423,13 +423,14 @@ def test_3d_nus_script_extract_off(bruker_dir: Path) -> None:
     from backend.script_generator import generate_3d_nus_script
 
     off = generate_3d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3",
+        exp,
+        in_file="e.fid",
+        nuslist="nuslist",
+        out_file="e.ft3",
         extract=False,
     )
     assert "| nmrPipe -fn EXT" not in off
-    on = generate_3d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3"
-    )
+    on = generate_3d_nus_script(exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3")
     assert "| nmrPipe -fn EXT" in on
 
 
@@ -438,8 +439,13 @@ def test_3d_nus_script(bruker_dir: Path) -> None:
     from backend.script_generator import generate_3d_nus_script
 
     script = generate_3d_nus_script(
-        exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3",
-        nuslist_count=4, ext_lo="9.0", ext_hi="7.5",
+        exp,
+        in_file="exp.fid",
+        nuslist="nuslist",
+        out_file="exp.ft3",
+        nuslist_count=4,
+        ext_lo="9.0",
+        ext_hi="7.5",
     )
     assert "-fn SMILE -nDim 3" in script
     assert "-sample nuslist" in script
@@ -453,9 +459,7 @@ def test_3d_nus_script(bruker_dir: Path) -> None:
     assert "| nmrPipe -fn FT \\" in script
     assert generate_3d_nus_script(
         exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3"
-    ) == generate_3d_nus_script(
-        exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3"
-    )
+    ) == generate_3d_nus_script(exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3")
 
 
 def test_3d_nus_script_smile_tuning(bruker_dir: Path) -> None:
@@ -463,13 +467,19 @@ def test_3d_nus_script_smile_tuning(bruker_dir: Path) -> None:
     from backend.script_generator import generate_3d_nus_script
 
     script = generate_3d_nus_script(
-        exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3",
-        nsigma=5.0, thresh=0.99, smile_scaling=True, smile_report=2,
+        exp,
+        in_file="exp.fid",
+        nuslist="nuslist",
+        out_file="exp.ft3",
+        nsigma=5.0,
+        thresh=0.99,
+        smile_scaling=True,
+        smile_report=2,
     )
     assert "-nSigma 5" in script
     assert "-thresh 0.99" in script
     assert "-xApod" not in script  # SMILE carries no window (step3 post-processing handles it)
-    assert "-xP0" not in script    # SMILE carries no phasing (step3 PS handles it)
+    assert "-xP0" not in script  # SMILE carries no phasing (step3 PS handles it)
     assert "-xAlt" in script  # F2=States-TPPI: consistent with step3 FT -alt
     assert "-xNeg" not in script  # handedness undecidable (no pulse program) ⇒ no negation
     assert "-yNeg" not in script  # F1=States: no direction flag
@@ -490,11 +500,9 @@ def test_3d_nus_script_default_smile_params(bruker_dir: Path) -> None:
     exp = read_dataset(bruker_dir / "nus_3d")
     from backend.script_generator import generate_3d_nus_script
 
-    script = generate_3d_nus_script(
-        exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3"
-    )
+    script = generate_3d_nus_script(exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3")
     assert "-xApod" not in script  # SMILE carries no window (step3 post-processing handles it)
-    assert "-xP0" not in script    # SMILE carries no phasing (step3 PS handles it)
+    assert "-xP0" not in script  # SMILE carries no phasing (step3 PS handles it)
     assert "-xAlt" in script  # F2=States-TPPI: consistent with step3 FT -alt
     assert "-xNeg" not in script  # handedness undecidable (no pulse program) ⇒ no negation
     assert "-yNeg" not in script  # F1=States: no direction flag
@@ -513,21 +521,20 @@ def test_smile_direction_flags_match_step3(bruker_dir: Path) -> None:
     from backend.script_generator import generate_2d_nus_script, generate_3d_nus_script
 
     exp3 = read_dataset(bruker_dir / "nus_3d")
-    s = generate_3d_nus_script(
-        exp3, in_file="e.fid", nuslist="nuslist", out_file="e.ft3"
-    )
+    s = generate_3d_nus_script(exp3, in_file="e.fid", nuslist="nuslist", out_file="e.ft3")
     assert "-xAlt" in s and "| nmrPipe -fn FT -alt \\" in s
     assert "-xNeg" not in s and "-neg" not in s
     assert "-yNeg" not in s and "-yAlt" not in s
     s = generate_3d_nus_script(
-        exp3, in_file="e.fid", nuslist="nuslist", out_file="e.ft3",
+        exp3,
+        in_file="e.fid",
+        nuslist="nuslist",
+        out_file="e.ft3",
         sampling={"flip_f1": True},
     )
     assert "-yNeg" in s and "| nmrPipe -fn FT -neg" in s  # F1 flip stays in sync
     exp2 = read_dataset(bruker_dir / "hsqc_2d")
-    s2 = generate_2d_nus_script(
-        exp2, in_file="e.fid", nuslist="nuslist", out_file="e.ft2"
-    )
+    s2 = generate_2d_nus_script(exp2, in_file="e.fid", nuslist="nuslist", out_file="e.ft2")
     assert "-xAlt" in s2 and "| nmrPipe -fn FT -alt" in s2
     assert "-xNeg" not in s2
 
@@ -536,7 +543,10 @@ def test_process_script_direct_phase(bruker_dir: Path) -> None:
     exp = read_dataset(bruker_dir / "hsqc_2d")
     plan = select_method(exp)
     script = generate_process_script(
-        exp, plan, in_file="a.fid", out_file="a.ft2",
+        exp,
+        plan,
+        in_file="a.fid",
+        out_file="a.ft2",
         direct_phase={"F2": (12.0, -3.0)},
     )
     assert "| nmrPipe -fn PS -p0 12 -p1 -3 -di \\" in script
@@ -547,11 +557,13 @@ def test_3d_nus_script_direct_phase(bruker_dir: Path) -> None:
     from backend.script_generator import generate_3d_nus_script
 
     script = generate_3d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3",
+        exp,
+        in_file="e.fid",
+        nuslist="nuslist",
+        out_file="e.ft3",
         direct_phase=(12.0, -3.0),
     )
     assert "| nmrPipe -fn PS -p0 12 -p1 -3 -di \\" in script
-
 
 
 def test_process_script_ext_default_6_11(bruker_dir: Path) -> None:
@@ -561,15 +573,9 @@ def test_process_script_ext_default_6_11(bruker_dir: Path) -> None:
     plan = select_method(exp)
     script = generate_process_script(exp, plan, in_file="a.fid", out_file="a.ft2")
     lines = script.splitlines()
-    ps_index = next(
-        i for i, line in enumerate(lines) if "| nmrPipe -fn PS" in line
-    )
-    ext_index = next(
-        i for i, line in enumerate(lines) if "| nmrPipe -fn EXT" in line
-    )
-    tp_index = next(
-        i for i, line in enumerate(lines) if "| nmrPipe -fn TP" in line
-    )
+    ps_index = next(i for i, line in enumerate(lines) if "| nmrPipe -fn PS" in line)
+    ext_index = next(i for i, line in enumerate(lines) if "| nmrPipe -fn EXT" in line)
+    tp_index = next(i for i, line in enumerate(lines) if "| nmrPipe -fn TP" in line)
     assert ps_index < ext_index < tp_index
     assert "| nmrPipe -fn EXT -x1 10.5ppm -xn 6.5ppm -sw -round 2" in script
 
@@ -577,16 +583,17 @@ def test_process_script_ext_default_6_11(bruker_dir: Path) -> None:
 def test_process_script_extract_disabled_and_custom(bruker_dir: Path) -> None:
     exp = read_dataset(bruker_dir / "hsqc_2d")
     plan = select_method(exp)
-    off = generate_process_script(
-        exp, plan, in_file="a.fid", out_file="a.ft2", extract=False
-    )
+    off = generate_process_script(exp, plan, in_file="a.fid", out_file="a.ft2", extract=False)
     assert "| nmrPipe -fn EXT" not in off
     custom = generate_process_script(
-        exp, plan, in_file="a.fid", out_file="a.ft2",
-        ext_lo="9.0", ext_hi="7.5",
+        exp,
+        plan,
+        in_file="a.fid",
+        out_file="a.ft2",
+        ext_lo="9.0",
+        ext_hi="7.5",
     )
     assert "| nmrPipe -fn EXT -x1 9.0ppm -xn 7.5ppm" in custom
-
 
 
 def test_process_script_baseline_default_and_overrides(bruker_dir: Path) -> None:
@@ -597,12 +604,18 @@ def test_process_script_baseline_default_and_overrides(bruker_dir: Path) -> None
     default = generate_process_script(exp, plan, in_file="a.fid", out_file="a.ft2")
     assert default.count("| nmrPipe -fn POLY -auto") == 2  # F2 + F1
     off = generate_process_script(
-        exp, plan, in_file="a.fid", out_file="a.ft2",
+        exp,
+        plan,
+        in_file="a.fid",
+        out_file="a.ft2",
         baseline={"F2": {"enabled": False}},
     )
     assert off.count("| nmrPipe -fn POLY") == 1
     ordered = generate_process_script(
-        exp, plan, in_file="a.fid", out_file="a.ft2",
+        exp,
+        plan,
+        in_file="a.fid",
+        out_file="a.ft2",
         baseline={"F1": {"mode": "order", "order": 2}},
     )
     assert "| nmrPipe -fn POLY -ord 2" in ordered
@@ -613,28 +626,30 @@ def test_2d_nus_script_baseline_insert(bruker_dir: Path) -> None:
     exp = read_dataset(bruker_dir / "nus_2d")
     from backend.script_generator import generate_2d_nus_script
 
-    script = generate_2d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2"
-    )
+    script = generate_2d_nus_script(exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2")
     assert script.count("| nmrPipe -fn POLY -auto") == 2
     stage2 = script.split("# stage 2:")[1].splitlines()
     ps_i = next(i for i, line in enumerate(stage2) if "| nmrPipe -fn PS" in line)
     assert "| nmrPipe -fn POLY" in stage2[ps_i + 1]
     off = generate_2d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2",
+        exp,
+        in_file="e.fid",
+        nuslist="nuslist",
+        out_file="e.ft2",
         baseline={"F1": {"enabled": False}},
     )
     assert off.count("| nmrPipe -fn POLY") == 1
+
+
 def test_3d_nus_script_baseline_insert(bruker_dir: Path) -> None:
     """NUS 3D: POLY is inserted after the direct-dimension EXT and after each of
     the F2/F1 PS lines (3 lines in total)."""
     exp = read_dataset(bruker_dir / "nus_3d")
     from backend.script_generator import generate_3d_nus_script
 
-    script = generate_3d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3"
-    )
+    script = generate_3d_nus_script(exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3")
     assert script.count("| nmrPipe -fn POLY -auto") == 3
+
 
 def test_effective_td_2d_nus_complex_grid(bruker_dir: Path) -> None:
     """2D NUS: F1 uses the complex-point grid TD//mult; an acqu2s NusTD=TD is not trusted."""
@@ -647,6 +662,7 @@ def test_effective_td_2d_nus_complex_grid(bruker_dir: Path) -> None:
     exp3 = read_dataset(bruker_dir / "nus_3d")
     td3 = effective_td(exp3)
     assert td3[1] == 48 and td3[2] == 128  # 3D keeps NusTD (already a complex-point count)
+
 
 def test_process_script_window_and_zero_fill_overrides(
     bruker_dir: Path,
@@ -721,9 +737,7 @@ def test_2d_nus_script_zero_fill_plan(bruker_dir: Path) -> None:
     )
 
     plan = zero_fill_plan(exp)
-    script = generate_2d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2"
-    )
+    script = generate_2d_nus_script(exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2")
     assert f"| nmrPipe -fn ZF -zf -size {plan['F2']['size']} \\" in script
     assert f"| nmrPipe -fn ZF -size {plan['F1']['size']} \\" in script
     # the NUS indirect dimension uses the reconstructed complex-point grid as TD
@@ -752,9 +766,7 @@ def test_finalize_script_zero_fill_plan(bruker_dir: Path) -> None:
     )
 
     plan = zero_fill_plan(exp)
-    script = generate_nus_finalize_script(
-        exp, planes="nus2d/recon.ft1", out_file="e.ft2"
-    )
+    script = generate_nus_finalize_script(exp, planes="nus2d/recon.ft1", out_file="e.ft2")
     assert f"| nmrPipe -fn ZF -size {plan['F1']['size']} \\" in script
     off = generate_nus_finalize_script(
         exp,
@@ -764,6 +776,7 @@ def test_finalize_script_zero_fill_plan(bruker_dir: Path) -> None:
     )
     assert "| nmrPipe -fn ZF" not in off
 
+
 def test_3d_nus_script_phases_baked(bruker_dir: Path) -> None:
     """Full-script final run: the direct-dimension phase comes after EXT (the same
     normalisation as the in-memory rotation of the recon plane), and the indirect-
@@ -772,15 +785,17 @@ def test_3d_nus_script_phases_baked(bruker_dir: Path) -> None:
     from backend.script_generator import generate_3d_nus_script
 
     script = generate_3d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3",
+        exp,
+        in_file="e.fid",
+        nuslist="nuslist",
+        out_file="e.ft3",
         direct_phase=(12.0, -3.0),
         phases={"F2": (10.0, -5.0), "F1": (20.0, 3.0)},
     )
     lines = script.splitlines()
     ext_i = next(i for i, line in enumerate(lines) if "| nmrPipe -fn EXT" in line)
     step1_ps = next(
-        i for i, line in enumerate(lines)
-        if "| nmrPipe -fn PS -p0 12 -p1 -3 -di" in line
+        i for i, line in enumerate(lines) if "| nmrPipe -fn PS -p0 12 -p1 -3 -di" in line
     )
     assert step1_ps > ext_i  # direct-dimension phase after EXT
     assert "| nmrPipe -fn PS -p0 10 -p1 -5 -di \\" in script
@@ -793,15 +808,17 @@ def test_2d_nus_script_phases_baked(bruker_dir: Path) -> None:
     from backend.script_generator import generate_2d_nus_script
 
     script = generate_2d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2",
+        exp,
+        in_file="e.fid",
+        nuslist="nuslist",
+        out_file="e.ft2",
         direct_phase=(12.0, -3.0),
         phases={"F1": (20.0, 3.0)},
     )
     lines = script.splitlines()
     ext_i = next(i for i, line in enumerate(lines) if "| nmrPipe -fn EXT" in line)
     step1_ps = next(
-        i for i, line in enumerate(lines)
-        if "| nmrPipe -fn PS -p0 12 -p1 -3 -di" in line
+        i for i, line in enumerate(lines) if "| nmrPipe -fn PS -p0 12 -p1 -3 -di" in line
     )
     assert step1_ps > ext_i
     assert "| nmrPipe -fn PS -p0 20 -p1 3 -di \\" in script
@@ -815,7 +832,10 @@ def test_3d_nus_script_window(bruker_dir: Path) -> None:
     from backend.script_generator import generate_3d_nus_script
 
     script = generate_3d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3",
+        exp,
+        in_file="e.fid",
+        nuslist="nuslist",
+        out_file="e.ft3",
         window={
             "F3": {"type": "gaussian", "g1": 3.0, "g2": 0.2},
             "F2": {"type": "sine_bell_squared"},
@@ -831,17 +851,11 @@ def test_3d_nus_script_window(bruker_dir: Path) -> None:
     lines = script.splitlines()
     f2_sp = next(i for i, line in enumerate(lines) if "pow 2 -c 0.5" in line)
     f2_zf = next(
-        i for i, line in enumerate(lines)
-        if line.startswith("| nmrPipe -fn ZF") and i > f2_sp
+        i for i, line in enumerate(lines) if line.startswith("| nmrPipe -fn ZF") and i > f2_sp
     )
-    f2_ft = next(
-        i for i, line in enumerate(lines)
-        if "| nmrPipe -fn FT" in line and i > f2_zf
-    )
+    f2_ft = next(i for i, line in enumerate(lines) if "| nmrPipe -fn FT" in line and i > f2_zf)
     assert f2_sp < f2_zf < f2_ft  # the window precedes ZF/FT
-    plain = generate_3d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3"
-    )
+    plain = generate_3d_nus_script(exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3")
     assert "| nmrPipe -fn GM" not in plain
     assert plain.count("| nmrPipe -fn SP") == 1  # only the step1 direct-dimension default window
 
@@ -851,7 +865,9 @@ def test_nus_finalize_script_3d_window(bruker_dir: Path) -> None:
     from backend.script_generator import generate_nus_finalize_script
 
     script = generate_nus_finalize_script(
-        exp, planes="nus3d_rc/test%04d.ft1", out_file="e.ft3",
+        exp,
+        planes="nus3d_rc/test%04d.ft1",
+        out_file="e.ft3",
         phases={"F2": (10.0, -5.0), "F1": (20.0, 3.0)},
         window={
             "F2": {"type": "sine_bell"},
@@ -862,24 +878,12 @@ def test_nus_finalize_script_3d_window(bruker_dir: Path) -> None:
     assert "| nmrPipe -fn GM -g1 4 -g2 15 \\" in script
     lines = script.splitlines()
     sp_idx = next(i for i, line in enumerate(lines) if "pow 1 -c 0.5" in line)
-    zf_idx = next(
-        i for i, line in enumerate(lines)
-        if "| nmrPipe -fn ZF" in line and i > sp_idx
-    )
-    ft_idx = next(
-        i for i, line in enumerate(lines)
-        if "| nmrPipe -fn FT" in line and i > zf_idx
-    )
+    zf_idx = next(i for i, line in enumerate(lines) if "| nmrPipe -fn ZF" in line and i > sp_idx)
+    ft_idx = next(i for i, line in enumerate(lines) if "| nmrPipe -fn FT" in line and i > zf_idx)
     assert sp_idx < zf_idx < ft_idx
     gm_idx = next(i for i, line in enumerate(lines) if "GM -g1 4" in line)
-    zf2_idx = next(
-        i for i, line in enumerate(lines)
-        if "| nmrPipe -fn ZF" in line and i > gm_idx
-    )
-    ft2_idx = next(
-        i for i, line in enumerate(lines)
-        if "| nmrPipe -fn FT" in line and i > zf2_idx
-    )
+    zf2_idx = next(i for i, line in enumerate(lines) if "| nmrPipe -fn ZF" in line and i > gm_idx)
+    ft2_idx = next(i for i, line in enumerate(lines) if "| nmrPipe -fn FT" in line and i > zf2_idx)
     assert gm_idx < zf2_idx < ft2_idx
 
 
@@ -934,9 +938,7 @@ def test_read_fid_com_correction_records_skips_specialised_keys(tmp_path: Path) 
         ),
         encoding="utf-8",
     )
-    assert read_fid_com_correction_records(work) == [
-        "xLAB: fid.com=HN -> acqus=1H (corrected)"
-    ]
+    assert read_fid_com_correction_records(work) == ["xLAB: fid.com=HN -> acqus=1H (corrected)"]
 
 
 def test_real_mode_ft_flags_honour_the_sampling_override(bruker_dir: Path) -> None:
@@ -953,9 +955,7 @@ def test_real_mode_ft_flags_honour_the_sampling_override(bruker_dir: Path) -> No
         plain = generate_process_script(exp, plan, in_file="a.fid", out_file="a.ft2")
         # the real family's direction flag is on the **indirect-dimension** FT line
         # (the last one)
-        plain_ft = [
-            line for line in plain.splitlines() if "-fn FT" in line
-        ][-1]
+        plain_ft = [line for line in plain.splitlines() if "-fn FT" in line][-1]
         assert "-neg" not in plain_ft, mode
         if base:
             assert base in plain_ft, (mode, plain_ft)

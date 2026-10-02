@@ -128,9 +128,11 @@ window.F1.off,window.F2.off,zero_fill.F1,baseline.F2.enabled,points_per_line.F1
 0.45,0.45,4,true,2
 ```
 
-- 高斯拟合预算(config `peaks.localization`,2026-09-14):`gaussian_roi_max_points`
-  (每轴半宽点数上限,**默认 0 = 不限制**,结果与旧版一致;设 48 等正值可提速,
-  但细网格上会改结果并逐峰留档)、`gaussian_max_nfev`(单峰求值上限,默认 200);
+- 峰定位配置(config `peaks.localization`,2026-09-26 起)只剩一项
+  `method: parabolic`(唯一方法:三点抛物线顶点,与 `peak_detection` 同一实现);
+  2026-09-26(用户需求⑦)删掉了二维高斯拟合,原有的 `gaussian_roi_*` /
+  `gaussian_max_nfev` 预算键一并删除——没有「拟合迭代预算」这回事,
+  抛物线是确定性闭式解;
 - 直接维范围 `ext_lo`/`ext_hi` 只作用于**直接维**;3D 数据请用 `window.F3.*` 等
   逐轴键(若该轴是直接维);
 - 参考层的逐轴参数(参考谱定义)用参考模式的 `params=`/`direct_range=` 指定,
@@ -191,7 +193,7 @@ python -m nmrforge_api sweep --study ~/studies/s1 --reference ~/studies/s1 \
 ```
 
 - **参考模式**:范围是参考谱的定义之一;与已建参考不一致时会**重建参考谱并重测
-  两张参考峰表**(日志说明),`force=True` 无条件重建;
+  参考峰表**(日志说明),`force=True` 无条件重建;
 - **组合模式**:`direct_range=` 写入本批 `base_overrides`(参考谱不重建),每个
   条件仍先使用自己的参考有效参数,逐组合还可用 `ext_lo`/`ext_hi` 最后覆盖
   (`plan.notes` 会说明口径);覆盖值与参考冻结范围**不一致时默认报错**——必须显式
@@ -234,7 +236,7 @@ python -m nmrforge_api peaks --study ~/studies/s1 --sigma 20
   `detection.sigma_multiplier` 与 `detection.threshold_source`
   (`user` / `default(35sigma)`);每条 workflow 记录另记
   `parameters_resolved.detection`(`source="reference(locked)"`、实际 σ、边距、
-  噪声 σ、精修方法列表;`independent=true`、`reference_matching="external"`);
+  噪声 σ、定位方式 `parabolic`;`independent=true`、`reference_matching="external"`);
 - 阈值过高导致选不出峰 → 明确报错(不静默产出空峰表);
 - 阈值写进 workflow 参数组合表 → 直接报错(`SweepError`),提示「要改阈值请重建
   参考」;
@@ -242,45 +244,47 @@ python -m nmrforge_api peaks --study ~/studies/s1 --sigma 20
 
 ## 5.11 限定峰的定位(targeted localization,2026-09-19)
 
-`localization` 的作用范围默认是该谱的**全部检出峰**。批量 ensemble 的成本集中在
-阈值受限的相关噪声峰上(实测:合成谱 431 个检出峰里只有约 75 个对应真值,
-Gaussian 回退率约 69%,同一批 5 行 parabolic 36 s、加 Gaussian 约 13 min),因此
-提供一等公民入口,只精修指定峰:
+峰定位的作用范围默认是该谱的**全部检出峰**;批量 ensemble 里往往只需要精修
+少数关心的峰,因此提供一等公民入口,只精修指定峰:
 
 ```python
-run_combination_study(f"{root}#A", combos=..., localization="gaussian",
+run_combination_study(f"{root}#A", combos=...,
                       localize_peaks="truth_peaks.csv")
-run_sweep(session, plan, localization="both", localize_peaks=[1, 5, 9])
-detect_and_localize(spectrum, method="gaussian", targets=(1, 5, 9))
+run_sweep(session, plan, localize_peaks=[1, 5, 9])
+detect_and_localize(spectrum, targets=(1, 5, 9))
 ```
 
 ```bash
 python -m nmrforge_api sweep --study ~/studies/s1 --reference ~/studies/s1 \
-    --combos design.csv --localization gaussian --localize-peaks truth_peaks.csv
+    --combos design.csv --localize-peaks truth_peaks.csv
 ```
 
 组合表里可以逐行指定(**优先级最高**;相对路径按**组合表所在目录**解析):
 
 ```csv
 zero_fill,localization,localization.targets
-1,gaussian,truth_peaks.csv
-2,gaussian,
+1,parabolic,truth_peaks.csv
+2,parabolic,
 ```
+
+> 2026-09-26(用户需求⑦):二维高斯拟合算法整体删除,峰定位只剩三点抛物线。
+> 因此 `localization` 只接受 `parabolic`,`localization.targets` 只有上面这一种
+> 方法无关写法;逐方法键见 §5.12(已删除)。
 
 目标列表 CSV 至少一列 `peak_id`(可另带 `reference_peak_id` 供留档;单列文本、
 每行一个序号也接受;重复 id 去重并保留首次出现顺序)。语义:
 
-- **检出与峰集完全不受影响**:目标列表只决定「哪些峰参与该方法的精修」——
+- **检出与峰集完全不受影响**:目标列表只决定「哪些峰参与抛物线精修」——
   选峰、行数、`peak_id` 编号一律不变;
-- 未列入目标的峰**保留在表里**,位置取检出阶段的三点抛物线估计(即该行实际用的
-  方法);该方法的 QC 列(`fit_success`/`FWHM_*`/`fit_rmse`/`boundary_hit`)写
-  `NaN`(没做拟合,**不是**失败),`fallback` 为 false;
+- 未列入目标的峰**保留在表里**,位置取检出阶段的整数格极大值;定位 QC 列
+  (`fit_success`/`FWHM_H`/`FWHM_N`/`boundary_hit`)写 `NaN`(没做精修,**不是**
+  失败),`fallback` 为 false;
 - 逐峰失败照常记录(`fit_success=false` + `fallback_reason`),**不会**换候选
-  重新拟合;`n_fallback` 只统计真正做过拟合的峰;
+  重新拟合;`n_fallback` 只统计真正做过精修的峰;
 - 留档:`run.json.parameters_resolved.detection.localization_targets` =
   `{scope, source, path, sha256, n_targets, peak_ids, reference_peak_ids?}`
-  (风格同 `direct_range.source`);`peak_localization.<method>` 另有
-  `localization_scope`(`all`/`subset`)、`n_targeted`、`n_skipped`;
+  (风格同 `direct_range.source`);`peak_localization.parabolic` 另有
+  `localization_scope`(`all`/`subset`/`none`)、`n_targeted`、`n_skipped`;
 - 断点续跑指纹包含**解析后**的目标列表(路径 + SHA-256 + id):换了目标列表、甚至
   只改了同一路径 CSV 的内容,也会重跑而不会复用旧 run;
 - **报错**而不是静默退化成全谱。静态错误(空列表 / 文件不存在 / 缺 `peak_id` 列)
@@ -290,38 +294,20 @@ zero_fill,localization,localization.targets
   workflow × 条件一张自己的谱),不会静默忽略、也不会换峰;
 - 不给目标 = 现在的全谱行为(`scope=all`),对既有研究根与记录零影响。
 
-## 5.12 逐方法目标键(按方法分别限定,2026-09-20)
+## 5.12 逐方法目标键(**已删除**,2026-09-26)
 
-`both` 模式最常用的组合是「parabolic 全谱 + 只对指定目标峰做 gaussian」:
+旧版(2026-09-20)允许按方法分别限定目标峰,常用组合是「parabolic 全谱 + 只对
+指定目标峰做 gaussian」。二维高斯拟合算法整体删除后**单方法下没有「逐方法」这
+回事**,这些写法全部取消,命中即报 `SweepError`:
 
-```python
-run_combination_study(f"{root}#A", combos=..., localization="both",
-                      localize_peaks={"gaussian": "truth_peaks.csv"})
-```
+- API 映射写法 `localize_peaks={"gaussian": "truth_peaks.csv"}`(以及 `"both"` 键);
+- 组合表键 `localization.targets.<方法>`(含 `localization.targets.all` 之外的方法名);
+- CLI `--localize-peaks-gaussian` / `--localize-peaks-parabolic`(两个选项已删除,
+  只留 `--localize-peaks`)。
 
-```bash
-python -m nmrforge_api sweep --study ~/studies/s1 --reference ~/studies/s1 \
-    --combos design.csv --localization both \
-    --localize-peaks-gaussian truth_peaks.csv
-```
-
-组合表里逐行写(`localization.targets.<方法>`;相对路径仍按组合表目录解析):
-
-```csv
-zero_fill,localization,localization.targets.gaussian,localization.targets.parabolic
-1,both,truth_peaks.csv,
-2,both,,""
-```
-
-语义与单列写法完全一致(**检出不变、未列入的峰保留、默认不变**),补充三条:
-
-- 优先级:`localization.targets.<方法>` > `localization.targets.all`(或 `all`/`*`/
-  `both` 键)> `localization.targets` > 调用参数 `localize_peaks=`;逐方法键只覆盖
-  该方法,其余方法沿用调用参数;
-- 显式写空串 = 该方法**不限定**(与「没给」区分:没给会继承方法无关那份);
-- 留档:`parameters_resolved.detection.localization_targets` 顶层保持方法无关口径
-  (`scope` 在逐方法不一致时写 `mixed`),逐方法明细在 `by_method.<方法>`(含该方法
-  自己的 `n_skipped`);`peak_localization.<method>` 的计数照旧按方法给。
+替代写法就是 §5.11 的方法无关形式:`localize_peaks=<CSV>` /
+`localization.targets = <CSV>`(映射里只剩 `all`/`*` 作公共默认值)。留档因此不再有
+`by_method` 明细,`scope` 也不再出现 `mixed`。
 
 ## 5.13 条件粒度(按 (workflow, 条件) 限定,2026-09-20)
 
@@ -348,7 +334,7 @@ B,41
 `on_missing` 写在映射写法里(用例参数或逐行组合表):
 
 ```python
-run_combination_study(f"{root}", combos=..., localization="gaussian",
+run_combination_study(f"{root}", combos=...,
                       localize_peaks={"path": "targets.csv", "on_missing": "none"})
 ```
 
@@ -356,9 +342,9 @@ run_combination_study(f"{root}", combos=..., localization="gaussian",
 A/B,不必为每个条件再跑一次 sweep):
 
 ```python
-run_combination_study(f"{root}", combos=..., localization="gaussian",
+run_combination_study(f"{root}", combos=...,
                       localize_peaks={"A": "a.csv", "B": "b.csv"})
-run_combination_study(f"{root}", combos=..., localization="gaussian",
+run_combination_study(f"{root}", combos=...,
                       localize_peaks={"default": "all_conditions.csv",
                                       "by_condition": {"A": "a.csv"}})
 ```
@@ -366,15 +352,15 @@ run_combination_study(f"{root}", combos=..., localization="gaussian",
 组合表里同样能写(CSV 单元格用花括号写法,相对路径仍按组合表目录解析):
 
 ```csv
-zero_fill,localization,localization.targets.gaussian
-1,gaussian,"{A: a.csv, B: b.csv}"
+zero_fill,localization,localization.targets
+1,parabolic,"{A: a.csv, B: b.csv}"
 ```
 
 留档:`run.json.parameters_resolved.detection.localization_targets` 顶层保留
 `path`/`sha256`(整文件)与本 run 实际生效的 `peak_ids`/`n_targets`/`n_skipped`,
 按条件写时另有 `condition`/`on_missing`,新增 `by_condition`(逐条件:
 `peak_ids`/`n_targets`/`line_ranges` 行号范围/`path` + `sha256` 来源文件/`from`);
-整批共用时 `by_condition` 写 `"all"`。`peak_localization.<method>.n_targeted` /
+整批共用时 `by_condition` 写 `"all"`。`peak_localization.parabolic.n_targeted` /
 `n_skipped` **仍是逐 run 口径**。断点续跑指纹带**解析后的逐条件清单**,且只带本
 条件那一份:改 A 的行不会让 B 重跑(映射写法各自文件另带自己的 SHA-256)。指纹
 载荷形状变了 → 既有断点缓存会失效**一次**并重算一遍同样数字(数值不变)。

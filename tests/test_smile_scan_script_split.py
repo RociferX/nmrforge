@@ -27,16 +27,12 @@ BRUKER = Path(__file__).resolve().parent / "fixtures" / "bruker"
 
 def _script_3d() -> str:
     exp = read_dataset(BRUKER / "nus_3d")
-    return generate_3d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3"
-    )
+    return generate_3d_nus_script(exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft3")
 
 
 def _script_2d() -> str:
     exp = read_dataset(BRUKER / "nus_2d")
-    return generate_2d_nus_script(
-        exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2"
-    )
+    return generate_2d_nus_script(exp, in_file="e.fid", nuslist="nuslist", out_file="e.ft2")
 
 
 def test_3d_script_splits_at_slice_boundary() -> None:
@@ -45,14 +41,10 @@ def test_3d_script_splits_at_slice_boundary() -> None:
     """
     prefix, suffix = split_nus_script(_script_3d())
 
-    assert prefix.rstrip().splitlines()[-1].strip() == (
-        "| pipe2xyz -out nus3d_1/test%04d.ft1 -z"
-    )
-    assert suffix.splitlines()[0].strip().startswith(
-        "xyz2pipe -in nus3d_1/test%04d.ft1 -x"
-    )
+    assert prefix.rstrip().splitlines()[-1].strip() == ("| pipe2xyz -out nus3d_1/test%04d.ft1 -z")
+    assert suffix.splitlines()[0].strip().startswith("xyz2pipe -in nus3d_1/test%04d.ft1 -x")
     assert "-fn SMILE" not in prefix  # the direct-dimension part does not run SMILE
-    assert "-fn SMILE" in suffix   # the second part carries SMILE + the indirect dimension
+    assert "-fn SMILE" in suffix  # the second part carries SMILE + the indirect dimension
     assert "-out e.ft3" in suffix
 
 

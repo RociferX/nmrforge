@@ -86,9 +86,7 @@ def test_failure_marks_only_its_own_data(tmp_path: Path) -> None:
     assert compute_data_step_statuses(manager, exp.id, d1.id)["spectrum"] != "FAILED"
 
 
-def test_tree_and_pipeline_agree(
-    tmp_path: Path, qapp: QApplication, host
-) -> None:
+def test_tree_and_pipeline_agree(tmp_path: Path, qapp: QApplication, host) -> None:
     """The project tree's "failed" and the Pipeline step FAILED must share one source."""
     manager, exp, d1 = _project(tmp_path, "own_agree")
     d2 = manager.import_data(exp.id, "/fake/2")
@@ -107,9 +105,7 @@ def test_step_refs_table_is_single_source(tmp_path: Path) -> None:
     """
     assert set(STEP_RUN_REFS) == {"fid", "spectrum", "smile", "peaks"}
     assert "phase_optimize_unified" in STEP_RUN_REFS["spectrum"]
-    assert set(ALL_STEP_RUN_REFS) == {
-        ref for refs in STEP_RUN_REFS.values() for ref in refs
-    }
+    assert set(ALL_STEP_RUN_REFS) == {ref for refs in STEP_RUN_REFS.values() for ref in refs}
     from gui.pipeline_panel import _step_refs
 
     for step, refs in STEP_RUN_REFS.items():

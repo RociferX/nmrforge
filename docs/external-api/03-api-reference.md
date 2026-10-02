@@ -28,28 +28,22 @@ build_reference(session, dataset=None, *, params=None, phase_route=None,
 load_reference(session, dataset=None) -> ReferenceSpectrum | None
 load_references(session) -> dict[str, ReferenceSpectrum]        # key = "exp/data"
 pick_reference_peaks(session, *, sigma_multiplier=None, out_path=None,
-                     details=None, localization_method="parabolic",
-                     gaussian_roi_f1_ppm=None, gaussian_roi_f2_ppm=None,
-                     dataset=None) -> Path
+                     details=None, dataset=None) -> Path
 set_reference_peaks(session, peak_table, reference=None, *,
                     source="external", params=None) -> ReferenceSpectrum
 ensure_reference_peaks(session, reference=None, *, sigma_multiplier=None,
-                       max_peaks=0, force=False,
-                       localization_method="parabolic",
-                       gaussian_roi_f1_ppm=None,
-                       gaussian_roi_f2_ppm=None) -> ReferenceSpectrum
+                       max_peaks=0, force=False) -> ReferenceSpectrum
 build_reference_peak_tables(session, reference, *, window_pts=None,
-                            window_ppm=None, roi_f1_ppm=None,
-                            roi_f2_ppm=None) -> ReferenceSpectrum
+                            window_ppm=None) -> ReferenceSpectrum
 ```
 
 - `build_reference` Go through the complete automatic chain (`generate_fid` -> `generate_spectrum`, including unity
   Phase optimisation), frozen spectrum and **actually executed script**; the actual results of automatic phase identification are written.
   `direct_phase`(`ReferenceSpectrum.phase_record()` gives `phase_mode="auto"` +.
   `actual_p0/actual_p1`);
-- `ensure_reference_peaks`: Main condition automatically selects peaks (or external peak table) to establish peak identity
-  `reference.list`; the same identity table is copied to the other conditions; **two reference peak
-  tables are always written afterwards** (`reference_peak_table_parabolic.csv` / `_gaussian.csv`);
+- `ensure_reference_peaks`: the main condition selects peaks automatically (or uses an external
+  peak table) to establish identities in `reference.list`; other conditions share those identities.
+  It writes one `reference_peak_table_parabolic.csv`;
 - `sigma_multiplier` (peak selection threshold, σ multiple) **can be specified externally when generating the reference**: default 35σ;
   Once the reference peak table is frozen, all subsequent workflows can only use the reference threshold -- and then throw different thresholds.
   `ReferenceError` (Change the threshold value to the reconstruction reference: `force=True` or delete the condition.
@@ -57,17 +51,16 @@ build_reference_peak_tables(session, reference, *, window_pts=None,
   `peak_params.previous_sigma_multiplier` /
   `peak_params.detection.sigma_multiplier` /
   `peak_params.detection.threshold_source`;
-- `localization_method` only determines the reference peak position selection method (default parabola); Gaussian on non-2D data
-  Do not skip silently: Gaussian table write `fallback=true` +.
-  `fallback_reason="gaussian_unsupported_ndim"`.
+- Reference peak positions use three-point parabolic localisation. Removed `gaussian` and `both`
+  requests raise an error; they are not silently downgraded.
 
 `ReferenceSpectrum` Key fields: `dataset_key`, `condition`, `ndim`, `sampling`.
 `frozen_spectrum`, `script_path`, `script_sha256`, `spectrum_sha256`, `params`,
 `sweep_params`, `direct_phase`, `peak_table_path`(identity table), `peak_count`.
 `peak_source`(`auto|external|shared:<condition>`), `peak_params`, `peak_tables`.
-(Paths to the two tables/Hash/Number of lines/detected number), `peak_localization`(position QC).
+(parabolic table path/hash/row count/detected count), `peak_localization`(position QC).
 `tool_versions`;Method:`direct_phase_override()`, `phase_record()`.
-`peak_table_parabolic_path`, `peak_table_gaussian_path`.
+`peak_table_parabolic_path`.
 
 ## 3.3 parameter combination and workflow plan
 
@@ -102,7 +95,7 @@ run_sweep(session, plan, *, reference=None, datasets=None,
           localization="parabolic", localize_peaks=None,
           edge_margin_ppm=None,
           sign="abs",            # legacy parameter (the detection sign convention is fixed to dominant)
-          roi_f1_ppm=None, roi_f2_ppm=None, resume=True,
+          resume=True,
           stop_on_error=False, progress=None, on_run=None) -> list[SweepRun]
 ```
 
@@ -117,8 +110,8 @@ run_sweep(session, plan, *, reference=None, datasets=None,
 - `parameters_used` Base = The condition refers to the effective parameters of the run (phase lock), and subsequently applies the batch
   `base_overrides`, the combination table finally covers only the keys it explicitly specifies; threshold class keys (`sigma_multiplier`/`min_snr`/`threshold_sigma`/.
   `detection.sigma_multiplier`) is written into the combination table -> `SweepError` (the threshold is locked at the reference);
-- `localization` = `parabolic`(default)/ `gaussian`(2D only)/ `both`: Output only the selected
-  Peak table; per combination can be overridden with the `localization` key of the combination table;
+- `localization` accepts only `parabolic`; `gaussian` and `both` raise `SweepError`. The
+  combination-table `localization` key follows the same rule;
 - `localize_peaks` (**targeted localization**, 2026-09-19): a CSV path (at least a
   `peak_id` column) / a sequence of peak numbers / `LocalizationTargets`; **only those
   peaks take the chosen method's refinement**. Detection, row count and `peak_id`
@@ -134,40 +127,39 @@ run_sweep(session, plan, *, reference=None, datasets=None,
   (unlimited) or `"none"` (refines nothing). A condition mapping
   `{"A": "a.csv", "B": "b.csv"}` or `{"default": "x.csv", "by_condition":
   {"A": "a.csv"}}` is also accepted;
-- `edge_margin_ppm` = exclude the physical width of the edge axis peak when selecting peaks (default 3 x nuclide line width of this axis)
-  Convert the number of points according to the point distance one by one and write it into `run.json.window`;
+- `edge_margin_ppm` is an optional manual edge exclusion margin. By default, experiment/acquisition
+  priors and spectrum evidence determine whether axial-edge screening applies; there is no
+  unconditional edge band. The effective point and ppm values are recorded in `run.json.window`;
 - Combined peak table **Do not track reference peak table**: `reference_peak_id`/`assignment` Leave blank, `detected`
   Always true (there are only peaks detected by this combination in the table).
 
-`SweepRun` For key fields and methods, see 06;`run.peak_table_path("parabolic"|"gaussian")`.
-Gives the peak table path for the selected method (an empty string is returned for unselected methods).
+`SweepRun` fields and methods are described in 06; `run.peak_table_path("parabolic")` returns the
+sole peak table path.
 
 ## 3.5 Peak position measurement (lower level)
 
 ```python
 measure_peak_positions(spectrum_path, peaks, *, window_pts=None,
                        window_ppm=None, axes=None, sign="abs",
-                       refine="parabolic", nuclei=None, roi_f1_ppm=None,
-                       roi_f2_ppm=None, noise_sigma=None,
+                       refine="parabolic", nuclei=None, noise_sigma=None,
                        exclusive_windows=True) -> list[PeakMeasurement]
-detect_and_localize(spectrum_path, *, method="parabolic",
+detect_and_localize(spectrum_path, *,
                     sigma_multiplier=None, edge_margin_ppm=None,
-                    edge_margin_points=None, roi_f1_ppm=None,
-                    roi_f2_ppm=None, sign_mode="dominant", axes=None)
+                    edge_margin_points=None, sign_mode="auto", axes=None,
+                    targets=None, allow_empty_targets=False, experiment=None)
     -> (list[dict], dict)     # combination-mode independent peak picking: peak_id = index in this spectrum, reference_peak_id=""
 read_reference_peaks(path) -> list[dict]      # fills in reference_peak_id
 window_points_by_axis(axes, *, window_pts=None, window_ppm=None) -> dict
 ```
 
-- `detect_and_localize` is the peak selection entrance of the combination mode: physical margin + `sigma_multiplier`
-  (Also do `min_snr`) + dominant symbol caliber, then press `method` to refine; without `max_peaks`.
-  (Write as many peaks as are detected under the locking threshold); Non-2D request `gaussian` throw `MeasurementError`;
-- `refine`:`parabolic`(default)|`none`|`gaussian`(**2D only**, not 2D throw
-  `MeasurementError("Gaussian peak fitting is currently supported only for
-  2D spectra.")`, no downgrade);
-- Gaussian failure peak-by-peak fallback parabola, `PeakMeasurement.localization` record
-  `requested_method`/`actual_method`/`fit_success`/`fallback`/
-  `fallback_reason`/`fit_rmse`/`boundary_hit` and press **Verification name**.
+- `detect_and_localize` detects peaks using the threshold (also used as `min_snr`), applies
+  experiment/acquisition-aware edge screening when evidence permits, selects sign handling from
+  experiment and spectrum evidence (`auto` by default), then uses three-point parabolic
+  localisation. There is no `max_peaks` limit. Explicit sign requests take precedence over auto;
+  without an `Experiment`, an independent spectrum retains edge peaks.
+- `refine` uses the three-point parabola. Requests for removed methods raise an explicit error.
+- `PeakMeasurement.localization` records localisation status, equivalent linewidth metrics,
+  `boundary_hit` and compatibility fields `fallback` / `fallback_reason`.
   `fwhm_by_nucleus`/`sigma_by_nucleus`;
 - `PeakMeasurement`:`peak_id`, `reference_peak_id`, `assignment`, `reference`,
   `positions`, `deltas`, `intensity`, `noise_sigma`, `snr`, `found`,
@@ -185,16 +177,13 @@ write_peak_table(path, rows) -> Path       # header = PEAK_TABLE_COLUMNS (includ
 read_peak_table(path) -> list[dict]        # NaN → float("nan")
 peak_table_rows(measurements, *, workflow_id, condition="", dataset="",
                 method="parabolic") -> list[dict]
-gaussian_fallback_rows(measurements, *, workflow_id, condition="", dataset="",
-                       reason) -> list[dict]
 reference_peak_id(peak_id) -> str          # 1 → "R0001"
 write_records(session, *, reference=None, references=None, plan, runs,
               peaks=None) -> dict[str, str]
 ```
 
-For fields and semantics, see 06;`write_records` produces `manifest.json`, `sweep_plan.json`.
-`runs.json`, `workflows.json`, `measurement.json`, two long tables.
-`peak_table_{parabolic,gaussian}.csv`.
+For fields and semantics, see 06; `write_records` produces `manifest.json`, `sweep_plan.json`,
+`runs.json`, `workflows.json`, `measurement.json` and the unified `peak_table_parabolic.csv`.
 
 ## 3.9 Two modes: reference mode / combination mode (2026-09-14)
 
@@ -209,17 +198,16 @@ run_reference_study(root, datasets={"A": "~/data/a"},
                     phase_route=None, peaks=None,
                     direct_range=(10.5, 6.5),         # direct-dimension range (high, low; ppm)
                     sigma_multiplier=25,              # peak-picking threshold (settable in this mode only)
-                    max_peaks=0, localization_method="parabolic",
-                    gaussian_roi_f1_ppm=None, gaussian_roi_f2_ppm=None,
+                    max_peaks=0,
                     backend=None, write=True, progress=None) -> ReferenceResult
 ```
 
-- Import condition data (optional) -> automatic optimisation reference spectrum and reference script -> two reference peak tables; do not make any parameters
+- Import condition data (optional) -> automatic reference spectrum and script -> one parabolic reference peak table; no parameter combinations are run
   Combination;
 - The peak selection threshold, reference peak table (external peak table), and localization are all determined at this stage, and then locked;
 - Reference phase window/baseline **Automatic optimisation **On by default; `params["reference_optimize"]` can be turned off or
   Limited candidate (Test only/Recurrence/audit; real experiments are not available, and must be stated in the record after use);
-- Product: `study/reference/<key>/`(script /Spectrum/Two peak tables)+ `study/records/reference.json`;
+- Product: `study/reference/<key>/`(script/spectrum/one parabolic peak table)+ `study/records/reference.json`;
 - `ReferenceResult`:`session` / `references`(key → `ReferenceSpectrum`),
   `conditions`, `reference(condition="")`, `peak_tables`, `records`.
 
@@ -229,11 +217,10 @@ run_reference_study(root, datasets={"A": "~/data/a"},
 run_combination_study(reference,                  # <- required: give the reference explicitly
                       combos=[{"zero_fill": 1}],  # or axes=...
                       max_runs=256,
-                      localization="parabolic",       # parabolic / gaussian / both
+                      localization="parabolic",       # only supported method
                       localize_peaks=None,            # refine only the named peaks (CSV/ids)
-                      edge_margin_ppm=None,             # defaults to 3× the nucleus line width (physical width)
+                      edge_margin_ppm=None,             # optional manual edge margin
                       direct_range=(10.0, 6.5),        # overrides the workflow base value for this batch
-                      roi_f1_ppm=None, roi_f2_ppm=None,
                       resume=True, backend=None, write=True,
                       progress=None) -> StudyResult
 ```
@@ -252,9 +239,9 @@ How to write `reference` (string/Path, or `ReferenceHandle`):
 - **Independent peak selection for combinations**: Each combination independently detects its own complete peak table on its own candidate spectrum
   (`peak_id` = serial number of this spectrum, `reference_peak_id`/`assignment` left blank), and
   matching against the reference peak table is done downstream. On a per-combination basis, record
-  `parameters_resolved.detection` (locked-threshold source `source="reference(locked)"`, margin,
-  noise σ, refinement method list);
-- `localization` Only the selected peak table is output; each combination can be overwritten by the combination table `localization` key;
+  `parameters_resolved.detection` (locked-threshold source `source="reference(locked)"`, manual
+  margin, noise σ and the parabolic refinement method);
+- `localization` accepts only `parabolic`, including in a combination-table override;
 - Reference does not exist/Peak table missing -> `ReferenceError`, the error message indicates that the reference mode should be run first;
 - Each running record indicates the reference: `run.json.base_script`(script/spectrum hash)
   `parameters_resolved.reference` (refer to peak table hash, etc.), `manifest.json` note.
@@ -283,7 +270,7 @@ Auxiliary function: `parse_reference_spec(spec) -> ReferenceHandle`.
 | --- | --- |
 | `DatasetError` | The data directory is not recognized, the condition label is repeated, and there is no dataset in the study |
 | `ReferenceError` | Reference spectrum/Product missing, the peak table does not exist |
-| `MeasurementError` | Spectrum does not exist, parameter is illegal, Gaussian is used in non-2D |
+| `MeasurementError` | Spectrum does not exist, parameter is illegal, or a removed localisation method was requested |
 | `SweepError` | combination table/grid illegal (locked key, exceeded upper limit, no design input), unsupported data type |
 
 All four inherit `SensitivityError`.

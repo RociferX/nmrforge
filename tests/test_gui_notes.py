@@ -26,6 +26,7 @@ from gui.notes import (
     note_fields,
     sample_note,
     sample_note_fields,
+    sampling_mode_text,
     set_data_note_fields,
     set_experiment_note_fields,
     set_sample_note_fields,
@@ -70,6 +71,7 @@ def test_note_fields_schemas_differ_per_level() -> None:
         "dimension",
         "experiment_type",
         "nuclei",
+        "sampling_mode",
         "peak_sign",
         "notes",
     ]
@@ -158,6 +160,10 @@ def test_center_panel_notes_bar(tmp_path: Path, qapp: QApplication) -> None:
     assert "实验类型: 指认实验" in panel.notes_label.text()
     panel.set_selection("data", exp_id, data_id)
     assert "重复号: 3" in panel.notes_label.text()
+    from ui_support.i18n import tr
+
+    source_line = tr("Source path: {p0}", p0=str(Path("/fake/1").resolve()))
+    assert source_line in panel.notes_label.text()
     assert not panel.edit_notes_button.isHidden()
     seen: list[tuple[str, str, str]] = []
     panel.edit_notes_requested.connect(lambda k, e, d: seen.append((k, e, d)))
@@ -185,23 +191,17 @@ def test_main_window_menu_experiment(
 
         def list_projects(self):
             return sorted(
-                p
-                for p in self.root.iterdir()
-                if p.is_dir() and (p / "project.json").is_file()
+                p for p in self.root.iterdir() if p.is_dir() and (p / "project.json").is_file()
             )
 
     monkeypatch.setattr("gui.main_window.WorkspaceManager", lambda: _Ws(workspace))
-    monkeypatch.setattr(
-        "core.workspace.WorkspaceManager", lambda *a, **k: _Ws(workspace)
-    )
+    monkeypatch.setattr("core.workspace.WorkspaceManager", lambda *a, **k: _Ws(workspace))
     window = MainWindow()
     menus = [action.text() for action in window.menuBar().actions()]
     assert "实验(&E)" in menus
     assert "样本(&S)" not in menus
     experiment_menu = next(
-        action.menu()
-        for action in window.menuBar().actions()
-        if action.text() == "实验(&E)"
+        action.menu() for action in window.menuBar().actions() if action.text() == "实验(&E)"
     )
     labels = [action.text() for action in experiment_menu.actions()]
     assert "新建实验..." in labels
@@ -214,7 +214,7 @@ def test_main_window_menu_experiment(
 def test_edit_notes_saves(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """"Edit notes" -> the main window saves the structured fields and refreshes the top note
+    """ "Edit notes" -> the main window saves the structured fields and refreshes the top note
     bar."""
     from gui.main_window import MainWindow
 
@@ -232,15 +232,11 @@ def test_edit_notes_saves(
 
         def list_projects(self):
             return sorted(
-                p
-                for p in self.root.iterdir()
-                if p.is_dir() and (p / "project.json").is_file()
+                p for p in self.root.iterdir() if p.is_dir() and (p / "project.json").is_file()
             )
 
     monkeypatch.setattr("gui.main_window.WorkspaceManager", lambda: _Ws(workspace))
-    monkeypatch.setattr(
-        "core.workspace.WorkspaceManager", lambda *a, **k: _Ws(workspace)
-    )
+    monkeypatch.setattr("core.workspace.WorkspaceManager", lambda *a, **k: _Ws(workspace))
 
     from qtcompat.QtWidgets import QDialog
 
@@ -264,6 +260,8 @@ def test_edit_notes_saves(
     assert fields["experiment_type"] == "指认实验"
     assert "指认实验" in window.center_panel.notes_label.text()
     window.close()
+
+
 def test_edit_notes_only_applies_changed_data_type(
     tmp_path: Path, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -338,10 +336,7 @@ def test_experiment_type_options_from_presets() -> None:
     assert "HSQC" not in options_3d
     assert "Generic2D" not in options_2d
     assert "Generic3D" not in options_3d
-    assert (
-        set(options_1d) | set(options_2d) | set(options_3d)
-        == set(experiment_type_options())
-    )
+    assert set(options_1d) | set(options_2d) | set(options_3d) == set(experiment_type_options())
 
 
 def test_temperature_from_acqus_detects_celsius_and_kelvin(
@@ -364,9 +359,7 @@ def test_auto_fill_notes_from_metadata(tmp_path: Path) -> None:
     """0.2.86: after import, auto-fill notes from metadata/acqus (existing values are not
     overwritten)."""
     manager, exp_id, data_id = _manager(tmp_path)
-    set_data_note_fields(
-        manager.project, exp_id, data_id, {"experiment_type": "HSQC"}
-    )
+    set_data_note_fields(manager.project, exp_id, data_id, {"experiment_type": "HSQC"})
     raw = manager.data_dir(exp_id, data_id, "raw")
     raw.mkdir(parents=True, exist_ok=True)
     (raw / "acqus").write_text(
@@ -380,9 +373,7 @@ def test_auto_fill_notes_from_metadata(tmp_path: Path) -> None:
             "experiment_type": {"name": "HSQC"},
         }
     }
-    filled = auto_fill_notes_from_metadata(
-        manager, exp_id, data_id, metadata
-    )
+    filled = auto_fill_notes_from_metadata(manager, exp_id, data_id, metadata)
     exp_fields = experiment_note_fields(manager.project, exp_id)
     assert exp_fields == {}  # experiment-type notes are no longer auto-filled on import
     data_fields = data_note_fields(manager.project, exp_id, data_id)
@@ -394,6 +385,82 @@ def test_auto_fill_notes_from_metadata(tmp_path: Path) -> None:
     assert "data.experiment_type" in filled
     assert "data.nuclei" in filled
     assert "data.temperature" in filled
+
+
+def test_sampling_mode_text_formats_nus_and_uniform() -> None:
+    "Regression coverage: test sampling mode text formats nus and uniform."
+    assert (
+        sampling_mode_text({"sampling": {"mode": "nus", "sampling_fraction": 0.25}})
+        == "NUS(fraction 25%)"
+    )
+    assert (
+        sampling_mode_text({"sampling": {"mode": "nus", "sampling_fraction": 0.5}})
+        == "NUS(fraction 50%)"
+    )
+    assert sampling_mode_text({"sampling": {"mode": "uniform"}}) == "uniform"
+    assert sampling_mode_text({"sampling": {"mode": "uncertain"}}) == "uncertain"
+
+
+def test_sampling_mode_text_never_invents_a_fraction() -> None:
+    "Regression coverage: test sampling mode text never invents a fraction."
+    assert sampling_mode_text({"sampling": {"mode": "nus", "sampling_fraction": 0.0}}) == "NUS"
+
+
+def test_sampling_mode_text_is_empty_without_sampling_info() -> None:
+    "Regression coverage: test sampling mode text is empty without sampling info."
+    assert sampling_mode_text({}) == ""
+    assert sampling_mode_text({"sampling": {}}) == ""
+
+
+def test_auto_fill_notes_fills_sampling_mode(tmp_path: Path) -> None:
+    "Regression coverage: test auto fill notes fills sampling mode."
+    manager, exp_id, data_id = _manager(tmp_path)
+    metadata = {
+        "dataset": {
+            "ndim": 3,
+            "dimensions": [{"nucleus": "1H"}, {"nucleus": "13C"}],
+            "experiment_type": {"name": "HNCACB"},
+            "sampling": {
+                "mode": "nus",
+                "sampling_fraction": 0.25,
+                "schedule_type": "nuslist",
+            },
+        }
+    }
+
+    filled = auto_fill_notes_from_metadata(manager, exp_id, data_id, metadata)
+
+    assert filled["data.sampling_mode"] == "NUS(fraction 25%)"
+    data_fields = data_note_fields(manager.project, exp_id, data_id)
+    assert data_fields["sampling_mode"] == "NUS(fraction 25%)"
+
+
+def test_auto_fill_notes_sampling_mode_not_overwritten(tmp_path: Path) -> None:
+    "Regression coverage: test auto fill notes sampling mode not overwritten."
+    manager, exp_id, data_id = _manager(tmp_path)
+    set_data_note_fields(manager.project, exp_id, data_id, {"sampling_mode": "手工写的"})
+
+    auto_fill_notes_from_metadata(
+        manager,
+        exp_id,
+        data_id,
+        {"dataset": {"sampling": {"mode": "nus", "sampling_fraction": 0.25}}},
+    )
+
+    data_fields = data_note_fields(manager.project, exp_id, data_id)
+    assert data_fields["sampling_mode"] == "手工写的"
+
+
+def test_auto_fill_notes_without_sampling_info_leaves_field_empty(
+    tmp_path: Path,
+) -> None:
+    "Regression coverage: test auto fill notes without sampling info leaves field empty."
+    manager, exp_id, data_id = _manager(tmp_path)
+
+    auto_fill_notes_from_metadata(manager, exp_id, data_id, {"dataset": {"ndim": 2}})
+
+    data_fields = data_note_fields(manager.project, exp_id, data_id)
+    assert not data_fields.get("sampling_mode")
 
 
 def test_notes_dialog_combos_dimension_then_type(

@@ -23,9 +23,7 @@ def qapp() -> QApplication:
     yield app
 
 
-def _axis(
-    label: str, size: int, sw: float = 6000.0, car: float = 4.7
-) -> SpectrumAxis:
+def _axis(label: str, size: int, sw: float = 6000.0, car: float = 4.7) -> SpectrumAxis:
     return SpectrumAxis(
         label=label,
         size=size,
@@ -45,9 +43,7 @@ def _synthetic_spectrum(shape: tuple[int, int] = (64, 128)) -> Spectrum:
 
     data = gaussian_filter(data, sigma=(1.5, 1.5))
     data = data + rng.normal(0, 0.05, size=shape)
-    return Spectrum(
-        data, [_axis("F1", shape[0]), _axis("F2", shape[1])]
-    )
+    return Spectrum(data, [_axis("F1", shape[0]), _axis("F2", shape[1])])
 
 
 def _write_ft2(path: Path, spectrum: Spectrum) -> None:
@@ -69,9 +65,7 @@ def _write_ft2(path: Path, spectrum: Spectrum) -> None:
         dic[prefix + "OBS"] = axis.obs_mhz
         dic[prefix + "CAR"] = axis.carrier_ppm
         dic[prefix + "ORIG"] = axis.orig_hz
-    pipe.write(
-        str(path), dic, spectrum.data.astype(np.float32), overwrite=True
-    )
+    pipe.write(str(path), dic, spectrum.data.astype(np.float32), overwrite=True)
 
 
 def _write_fid(path: Path, data: np.ndarray) -> None:
@@ -256,9 +250,7 @@ def test_viewer_1d_strips_toggle_and_update(qapp: QApplication) -> None:
     assert not viewer.strip_right.isHidden()
     # 0.2.199-patch29bt: horizontal strip 170 high, vertical strip 190 wide
     assert viewer.strip_top.minimumHeight() == viewer.strip_top.maximumHeight() == 170
-    assert (
-        viewer.strip_right.minimumWidth() == viewer.strip_right.maximumWidth() == 190
-    )
+    assert viewer.strip_right.minimumWidth() == viewer.strip_right.maximumWidth() == 190
     # Update the crosshair position → two 1D traces
     viewer._update_strips(40, 120)
     _xt, yt = viewer.strip_top_curve.getData()
@@ -407,16 +399,12 @@ def test_viewer_strip_right_y_direction_and_link(qapp: QApplication) -> None:
     )
     # Right-strip data row 0 points the same way (down) as the main plot (matches the
     # 2D Y axis)
-    right_s0 = viewer.strip_right.getViewBox().mapViewToScene(
-        QPointF(0.0, 0.0)
-    )
+    right_s0 = viewer.strip_right.getViewBox().mapViewToScene(QPointF(0.0, 0.0))
     right_s1 = viewer.strip_right.getViewBox().mapViewToScene(
         QPointF(0.0, spectrum.data.shape[0] - 1)
     )
     main_s0 = viewer.plot.getViewBox().mapViewToScene(QPointF(0.0, 0.0))
-    main_s1 = viewer.plot.getViewBox().mapViewToScene(
-        QPointF(0.0, spectrum.data.shape[0] - 1)
-    )
+    main_s1 = viewer.plot.getViewBox().mapViewToScene(QPointF(0.0, spectrum.data.shape[0] - 1))
     assert (right_s0.y() < right_s1.y()) == (main_s0.y() < main_s1.y())
     viewer.close()
 
@@ -452,7 +440,6 @@ def test_viewer_peaks_toggle(qapp: QApplication) -> None:
     viewer.close()
 
 
-
 class _FakeClickEventNoPress(_FakeClickEvent):
     """Simulates pyqtgraph MouseClickEvent: no buttonDownScenePos (0.2.199-patch29aw)."""
 
@@ -468,8 +455,8 @@ def test_viewer_plot_click_without_button_down_pos(qapp: QApplication) -> None:
     viewer.set_peaks(
         [
             {
-                'H_shift': spectrum.x_axis.ppm_at(60),
-                'N_shift': spectrum.y_axis.ppm_at(30),
+                "H_shift": spectrum.x_axis.ppm_at(60),
+                "N_shift": spectrum.y_axis.ppm_at(30),
             }
         ]
     )
@@ -479,7 +466,6 @@ def test_viewer_plot_click_without_button_down_pos(qapp: QApplication) -> None:
     viewer.close()
 
 
-
 def test_box_select_uses_peak_coords_only(qapp: QApplication) -> None:
     # 0.2.199-patch29ay: box selection only compares the box range with cached peak coords
     spectrum = _synthetic_spectrum()
@@ -487,9 +473,9 @@ def test_box_select_uses_peak_coords_only(qapp: QApplication) -> None:
     viewer.add_spectrum(spectrum)
     viewer.set_peaks(
         [
-            {'H_shift': spectrum.x_axis.ppm_at(30), 'N_shift': spectrum.y_axis.ppm_at(20)},
-            {'H_shift': spectrum.x_axis.ppm_at(100), 'N_shift': spectrum.y_axis.ppm_at(50)},
-            {'H_shift': spectrum.x_axis.ppm_at(80), 'N_shift': spectrum.y_axis.ppm_at(10)},
+            {"H_shift": spectrum.x_axis.ppm_at(30), "N_shift": spectrum.y_axis.ppm_at(20)},
+            {"H_shift": spectrum.x_axis.ppm_at(100), "N_shift": spectrum.y_axis.ppm_at(50)},
+            {"H_shift": spectrum.x_axis.ppm_at(80), "N_shift": spectrum.y_axis.ppm_at(10)},
         ]
     )
     viewer._apply_peak_items()
@@ -501,7 +487,6 @@ def test_box_select_uses_peak_coords_only(qapp: QApplication) -> None:
     viewer.close()
 
 
-
 def test_box_select_clamps_to_spectrum_edges(qapp: QApplication) -> None:
     # 0.2.199-patch29bf: a box beyond the spectrum is clamped to the edge and still selects
     spectrum = _synthetic_spectrum()
@@ -509,8 +494,8 @@ def test_box_select_clamps_to_spectrum_edges(qapp: QApplication) -> None:
     viewer.add_spectrum(spectrum)
     viewer.set_peaks(
         [
-            {'H_shift': spectrum.x_axis.ppm_at(30), 'N_shift': spectrum.y_axis.ppm_at(20)},
-            {'H_shift': spectrum.x_axis.ppm_at(100), 'N_shift': spectrum.y_axis.ppm_at(50)},
+            {"H_shift": spectrum.x_axis.ppm_at(30), "N_shift": spectrum.y_axis.ppm_at(20)},
+            {"H_shift": spectrum.x_axis.ppm_at(100), "N_shift": spectrum.y_axis.ppm_at(50)},
         ]
     )
     vb = viewer.plot.getViewBox()

@@ -17,6 +17,7 @@ It may use `core/` and `backend/`, and must not import `gui/` or `viewer/`.
 | `baseline_optimize.py`, `window_optimize.py`, `param_optimize.py` | parameter-optimisation grids |
 | `memory_phase_search.py` | in-memory phase search |
 | `script_check.py` | script validation before a run |
+| `script_audit.py` | manual-script parameter diffs, baselines and reports; parses only and never executes scripts or infers physical axes |
 | `optimization_report.py` | writing the quality and optimisation record |
 | `ucsf_export.py` | exporting processed spectra |
 

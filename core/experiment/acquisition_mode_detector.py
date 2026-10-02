@@ -86,7 +86,8 @@ KNOWN_FNMODE_MAX = 6
 
 def hypercomplex_mult(fnmode: int) -> int:
     """Hypercomplex component count of this FnMODE (real families = 1, complex = 2); the sole
-    source for the whole project."""
+    source for the whole project.
+    """
     return 1 if is_real_kind(fnmode) else 2
 
 
@@ -156,7 +157,8 @@ BRUK2PIPE_MODE_CODES: dict[str, int] = {
 
 def same_mode_family(first: str | None, second: str | None) -> bool:
     """Whether two MODE keywords share the same **mode number** (family); unknown keywords
-    return False (treated as different)."""
+    return False (treated as different).
+    """
     if first is None or second is None:
         return False
     if str(first) == str(second):
@@ -205,17 +207,16 @@ def unsupported_real_mode_error(fnmode: int, *, logical_axis: str) -> str:
     FnMODE is always States-TPPI/Echo-Antiecho).
     """
     name = _FNMODE_TO_MODE.get(fnmode, f"unknown({fnmode})")
-    return (
-        tr(
-            "dimension {p0} acquisition mode FnMODE={p1}({p2}) is real/magnitude, while NUS/SMILE "
-            "reconstruction only supports complex encoding(States/States-TPPI/Echo-Antiecho); the "
-            "uniform sampling path supports this "
-            "mode",
-            p0=logical_axis,
-            p1=fnmode,
-            p2=name,
-        )
+    return tr(
+        "dimension {p0} acquisition mode FnMODE={p1}({p2}) is real/magnitude, while NUS/SMILE "
+        "reconstruction only supports complex encoding(States/States-TPPI/Echo-Antiecho); the "
+        "uniform sampling path supports this "
+        "mode",
+        p0=logical_axis,
+        p1=fnmode,
+        p2=name,
     )
+
 
 #: The FT ``-alt`` set lives in ``_FNMODE_FT_ALT`` at the top of the file (single source, not
 #: repeated here).
@@ -275,11 +276,7 @@ def ft_neg_for(experiment: Experiment, fnmode: int, logical_axis: str) -> bool:
         # user's sampling.flip_f1/flip_f2 choice
         return False
     dimension = next(
-        (
-            dim
-            for dim in experiment.dimensions
-            if dim.logical_axis == logical_axis
-        ),
+        (dim for dim in experiment.dimensions if dim.logical_axis == logical_axis),
         None,
     )
     if dimension is None or dimension.role is AxisRole.DIRECT:
@@ -313,6 +310,4 @@ def sign_sampling_flags(params: Any) -> dict[str, Any]:
     result is an empty dict.
     """
     sampling = dict((params or {}).get("sampling") or {})
-    return {
-        key: sampling[key] for key in SIGN_SAMPLING_KEYS if key in sampling
-    }
+    return {key: sampling[key] for key in SIGN_SAMPLING_KEYS if key in sampling}

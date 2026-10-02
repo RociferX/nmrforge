@@ -142,7 +142,7 @@ def test_has_stripe_artifact_relative_veto() -> None:
         return arr
 
     clean = rng.normal(0.0, 1.0, size=(24, 40))
-    orig = striped(50.0)   # Strong stripes in the original spectrum
+    orig = striped(50.0)  # Strong stripes in the original spectrum
     improved = striped(20.0)  # Improved but still above threshold
     worse = striped(200.0)  # Clearly worse
     clean_r = _stripe_ratio(clean, 1)
@@ -158,9 +158,7 @@ def test_has_stripe_artifact_relative_veto() -> None:
     assert _has_stripe_artifact(worse, 1)
 
 
-def test_optimize_baseline_corrects_peak_spectrum_safely(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_optimize_baseline_corrects_peak_spectrum_safely(tmp_path: Path, bruker_dir: Path) -> None:
     """Strong-peak + drift spectrum: the robust-correction candidate passes (no stripes
     are produced) and that axis is written back as corrected.
 
@@ -189,15 +187,10 @@ def test_optimize_baseline_corrects_peak_spectrum_safely(
             ),
         )
     assert stripe_penalty(applied) <= stripe_penalty(spec) + 0.2
-    assert (
-        bq.evaluate(applied, axis=1).score
-        > bq.evaluate(spec, axis=1).score + 1.0
-    )
+    assert bq.evaluate(applied, axis=1).score > bq.evaluate(spec, axis=1).score + 1.0
 
 
-def test_optimize_baseline_axis_mapping(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_optimize_baseline_axis_mapping(tmp_path: Path, bruker_dir: Path) -> None:
     """Scoring axis matches the correction axis (dimensions no longer let the wrong axis
     be scored when the direct dimension comes first)."""
     spec = np.zeros((32, 64))

@@ -36,17 +36,14 @@ def describe_exception(exc: BaseException) -> str:
     if isinstance(exc, PermissionError):
         return tr("Permission denied: {p0}", p0=exc.filename or exc)
     if isinstance(exc, KeyError):
-        return (
-            tr(
+        return tr(
             "Missing required field {p0} (does the input file or run record belong to this "
             "version?)",
             p0=exc,
         )
-        )
     if isinstance(exc, (IndexError, TypeError, AttributeError)):
         return tr(
-            "Input does not match the expected structure ({p0}): "
-            "{p1}",
+            "Input does not match the expected structure ({p0}): {p1}",
             p0=type(exc).__name__,
             p1=exc,
         )

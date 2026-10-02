@@ -1,5 +1,6 @@
 """Recent-project store: the core layer must not depend on Qt; JSON on disk
-(8 entries at most, most-recent first, de-duplicated)."""
+(8 entries at most, most-recent first, de-duplicated).
+"""
 
 from __future__ import annotations
 
@@ -13,7 +14,8 @@ MAX_RECENT_ENTRIES = 8
 
 def default_config_dir() -> Path:
     """Platform-specific application config directory
-    (Windows: LOCALAPPDATA/NMRForge, Linux: ~/.config/NMRForge)."""
+    (Windows: LOCALAPPDATA/NMRForge, Linux: ~/.config/NMRForge).
+    """
     if os.name == "nt":
         base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
         if base:
@@ -24,9 +26,7 @@ def default_config_dir() -> Path:
 class JsonRecentProjectsStore:
     """JSON-file recent-project store (atomic write, most-recent first, 8 by default)."""
 
-    def __init__(
-        self, path: Path | None = None, max_entries: int = MAX_RECENT_ENTRIES
-    ) -> None:
+    def __init__(self, path: Path | None = None, max_entries: int = MAX_RECENT_ENTRIES) -> None:
         self.path = path or (default_config_dir() / "recent_projects.json")
         self.max_entries = max_entries
 

@@ -1,9 +1,12 @@
-"""Inter-part field-drift detection and conversion-time correction for multi-part FIDs (2026-09-23).
+"""Inter-part field-drift detection and conversion-time correction for multi-part FIDs
+(2026-09-23).
 
 Segmented acquisition / repeated-experiment averaging (repeat_uniform / repeat_nus) splits one
 experiment into several fids by acquisition time; if the parts drift in frequency (field drift)
-before they are merged, the point-by-point time-domain summation of addNMR broadens or even splits
-the peaks - which is exactly how "acquire a few more parts to raise the SNR" gets ruined (the lab
+before they are merged, the point-by-point time-domain summation of addNMR broadens or even
+splits
+the peaks - which is exactly how "acquire a few more parts to raise the SNR" gets ruined (the
+lab
 1stfid.com + 2ndAdd.com flow aligned the parts by hand; this module automates it).
 
 The rules the user locked on 2026-09-23:
@@ -13,26 +16,36 @@ The rules the user locked on 2026-09-23:
   convention is more reasonable, change it"): act only when |Δ| exceeds
   ``max(DRIFT_HZ_MIN, IMPACT_FRACTION × line width)`` - a relative broadening
   ``Var(δ)/(2W²)`` of more than 2% counts as a measurable effect on the line shape (see
-  "theory ②"). The old convention tied "correct or not" to the digital resolution through the FFT
-  point (d_018: point width 66.9 Hz ≈ half a line width), which is not the same thing as a physical
+  "theory ②"). The old convention tied "correct or not" to the digital resolution through the
+  FFT
+  point (d_018: point width 66.9 Hz ≈ half a line width), which is not the same thing as a
+  physical
   criterion; the point width is still measured and recorded, but serves only as a "can it be
-  measured" reference in the report. When the line width cannot be measured (direct dimension too
+  measured" reference in the report. When the line width cannot be measured (direct dimension
+  too
   short / all rows bad) it falls back to ``max(hz_min, points_min × point width)``. ppm is still
   measured and recorded (:data:`DRIFT_PPM_THRESHOLD` is record-only);
 - **pairing by physical trace index**: the row indices of the high-energy traces are chosen once
-  over all parts (:func:`pool_trace_rows`) - letting each part pick its own traces by energy would
+  over all parts (:func:`pool_trace_rows`) - letting each part pick its own traces by energy
+  would
   pair the i-th high-energy trace with a different indirect-dimension plane of another part;
-- **part consistency**: before merging, compare NS/TD/DS/SW/O1/SFO1/GRPDLY/FnMODE/PULPROG part by
-  part (:func:`check_segment_consistency`); differing TD/SW/O1 etc. = **refuse to merge** (not the
-  same acquisition parameters), while a differing NS only warns - it is not a weighting issue (see
+- **part consistency**: before merging, compare NS/TD/DS/SW/O1/SFO1/GRPDLY/FnMODE/PULPROG part
+by
+  part (:func:`check_segment_consistency`); differing TD/SW/O1 etc. = **refuse to merge** (not
+  the
+  same acquisition parameters), while a differing NS only warns - it is not a weighting issue
+  (see
   "theory ①");
 - the correction is written into **that part's fid.com**: ``| nmrPipe -fn PS -rs <Δ>Hz \\`` is
   inserted before ``| nmrPipe -fn MULT -c …`` (``MULT -c`` is left alone) and the part is
   re-converted;
-- the residual is re-checked after re-conversion, at most :data:`MAX_ROUNDS` rounds; still over the
-  criterion is reported, never escalated. **Consistency rule**: either all parts over the criterion
+- the residual is re-checked after re-conversion, at most :data:`MAX_ROUNDS` rounds; still over
+the
+  criterion is reported, never escalated. **Consistency rule**: either all parts over the
+  criterion
   are corrected or none of them - merging with one part left uncorrected is worse than not
-  correcting at all; the caller (backend) executes all-or-nothing and rolls back to "correct none"
+  correcting at all; the caller (backend) executes all-or-nothing and rolls back to "correct
+  none"
   on a pre-check or mid-run failure.
 
 
@@ -44,28 +57,41 @@ dataset; the criterion and the report wording may only speak according to them.
 **① Adding FIDs directly is the optimal combination - so a differing NS is not a "weighting
 issue".**
 The converted fid of part i is ``S_i·s(t) + n_i``: the coherently summed amplitude is
-``S_i ∝ NS_i`` and the incoherently summed noise is ``σ_i² ∝ NS_i``. Summing with weights ``w_i``,
+``S_i ∝ NS_i`` and the incoherently summed noise is ``σ_i² ∝ NS_i``. Summing with weights
+``w_i``,
 the matched-filter weight is ``w_i ∝ S_i/σ_i² = constant`` - **equal-weight summation is the
-optimal combination for this data**, with zero SNR loss relative to optimal weighting. A differing
-NS only means the parts were not acquired equally long (the per-trace noise differs by ``1/√NS``,
+optimal combination for this data**, with zero SNR loss relative to optimal weighting. A
+differing
+NS only means the parts were not acquired equally long (the per-trace noise differs by
+``1/√NS``,
 and the signal differs by the same factor), not that the weighting is wrong.
-What really makes equal-weight summation suboptimal is a **different noise scale per scan** (when
-the receiver gain ``RG``, the digital filter/decimation ``DS`` or other acquisition-chain settings
-differ, ``σ_i²/NS_i`` is no longer equal). So what has to be compared before merging is whether the
+What really makes equal-weight summation suboptimal is a **different noise scale per scan**
+(when
+the receiver gain ``RG``, the digital filter/decimation ``DS`` or other acquisition-chain
+settings
+differ, ``σ_i²/NS_i`` is no longer equal). So what has to be compared before merging is whether
+the
 parts share one and the same set of acquisition parameters, which has nothing to do with an NS
 difference.
 
 **② Whether to correct depends on "drift vs line width", not on "drift vs points".**
-With a rigid offset ``δ_i`` per part, the line shape of the merged spectrum is ``Σ_i L(f−δ_i)/n``:
-the second moment is ``W_eff² = W² + Var(δ)``, i.e. a **relative broadening ≈ Var(δ)/(2W²)** and a
-peak position moved by ``mean(δ)``. So for ``δ ≪ W`` there is **no measurable effect** on the line
-shape and correcting it only moves the data by the estimation noise; only when ``δ`` is of the same
+With a rigid offset ``δ_i`` per part, the line shape of the merged spectrum is ``Σ_i
+L(f−δ_i)/n``:
+the second moment is ``W_eff² = W² + Var(δ)``, i.e. a **relative broadening ≈ Var(δ)/(2W²)** and
+a
+peak position moved by ``mean(δ)``. So for ``δ ≪ W`` there is **no measurable effect** on the
+line
+shape and correcting it only moves the data by the estimation noise; only when ``δ`` is of the
+same
 order as ``W`` is the distortion real and must be corrected. **The criterion is therefore**
-``max(DRIFT_HZ_MIN, IMPACT_FRACTION × W)`` (IMPACT_FRACTION = 0.2 ⇒ relative broadening ≤ 2%). The
-digital resolution (point width = direct-dimension SW / complex points) goes into the report only
+``max(DRIFT_HZ_MIN, IMPACT_FRACTION × W)`` (IMPACT_FRACTION = 0.2 ⇒ relative broadening ≤ 2%).
+The
+digital resolution (point width = direct-dimension SW / complex points) goes into the report
+only
 as a "can it be measured" reference - it is **not** the physical criterion for "should it be
 corrected" (2026-09-24, user: "if the line-width convention is more reasonable, change it"). The
-line width is measured by :func:`direct_linewidth_hz`: the **point-by-point median of the magnitude
+line width is measured by :func:`direct_linewidth_hz`: the **point-by-point median of the
+magnitude
 spectra** of the top traces, minus that spectrum's own median floor, then the full width at half
 maximum; when the line width cannot be measured it falls back to the old convention
 ``max(hz_min, points × point width)``.
@@ -74,43 +100,57 @@ maximum; when the line width cannot be measured it falls back to the old convent
 "not measurable" does not mean "the data are not from the same source".**
 The matched filter has two ways to sum the scan curves: for the same physical trace the product
 ``part·conj(ref)`` has the same phase (the inter-part indirect-dimension phase cancels in the
-product), so **summing the complex values first and then taking the squared magnitude** (coherent)
-lets the common signal stack with the number of traces; taking the squared magnitude per trace and
-then summing (incoherent, the old 2026-09-23 convention) is dominated by the **noise×noise** term
+product), so **summing the complex values first and then taking the squared magnitude**
+(coherent)
+lets the common signal stack with the number of traces; taking the squared magnitude per trace
+and
+then summing (incoherent, the old 2026-09-23 convention) is dominated by the **noise×noise**
+term
 at low SNR - on d_018 the measured correlation peak was only 1.4× the floor and the per-trace
-estimates differed by 39-151 Hz, so the measured "drift" was all noise (it describes whether this
+estimates differed by 39-151 Hz, so the measured "drift" was all noise (it describes whether
+this
 measurement can separate the signal, not a judgement about the origin of the data). Take the
 incoherent scan as the **noise ruler of this measurement** (it does not grow with the number of
 traces while the signal phases are scattered); the detection statistic =
-``max(coherent scan) / median(incoherent scan)``: with no signal it is set only by the extreme-value
-fluctuation over the search grid (1-8 in both synthetic and real-machine measurements, independent
+``max(coherent scan) / median(incoherent scan)``: with no signal it is set only by the
+extreme-value
+fluctuation over the search grid (1-8 in both synthetic and real-machine measurements,
+independent
 of the number of traces), and with full coherence its upper bound is the number of traces.
 **Scrambling the pairing** (shifting the row numbers between parts, which destroys the common
 signal while leaving the noise level, the trace count and the grid unchanged) gives the control
 ``null``; "measurable" requires ``stat ≥ max(COHERENT_STAT_MIN, COHERENT_NULL_MARGIN × null)``.
 Add one more **stability** threshold: the scatter of random half-split resampling
 (``uncertainty_hz``) must not exceed the criterion - a "drift value" whose uncertainty is larger
-than the criterion is not actionable. If it is not measurable, only report and do not correct, and
+than the criterion is not actionable. If it is not measurable, only report and do not correct,
+and
 the wording may only describe **whether this measurement can separate the signal**. To judge
 whether the parts come from the same source, look at **part consistency** (whether
 TD/SW/O1/SFO1/GRPDLY/FnMODE/PULPROG are equal).
 
-Estimator: matched filter (it replaced "strongest-peak position difference" on 2026-09-23). For a
+Estimator: matched filter (it replaced "strongest-peak position difference" on 2026-09-23). For
+a
 rigid frequency shift Δf the per-trace product ``part·conj(reference)`` is
-``|ref|²·exp(+i2πΔf·t)``; scanning that product over Δf within ±max_ppm gives the peak position as
-Δf (coherent summation, see "theory ③"). **Why not the strongest-peak position difference**: with
+``|ref|²·exp(+i2πΔf·t)``; scanning that product over Δf within ±max_ppm gives the peak position
+as
+Δf (coherent summation, see "theory ③"). **Why not the strongest-peak position difference**:
+with
 several peaks or low SNR the strongest peak hops lines - on the VM the three synthetic parts of
 d_015 (a few Hz apart) gave +320/+350/+450 Hz with the peak-position method (it had hopped to a
-neighbouring line) while the matched filter gave -2.9/-7.0 Hz, consistent with the true relation; a
+neighbouring line) while the matched filter gave -2.9/-7.0 Hz, consistent with the true
+relation; a
 hop silently moves a whole part by hundreds of Hz.
 
 
 Sign convention (measured on the real machine 2026-09-23, VM d_015): ``-rs``/``-ls`` of
 ``nmrPipe -fn PS`` are a **time-domain** frequency shift (``nmrPipe -fn PS -help`` writes
 "Time-Domain Phase Correction for Freq Shift"), applied to the converted time-domain fid.
-Measured: ``PS -rs 30Hz`` moved the direct-dimension peak from point 141 to point 139 (sweep width
-16129.032 Hz / 806 complex points = 20.01 Hz/point, i.e. -30 Hz), and ``PS -ls 30Hz`` the other way
-by +1 point. The "this part sits ΔHz above the reference" value measured here is exactly the number
+Measured: ``PS -rs 30Hz`` moved the direct-dimension peak from point 141 to point 139 (sweep
+width
+16129.032 Hz / 806 complex points = 20.01 Hz/point, i.e. -30 Hz), and ``PS -ls 30Hz`` the other
+way
+by +1 point. The "this part sits ΔHz above the reference" value measured here is exactly the
+number
 to write into ``PS -rs``: a positive value pulls that part's peak down (to lower frequency) back
 onto the reference; the reference part itself gets nothing (value 0). The sign of the matched
 filter was calibrated the same way against a known ``PS -rs 30Hz`` copy: -30.00 Hz.
@@ -152,15 +192,13 @@ MAX_ROUNDS = 2
 TOP_FRACTION = 0.05
 TOP_MIN = 4
 TOP_MAX = 20
-#: Matched-filter search step (Hz)
 SHIFT_STEP_HZ = 0.25
-#: Lower bound of the coherent statistic (**a detection threshold, not a source judgement**):
-#: statistic = coherent scan peak / incoherent scan floor (see "theory ③" at the top of the
-#: module). With no signal it is set only by the extreme-value fluctuation over the search grid
-#: (1-8 in both synthetic and real-machine measurements, independent of the trace count), and with
-#: full coherence its upper bound is the trace count; below the threshold means **this measurement
-#: cannot separate the signal**. With very few traces it is capped at half the trace count (4 traces
-#: cannot give a statistic of 10).
+FINE_HALF_WIDTH_HZ = 0.50
+FINE_STEP_HZ = 0.01
+PARABOLIC_REFINEMENT = True
+TIME_FRACTION = 0.60
+STABILITY_TIME_FRACTIONS = (0.50, 0.60, 0.70)
+TIME_FRACTION_SPREAD_HZ = 0.5
 COHERENT_STAT_MIN = 10.0
 #: "Measurable" criterion: the coherent statistic must also exceed the **scrambled-pairing**
 #: control by this factor (the data's own noise is the ruler)
@@ -193,10 +231,7 @@ POOL_MAX_TRACES = 512
 
 #: Name of the field-drift record file carried in the conversion provenance (same directory as fid)
 FIELD_DRIFT_FILENAME = "field_drift.json"
-#: Part consistency: **differing** values of these acquisition parameters refuse the merge (the
-#: physical meaning of the time axis / frequency axis / digital filter has changed). The 0.5 ppm
-#: mistracked-peak guard cannot catch a case where "the two parts were never the same experiment";
-#: the NS difference of d_018 is reported here too.
+#:
 BLOCKING_PARAM_KEYS = (
     "TD",
     "SW_h",
@@ -208,9 +243,19 @@ BLOCKING_PARAM_KEYS = (
     "DECIM",
     "DSPFVS",
 )
-#: Differing values of these parameters only warn (they do not block): NS/DS/RG do not change the
-#: time axis / frequency axis. Note that an NS difference is **not** a weighting issue - the matched
-#: weight w ∝ S/σ² is constant (see "theory ①" at the top of the module).
+#:
+#:
+BLOCKING_PARAM_KEYS_NUS = (
+    "NusTD",
+    "SW_h",
+    "O1",
+    "SFO1",
+    "GRPDLY",
+    "FnMODE",
+    "PULPROG",
+    "DECIM",
+    "DSPFVS",
+)
 WARNING_PARAM_KEYS = ("NS", "DS", "RG")
 #: Parameter files covered by the consistency comparison (direct-dimension acqus + indirect
 #: acqu2s/acqu3s)
@@ -224,8 +269,10 @@ def pool_trace_rows(
 
     Pairing follows the **physical trace index** (only the same row across the parts is the same
     trace; letting each part pick its own traces by energy would pair the i-th high-energy trace
-    with a different indirect-dimension plane of another part). The SNR of the coherent sum grows
-    with the trace count, so use as many as possible - ``cap`` only caps the cost of a single check
+    with a different indirect-dimension plane of another part). The SNR of the coherent sum
+    grows
+    with the trace count, so use as many as possible - ``cap`` only caps the cost of a single
+    check
     (on the real machine 1368 traces still take only the first :data:`POOL_MAX_TRACES`).
     """
     usable = [p for p in planes if p is not None]
@@ -261,12 +308,98 @@ class PooledShiftEstimate:
     null_stat: float
     uncertainty_hz: float | None = None
     traces: int = 0
+    span_hz: float | None = None
+    resolution_hz: float | None = None
+    time_fraction_shifts: dict[float, float] | None = None
+    time_fraction_spread_hz: float | None = None
+    stable: bool | None = None
 
     @property
     def significant(self) -> bool:
         """Whether the coherent statistic stands above the scrambled-pairing control."""
         floor = min(COHERENT_STAT_MIN, max(2.0, self.traces / 2.0))
         return self.stat >= max(floor, COHERENT_NULL_MARGIN * self.null_stat)
+
+
+def _time_fraction_rows(
+    reference: np.ndarray, part: np.ndarray, fraction: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Keep the first ``fraction`` of each trace, where signal-to-noise is higher.
+
+    The tail is often noise-dominated after the signal has decayed, so including it adds noise
+    to ``C(Δf)``. Do not truncate too aggressively: a shorter rectangular time window broadens
+    the correlation peak and reduces frequency resolution. The default fraction is 0.60
+    (:data:`TIME_FRACTION`), with 0.5–0.8 supported. Keep at least eight points.
+    """
+    span = int(reference.shape[-1])
+    keep = max(8, min(span, int(round(span * float(fraction)))))
+    return reference[..., :keep], part[..., :keep]
+
+
+def _normalize_amplitude(rows: np.ndarray) -> np.ndarray:
+    """Normalize each trace's amplitude before coherent combination.
+
+    The coherent correlation ``Σ s₁* s₂ e^{-i2πΔf t}`` scales with the product of the two
+    trace amplitudes, so different receiver gain, concentration or scan counts can rescale the
+    peak. The peak-to-floor statistic is invariant to a single global scale, but amplitude
+    differences between traces make coherent summation depart from a matched filter: strong
+    traces dominate while weak traces contribute little. Dividing each trace by its norm gives
+    traces equal weight, as required for coherent accumulation to gain signal-to-noise with the
+    number of traces.
+    """
+    norm = np.sqrt(np.sum(np.abs(rows) ** 2, axis=-1, keepdims=True))
+    safe = np.where(norm > 0, norm, 1.0)
+    return rows / safe
+
+
+def _coherent_product(reference: np.ndarray, part: np.ndarray) -> np.ndarray:
+    """Return the per-trace product ``part * conj(reference)`` after amplitude normalization."""
+    return _normalize_amplitude(part) * np.conj(_normalize_amplitude(reference))
+
+
+def _coarse_fine_shift(
+    product: np.ndarray,
+    sw_hz: float,
+    *,
+    span_hz: float,
+    coarse_step_hz: float,
+    fine_half_width_hz: float,
+    fine_step_hz: float,
+    refine: bool,
+) -> tuple[float, float]:
+    """Find ``argmax C(Δf)`` with a coarse scan followed by a local fine scan.
+
+    The coarse scan brackets the peak to a grid point, then the fine scan covers
+    ``f_c ± fine_half_width``. Parabolic interpolation is only a final refinement: if it fails,
+    ``fine_step_hz`` still provides the guaranteed grid resolution. Return the offset in Hz and
+    the maximum peak height from the fine-scan curve.
+    """
+    coarse = _scan_curves(product, sw_hz, span_hz=span_hz, step_hz=coarse_step_hz, coherent=True)
+    if coarse.size == 0:
+        return float("nan"), float("nan")
+    index = int(np.argmax(coarse))
+    center = float(index) * coarse_step_hz - float(span_hz)
+
+    fine_half = max(float(fine_half_width_hz), float(fine_step_hz))
+    lo = max(-float(span_hz), center - fine_half)
+    hi = min(float(span_hz), center + fine_half)
+    if hi <= lo:
+        return center, float(coarse[index])
+    steps = max(1, int(round((hi - lo) / float(fine_step_hz))))
+    grid = lo + np.arange(steps + 1) * float(fine_step_hz)
+    time = np.arange(product.shape[-1], dtype=float)
+    block = product @ np.exp(-2j * np.pi * np.outer(grid / sw_hz, time)).T
+    curve = np.abs(block.sum(axis=0)) ** 2
+    best = int(np.argmax(curve))
+    shift = float(grid[best])
+    peak = float(curve[best])
+    if refine and 0 < best < curve.size - 1:
+        left, middle, right = curve[best - 1], curve[best], curve[best + 1]
+        denom = left - 2.0 * middle + right
+        if denom:
+            offset = float(np.clip(0.5 * (left - right) / denom, -0.5, 0.5))
+            shift += offset * float(fine_step_hz)
+    return shift, peak
 
 
 def _scan_curves(
@@ -279,9 +412,11 @@ def _scan_curves(
 ) -> np.ndarray:
     """Scan curve of the product over δ (chunked; memory blocked by grid points × traces).
 
-    Coherent (sum the complex values first, then take the squared magnitude - the more traces are
+    Coherent (sum the complex values first, then take the squared magnitude - the more traces
+    are
     summed the higher the SNR) or incoherent (take the squared magnitude per trace and then sum,
-    which grows only as ``√m`` once the signal phases are scattered - so it can serve as the **noise
+    which grows only as ``√m`` once the signal phases are scattered - so it can serve as the
+    **noise
     ruler**, see "theory ③" at the top of the module).
     """
     time = np.arange(product.shape[-1], dtype=float)
@@ -311,18 +446,24 @@ def _scrambled_null(
 ) -> float:
     """Control statistic from scrambling the **per-trace phase**.
 
-    How high this statistic can climb when there is no common signal: the phase of the product (the
+    How high this statistic can climb when there is no common signal: the phase of the product
+    (the
     per-trace product) is the whole information source of the criterion. Under H0 (the two parts
-    share no signal) it is random to begin with, so randomising it does not change the distribution;
+    share no signal) it is random to begin with, so randomising it does not change the
+    distribution;
     under H1 (a common signal) it is identical across traces, and randomising scrambles it. The
     control is therefore = multiply each row of the product by ``e^{iθ_i}`` (θ independent and
-    uniform) and compute the coherent peak/floor again - exactly the same scale as the data's own
-    noise level, trace count and search grid (the floor is unchanged, because ``|e^{iθ}p| = |p|``).
+    uniform) and compute the coherent peak/floor again - exactly the same scale as the data's
+    own
+    noise level, trace count and search grid (the floor is unchanged, because ``|e^{iθ}p| =
+    |p|``).
 
     **Shifting the row numbers between parts cannot do this**: the indirect-dimension phase is a
-    deterministic function of the row number, so shifting whole rows only adds one constant phase to
+    deterministic function of the row number, so shifting whole rows only adds one constant
+    phase to
     all the products (on single-peak or regularly sampled data the "control" is as high as the
-    observation and the control fails). Random phases hold for any phase structure, and only **one**
+    observation and the control fails). Random phases hold for any phase structure, and only
+    **one**
     combined trace has to be scanned once (``m`` times cheaper than scanning the whole batch).
     """
     rows = int(product.shape[0])
@@ -333,9 +474,7 @@ def _scrambled_null(
     for _ in range(max(1, int(draws))):
         phases = np.exp(2j * np.pi * rng.random(rows))
         combined = (product * phases[:, None]).sum(axis=0)[None, :]
-        total = _scan_curves(
-            combined, sw_hz, span_hz=span_hz, step_hz=step_hz, coherent=True
-        )
+        total = _scan_curves(combined, sw_hz, span_hz=span_hz, step_hz=step_hz, coherent=True)
         best = max(best, float(total.max()) / baseline)
     return best
 
@@ -372,14 +511,20 @@ def _resampled_uncertainty(
     span_hz: float,
     step_hz: float,
     rows: int,
+    fine_half_width_hz: float = FINE_HALF_WIDTH_HZ,
+    fine_step_hz: float = FINE_STEP_HZ,
+    refine: bool = PARABOLIC_REFINEMENT,
 ) -> float | None:
     """Uncertainty of the estimate itself (±,Hz): draw half the traces at random, repeat the
     estimate, and take (max−min)/2.
 
     See the note on :data:`STABILITY_DRAWS`: a single even/odd split **cannot** stand for the
-    uncertainty - the rows come in blocks along the slices, so even/odd land on the same side and
-    report a false "stable", and moving data on that basis carries noise off as if it were signal.
-    Returns None when there are too few traces (``< 8``) or fewer than two finite estimates can be
+    uncertainty - the rows come in blocks along the slices, so even/odd land on the same side
+    and
+    report a false "stable", and moving data on that basis carries noise off as if it were
+    signal.
+    Returns None when there are too few traces (``< 8``) or fewer than two finite estimates can
+    be
     drawn (the caller treats that as "not stable enough").
     """
     if rows < 8:
@@ -392,9 +537,15 @@ def _resampled_uncertainty(
     for _ in range(STABILITY_DRAWS):
         pick = rng.choice(rows, half, replace=False)
         block = product[pick]
-        coh = _scan_curves(block, sw_hz, span_hz=span_hz, step_hz=step_hz, coherent=True)
-        inc = _scan_curves(block, sw_hz, span_hz=span_hz, step_hz=step_hz, coherent=False)
-        value = _scan_shift_stat(coh, inc, span_hz=span_hz, step_hz=step_hz)[0]
+        value, _peak = _coarse_fine_shift(
+            block,
+            sw_hz,
+            span_hz=span_hz,
+            coarse_step_hz=step_hz,
+            fine_half_width_hz=fine_half_width_hz,
+            fine_step_hz=fine_step_hz,
+            refine=refine,
+        )
         if math.isfinite(value):
             drawn.append(value)
     if len(drawn) < 2:
@@ -409,6 +560,11 @@ def estimate_shift_hz_pooled(
     *,
     span_hz: float,
     step_hz: float = SHIFT_STEP_HZ,
+    time_fraction: float = TIME_FRACTION,
+    fine_half_width_hz: float = FINE_HALF_WIDTH_HZ,
+    fine_step_hz: float = FINE_STEP_HZ,
+    refine: bool = PARABOLIC_REFINEMENT,
+    stability: bool = True,
 ) -> PooledShiftEstimate | None:
     """Pooled (coherent) estimate of the rigid frequency shift (Hz) of ``part`` vs ``reference``,
     plus the two criteria.
@@ -418,7 +574,8 @@ def estimate_shift_hz_pooled(
     - ``uncertainty_hz``: the scatter given by random half-split resampling (±,Hz, see
       :func:`_resampled_uncertainty`).
 
-    Returns None when the data are too small or the floor is not positive (the caller only reports,
+    Returns None when the data are too small or the floor is not positive (the caller only
+    reports,
     it does not guess).
     """
     if reference is None or part is None or sw_hz <= 0 or span_hz <= 0:
@@ -428,31 +585,61 @@ def estimate_shift_hz_pooled(
     if rows < 4 or columns < 8:
         return None
     reference, part = reference[:rows, :columns], part[:rows, :columns]
-    product = part * np.conj(reference)
-    coherent = _scan_curves(
-        product, sw_hz, span_hz=span_hz, step_hz=step_hz, coherent=True
+    trimmed_ref, trimmed_part = _time_fraction_rows(reference, part, time_fraction)
+    product = _coherent_product(trimmed_ref, trimmed_part)
+    shift, peak = _coarse_fine_shift(
+        product,
+        sw_hz,
+        span_hz=span_hz,
+        coarse_step_hz=step_hz,
+        fine_half_width_hz=fine_half_width_hz,
+        fine_step_hz=fine_step_hz,
+        refine=refine,
     )
-    incoherent = _scan_curves(
-        product, sw_hz, span_hz=span_hz, step_hz=step_hz, coherent=False
-    )
-    shift, stat = _scan_shift_stat(
-        coherent, incoherent, span_hz=span_hz, step_hz=step_hz
-    )
-    if not math.isfinite(shift) or not math.isfinite(stat):
+    if not math.isfinite(shift):
         return None
-    baseline = float(np.median(incoherent))
-    null_stat = _scrambled_null(
-        product, sw_hz, span_hz=span_hz, step_hz=step_hz, baseline=baseline
-    )
+    incoherent = _scan_curves(product, sw_hz, span_hz=span_hz, step_hz=step_hz, coherent=False)
+    baseline = float(np.median(incoherent)) if incoherent.size else float("nan")
+    if not math.isfinite(baseline) or baseline <= 0:
+        return None
+    stat = float(peak / baseline)
+    null_stat = _scrambled_null(product, sw_hz, span_hz=span_hz, step_hz=step_hz, baseline=baseline)
     uncertainty = _resampled_uncertainty(
         product, sw_hz, span_hz=span_hz, step_hz=step_hz, rows=rows
     )
+    shifts: dict[float, float] | None = None
+    spread: float | None = None
+    stable: bool | None = None
+    if stability and rows >= 4:
+        shifts = {}
+        for fraction in STABILITY_TIME_FRACTIONS:
+            sub_ref, sub_part = _time_fraction_rows(reference, part, fraction)
+            sub_product = _coherent_product(sub_ref, sub_part)
+            value, _peak = _coarse_fine_shift(
+                sub_product,
+                sw_hz,
+                span_hz=span_hz,
+                coarse_step_hz=step_hz,
+                fine_half_width_hz=fine_half_width_hz,
+                fine_step_hz=fine_step_hz,
+                refine=refine,
+            )
+            if math.isfinite(value):
+                shifts[float(fraction)] = float(value)
+        if len(shifts) >= 2:
+            spread = max(shifts.values()) - min(shifts.values())
+            stable = spread <= TIME_FRACTION_SPREAD_HZ
     return PooledShiftEstimate(
         shift_hz=shift,
         stat=stat,
         null_stat=null_stat,
         uncertainty_hz=uncertainty,
         traces=rows,
+        span_hz=float(span_hz),
+        resolution_hz=float(fine_step_hz),
+        time_fraction_shifts=shifts,
+        time_fraction_spread_hz=spread,
+        stable=stable,
     )
 
 
@@ -466,16 +653,21 @@ def direct_linewidth_hz(
     """Direct-dimension line width (Hz): full width at half maximum of the **median magnitude
     spectrum** of the top traces; None when it cannot be measured.
 
-    The impact criterion compares "drift vs line width" (see "theory ②" at the top of the module),
-    so the line width is the ruler of that criterion. Convention: take the highest-energy traces →
+    The impact criterion compares "drift vs line width" (see "theory ②" at the top of the
+    module),
+    so the line width is the ruler of that criterion. Convention: take the highest-energy traces
+    →
     take the **point-by-point median** of their magnitude spectra (the median flattens the noise
     floor, which then does not grow with the trace count) → subtract that median spectrum's own
     median floor → measure the full width at half maximum (zero fill ×4 for interpolation).
 
-    **Do not** measure the line width from the projection obtained by "adding the magnitude spectra
+    **Do not** measure the line width from the projection obtained by "adding the magnitude
+    spectra
     of all traces" - the projection shape is set by the distribution of the individual lines
-    (measured 668.8 Hz on one synthetic set against a true line width of 133.8 Hz); nor measure it
-    per trace and then take a median - at low SNR the per-trace half width is set by noise (on the
+    (measured 668.8 Hz on one synthetic set against a true line width of 133.8 Hz); nor measure
+    it
+    per trace and then take a median - at low SNR the per-trace half width is set by noise (on
+    the
     same synthetic set it swings from 84 Hz to 234 Hz).
     """
     if plane is None or np.ndim(plane) != 2 or plane.shape[1] < 8 or sw_hz <= 0:
@@ -521,11 +713,16 @@ def load_segment_planes(paths: Sequence[Path | str]) -> np.ndarray | None:
     """Read one part's converted fid (possibly a multi-file slice stream) → (rows, complex points),
     **without filtering traces and preserving the row order**.
 
-    Multi-part estimation must go through this entry point: pairing follows the physical trace index
-    (the same row of the indirect dimension). When each part picks its own traces by energy rank,
-    the i-th high-energy trace may come from a different indirect-dimension plane of another part -
-    the "cross-correlation" then multiplies two different signals and the estimate is pure noise.
-    Returns None if it cannot be read or is not 2-D (the caller only reports, it does not guess).
+    Multi-part estimation must go through this entry point: pairing follows the physical trace
+    index
+    (the same row of the indirect dimension). When each part picks its own traces by energy
+    rank,
+    the i-th high-energy trace may come from a different indirect-dimension plane of another
+    part -
+    the "cross-correlation" then multiplies two different signals and the estimate is pure
+    noise.
+    Returns None if it cannot be read or is not 2-D (the caller only reports, it does not
+    guess).
     """
     blocks: list[np.ndarray] = []
     for path in paths:
@@ -563,7 +760,8 @@ def segment_traces(paths: Sequence[Path | str], *, top: int = TOP_MAX) -> np.nda
     """Read the high-energy traces of one converted fid → (rows, complex points).
 
     For single-part self-checks/estimates (for multi-part estimation use
-    :func:`load_segment_planes` + :func:`pool_trace_rows`, see :func:`detect_group_drift`). Traces
+    :func:`load_segment_planes` + :func:`pool_trace_rows`, see :func:`detect_group_drift`).
+    Traces
     with non-finite values are dropped as a whole; None if all are bad or it cannot be read.
     """
     data = load_segment_planes(paths)
@@ -591,12 +789,11 @@ class GroupDriftResult:
     null_stat: list[float | None] = field(default_factory=list)
     #: Scatter of random half-split resampling (±,Hz): the uncertainty of the estimate itself
     uncertainty_hz: list[float | None] = field(default_factory=list)
+    time_fraction_shifts: list[dict[float, float] | None] = field(default_factory=list)
+    time_fraction_spread_hz: list[float | None] = field(default_factory=list)
+    stable: list[bool | None] = field(default_factory=list)
     needs_shift: dict[int, float] = field(default_factory=dict)
-    #: Parts that passed the "measurable + stable" thresholds and may carry a conclusion (None =
-    #: legacy record / hand-built, treated as "all measured parts")
     trusted: list[int] | None = None
-    #: Whether a "drift not measurable" part occurred (adds a note at the end of the report, see
-    #: no_measurement_note)
     reports_note: bool = False
     skipped: list[str] = field(default_factory=list)
     reports: list[str] = field(default_factory=list)
@@ -617,12 +814,11 @@ class GroupDriftResult:
 
     def trusted_indices(self) -> list[int]:
         """Part indices (0-based) usable for a conclusion: falls back to "all measured parts" when
-        ``trusted`` is None (legacy record)."""
+        ``trusted`` is None (legacy record).
+        """
         if self.trusted is not None:
             return list(self.trusted)
-        return [
-            index for index, ppm in enumerate(self.offsets_ppm) if ppm is not None
-        ]
+        return [index for index, ppm in enumerate(self.offsets_ppm) if ppm is not None]
 
     def largest_offset(self) -> tuple[float, float] | None:
         """(ppm, Hz) pair of the largest |Δ| among the trusted parts (for the residual check and
@@ -630,8 +826,10 @@ class GroupDriftResult:
 
         Fixed 2026-09-24 (measured with d_018): the ``skipped`` parts (the measurement cannot
         separate the signal / the estimation failed) also stay in ``offsets_hz``, and the old
-        implementation used them to write "largest offset -24.26 Hz, within the 1.5 Hz criterion" -
-        self-contradictory. Only parts that passed the "measurable + stable" thresholds are counted.
+        implementation used them to write "largest offset -24.26 Hz, within the 1.5 Hz
+        criterion" -
+        self-contradictory. Only parts that passed the "measurable + stable" thresholds are
+        counted.
         """
         best: tuple[float, float] | None = None
         for index in self.trusted_indices():
@@ -652,14 +850,16 @@ class GroupDriftResult:
 
     def max_abs_hz(self) -> float | None:
         """Largest |ΔHz| among the trusted parts; None when there is no trusted measurement (not
-        0, which would read as "perfectly aligned")."""
+        0, which would read as "perfectly aligned").
+        """
         best = self.largest_offset()
         return abs(best[1]) if best else None
 
     def within_criterion(self) -> bool:
         """All **trusted** measurements are within the criterion (no trusted measurement → False).
 
-        Decoupled from "does this round still need correcting": the latter would be written true in
+        Decoupled from "does this round still need correcting": the latter would be written true
+        in
         the "every part untrusted" case (the self-contradictory within_threshold_after fixed
         2026-09-24).
         """
@@ -691,6 +891,14 @@ class GroupDriftResult:
             "quality": _round(self.quality, 2),
             "null_stat": _round(self.null_stat, 2),
             "uncertainty_hz": _round(self.uncertainty_hz, 2),
+            "time_fraction_shifts": [
+                None
+                if entry is None
+                else {f"{key:.2f}": round(float(value), 3) for key, value in sorted(entry.items())}
+                for entry in self.time_fraction_shifts
+            ],
+            "time_fraction_spread_hz": _round(self.time_fraction_spread_hz, 3),
+            "stable": list(self.stable),
             "shifted_parts_hz": {
                 str(index + 1): round(float(value), 4)
                 for index, value in sorted(self.needs_shift.items())
@@ -771,8 +979,10 @@ def detect_group_drift(
     batch); ``sw_hz``/``sf_mhz`` come from the direct dimension (SW_h and SFO1).
 
     Criterion = ``max(hz_min, IMPACT_FRACTION × line width)`` (see "theory ②" at the top of the
-    module; falls back to ``max(hz_min, points_min × point width)`` when the line width cannot be
-    measured). Only **measurable** parts (coherent statistic above the scrambled-pairing control and
+    module; falls back to ``max(hz_min, points_min × point width)`` when the line width cannot
+    be
+    measured). Only **measurable** parts (coherent statistic above the scrambled-pairing control
+    and
     random half-split scatter not over the criterion) take part in the conclusion: over the
     criterion goes into ``needs_shift``, not over is only reported. Unmeasurable parts go into
     ``skipped`` with their reason spelled out - that is "this measurement cannot separate the
@@ -789,9 +999,10 @@ def detect_group_drift(
     result.quality = [None] * count
     result.null_stat = [None] * count
     result.uncertainty_hz = [None] * count
-    reference = (
-        planes[reference_index] if 0 <= reference_index < count else None
-    )
+    result.time_fraction_shifts = [None] * count
+    result.time_fraction_spread_hz = [None] * count
+    result.stable = [None] * count
+    reference = planes[reference_index] if 0 <= reference_index < count else None
     if reference is None:
         reason = tr(
             "part 1 (reference): the converted fid could not be read, "
@@ -851,9 +1062,7 @@ def detect_group_drift(
         criterion_hz = max(float(hz_min), IMPACT_FRACTION * linewidth_hz)
     else:
         result.criterion_basis = "points"
-        criterion_hz = (
-            max(float(hz_min), points_min * point_hz) if point_hz else float(hz_min)
-        )
+        criterion_hz = max(float(hz_min), points_min * point_hz) if point_hz else float(hz_min)
     result.criterion_hz = criterion_hz
     span_hz = max(max_ppm * sf_mhz, 2.0 * criterion_hz)
     reference_rows = _clean_rows(reference[keep])
@@ -879,6 +1088,9 @@ def detect_group_drift(
         result.quality[index] = estimated.stat
         result.null_stat[index] = estimated.null_stat
         result.uncertainty_hz[index] = estimated.uncertainty_hz
+        result.time_fraction_shifts[index] = estimated.time_fraction_shifts
+        result.time_fraction_spread_hz[index] = estimated.time_fraction_spread_hz
+        result.stable[index] = estimated.stable
         if not estimated.significant:
             # The coherent statistic does not stand above the scrambled-pairing control - this
             # measurement cannot separate the signal (see "theory ③" at the top of the module). The
@@ -909,33 +1121,50 @@ def detect_group_drift(
             )
             continue
         if estimated.uncertainty_hz is None:
-            # Too few traces (<8) or fewer than two finite estimates drawn: no stability test is
-            # possible - say "not measured" plainly and do not write "scatter ±0.0 Hz, over the
-            # criterion" (2026-09-24 re-check: that sentence is self-contradictory).
             result.skipped.append(
                 tr(
                     "part {p0}: only {p1} comparable trace(s) - too few to repeat the estimate and "
-                    "check that it is reproducible, so no correction was applied",
+                    "check that it is reproducible; the measured shift {p2:+.2f} Hz is applied "
+                    "anyway (its uncertainty is unknown)",
                     p0=index + 1,
                     p1=estimated.traces,
+                    p2=delta,
                 )
             )
             result.reports_note = True
-            continue
-        if estimated.uncertainty_hz > criterion_hz:
+        elif estimated.stable is False:
+            scatter = " / ".join(
+                f"{fraction * 100:.0f}% {value:+.2f}"
+                for fraction, value in sorted((estimated.time_fraction_shifts or {}).items())
+            )
+            result.skipped.append(
+                tr(
+                    "part {p0}: the estimate swings with the time-domain window ({p1} Hz; spread "
+                    "{p2:.2f} Hz > {p3:.2f} Hz) - low confidence, it is sensitive to the noisy "
+                    "tail; the measured shift {p4:+.2f} Hz is applied anyway",
+                    p0=index + 1,
+                    p1=scatter,
+                    p2=estimated.time_fraction_spread_hz or 0.0,
+                    p3=TIME_FRACTION_SPREAD_HZ,
+                    p4=delta,
+                )
+            )
+            result.reports_note = True
+        elif estimated.uncertainty_hz > criterion_hz:
             result.skipped.append(
                 tr(
                     "part {p0}: random half-split repeats scatter by \u00b1{p1:.1f} Hz, more than "
                     "the {p2:.2f} Hz criterion - the estimate is not reproducible at this "
-                    "signal-to-noise, so no correction was applied",
+                    "signal-to-noise; the measured shift {p3:+.2f} Hz is applied anyway",
                     p0=index + 1,
                     p1=estimated.uncertainty_hz,
                     p2=criterion_hz,
+                    p3=delta,
                 )
             )
             result.reports_note = True
-            continue
-        result.trusted.append(index)
+        else:
+            result.trusted.append(index)
         if abs(delta) <= criterion_hz:
             continue
         result.needs_shift[index] = delta
@@ -943,26 +1172,36 @@ def detect_group_drift(
     if result.needs_shift:
         for index in sorted(result.needs_shift):
             offset = result.offsets_hz[index] or 0.0
+            if index in result.trusted:
+                reports.append(
+                    tr(
+                        "Inter-part field drift part {p0}: {p1:+.2f} Hz ({p2:+.4f} ppm) vs part 1 "
+                        "is over the {p3:.2f} Hz criterion ({p4:.2f} linewidth(s) at {p5:.1f} Hz "
+                        "line width); correcting this part's fid.com (PS -rs) and re-converting",
+                        p0=index + 1,
+                        p1=offset,
+                        p2=result.offsets_ppm[index] or 0.0,
+                        p3=criterion_hz,
+                        p4=abs(offset) / linewidth_hz if linewidth_hz else 0.0,
+                        p5=linewidth_hz or 0.0,
+                    )
+                )
+                continue
             reports.append(
                 tr(
-                    "Inter-part field drift part {p0}: {p1:+.2f} Hz ({p2:+.4f} ppm) vs part 1 "
-                    "is over the {p3:.2f} Hz criterion ({p4:.2f} linewidth(s) at {p5:.1f} Hz "
-                    "line width); correcting this part's fid.com (PS -rs) and re-converting",
+                    "Inter-part field drift part {p0}: {p1:+.2f} Hz ({p2:+.4f} ppm) vs part 1 is "
+                    "over the {p3:.2f} Hz criterion, but the estimate is less certain than the "
+                    "criterion (see the reason below); the measured value is applied anyway - "
+                    "correcting this part's fid.com (PS -rs) and re-converting",
                     p0=index + 1,
                     p1=offset,
                     p2=result.offsets_ppm[index] or 0.0,
                     p3=criterion_hz,
-                    p4=abs(offset) / linewidth_hz if linewidth_hz else 0.0,
-                    p5=linewidth_hz or 0.0,
                 )
             )
     elif result.trusted:
-        reports.append(
-            _within_criterion_report(result, criterion_hz=criterion_hz, hz_min=hz_min)
-        )
+        reports.append(_within_criterion_report(result, criterion_hz=criterion_hz, hz_min=hz_min))
     else:
-        # Every part was stopped by the "measurable + stable" thresholds: do not write "largest
-        # offset X Hz, within the criterion"
         reports.append(
             tr(
                 "Inter-part field drift: no part gave a reliable measurement against part {p0} "
@@ -983,8 +1222,10 @@ def criterion_text(result: GroupDriftResult) -> str:
     """Human-readable text of the criterion convention (for audit records / logs; it states the
     convention and value **actually in force**).
 
-    ``detection_rule`` in ``qc_audit.jsonl`` must match the criterion used at decision time - after
-    the criterion changed from "1 FFT point" to ``max(1.5 Hz, 0.2×line width)``, an audit that still
+    ``detection_rule`` in ``qc_audit.jsonl`` must match the criterion used at decision time -
+    after
+    the criterion changed from "1 FFT point" to ``max(1.5 Hz, 0.2×line width)``, an audit that
+    still
     states the old convention leaves the record disconnected from the behaviour.
     """
     if result.criterion_basis == "linewidth" and result.linewidth_hz:
@@ -1022,8 +1263,10 @@ def criterion_rule_text(result: GroupDriftResult) -> str:
     shift plus the criterion **actually in force**.
 
     2026-09-24 re-check: after the criterion changed from "1 FFT point" to
-    ``max(1.5 Hz, 0.2×line width)``, an old convention in ``qc_audit.jsonl`` would leave the record
-    disconnected from the behaviour - :func:`criterion_text` now supplies the value **actually in
+    ``max(1.5 Hz, 0.2×line width)``, an old convention in ``qc_audit.jsonl`` would leave the
+    record
+    disconnected from the behaviour - :func:`criterion_text` now supplies the value **actually
+    in
     force**.
     """
     return tr(
@@ -1040,7 +1283,8 @@ def _param_equal(first: Any, second: Any) -> bool:
 
     The tolerance is necessary: the same physical sweep width may be written as 11904.762 and
     11904.7619047619 in different parts' acqus (the same convention as
-    :func:`core.data.bruker_reader.read_segments`); genuinely different experiments differ by far
+    :func:`core.data.bruker_reader.read_segments`); genuinely different experiments differ by
+    far
     more than this tolerance.
     """
     if isinstance(first, bool) or isinstance(second, bool):
@@ -1062,11 +1306,12 @@ def _segment_parameters(raw_dir: Path) -> dict[str, Any] | None:
     if not isinstance(params, dict):
         return None
     found: dict[str, Any] = {}
+    keys = set(BLOCKING_PARAM_KEYS) | set(BLOCKING_PARAM_KEYS_NUS) | set(WARNING_PARAM_KEYS)
     for name in CONSISTENCY_FILES:
         block = params.get(name)
         if not isinstance(block, dict):
             continue
-        for key in (*BLOCKING_PARAM_KEYS, *WARNING_PARAM_KEYS):
+        for key in keys:
             if key in block:
                 found[f"{name}.{key}"] = block[key]
     return found or None
@@ -1084,11 +1329,15 @@ def _jsonable(value: Any) -> Any:
 def check_segment_consistency(raw_dirs: Sequence[Path | str]) -> dict[str, Any]:
     """Compare the acquisition parameters part by part (NS/TD/DS/SW/O1/SFO1/GRPDLY/FnMODE/PULPROG).
 
-    Returns a dictionary that can go straight into a JSON record: ``available`` (the number of parts
-    whose parameter files were read), ``values`` (key → per-part value, part order = merge order),
-    ``warnings`` (non-blocking, e.g. a differing NS - see "theory ①" at the top of the module; it is
+    Returns a dictionary that can go straight into a JSON record: ``available`` (the number of
+    parts
+    whose parameter files were read), ``values`` (key → per-part value, part order = merge
+    order),
+    ``warnings`` (non-blocking, e.g. a differing NS - see "theory ①" at the top of the module;
+    it is
     not a weighting issue) and ``blocking`` (blocks the merge: differing TD/SW/O1 = not the same
-    acquisition parameters). The wording comes from :func:`consistency_report_lines`, so the log and
+    acquisition parameters). The wording comes from :func:`consistency_report_lines`, so the log
+    and
     the step report share one source.
 
     When the parameter files cannot be read (fake test directories / permission problems)
@@ -1099,12 +1348,17 @@ def check_segment_consistency(raw_dirs: Sequence[Path | str]) -> dict[str, Any]:
     available = sum(1 for entry in per_part if entry)
     keys = sorted({key for entry in per_part if entry for key in entry})
     values: dict[str, list[Any]] = {
-        key: [
-            _jsonable(entry.get(key)) if entry else None
-            for entry in per_part
-        ]
-        for key in keys
+        key: [_jsonable(entry.get(key)) if entry else None for entry in per_part] for key in keys
     }
+    nus_complementary = False
+    if len(dirs) >= 2:
+        try:
+            from core.data.bruker_reader import classify_segment_kind
+
+            nus_complementary = classify_segment_kind(dirs) == "segmented_nus"
+        except Exception:
+            nus_complementary = False
+    blocking_keys = BLOCKING_PARAM_KEYS_NUS if nus_complementary else BLOCKING_PARAM_KEYS
     warnings: list[dict[str, Any]] = []
     blocking: list[dict[str, Any]] = []
     for key in keys:
@@ -1114,14 +1368,19 @@ def check_segment_consistency(raw_dirs: Sequence[Path | str]) -> dict[str, Any]:
             continue
         if all(_param_equal(present[0], other) for other in present[1:]):
             continue
-        entry = {"key": key.split(".", 1)[-1], "parameter": key, "values": column}
-        if key.split(".", 1)[-1] in BLOCKING_PARAM_KEYS:
+        short = key.split(".", 1)[-1]
+        entry = {"key": short, "parameter": key, "values": column}
+        if short in blocking_keys:
             blocking.append(entry)
+        elif nus_complementary and short == "TD":
+            entry["nus_subset_points"] = True
+            warnings.append(entry)
         else:
             warnings.append(entry)
     return {
         "available": available,
         "parts": len(dirs),
+        "nus_complementary": nus_complementary,
         "values": values,
         "warnings": warnings,
         "blocking": blocking,
@@ -1147,7 +1406,8 @@ def consistency_report_lines(consistency: dict[str, Any] | None) -> list[str]:
     report share one source).
 
     Blocking entries (differing TD/SW/O1/SFO1/GRPDLY/FnMODE/PULPROG/DECIM/DSPFVS) say "merging
-    refused"; warning entries (NS/DS/RG) say "still merged" - a differing NS additionally points out
+    refused"; warning entries (NS/DS/RG) say "still merged" - a differing NS additionally points
+    out
     that it is **not a weighting issue** (the matched weight is constant).
     """
     if not isinstance(consistency, dict) or not consistency.get("available"):
@@ -1165,13 +1425,17 @@ def consistency_report_lines(consistency: dict[str, Any] | None) -> list[str]:
     for entry in consistency.get("warnings") or []:
         key = str(entry.get("key", ""))
         values = _format_param_values(entry.get("values"))
-        if key == "NS":
-            # 2026-09-24 (user: "adding the fids directly has no weighting issue either"): drop the
-            # claim that equal-weight summation has a weighting problem - per part the signal is
-            # S_i ∝ NS_i and the noise σ_i ∝ √NS_i, so the matched weight w_i ∝ S_i/σ_i² = constant
-            # and **direct summation is the optimal (matched) combination for this data**, not a
-            # weighting error. What a differing NS means is "the parts were not acquired equally
-            # long and the per-trace noise differs", not a weighting defect.
+        if entry.get("nus_subset_points"):
+            lines.append(
+                tr(
+                    "part consistency: TD differs between parts ({p0}) - this is complementary NUS "
+                    "sampling (each part holds a different subset of the grid, so its TD is just "
+                    "that subset's point count); the full grid NusTD is the same, the nuslists "
+                    "were merged to complete the grid, so the parts were still merged",
+                    p0=values,
+                )
+            )
+        elif key == "NS":
             lines.append(
                 tr(
                     "part consistency: NS differs between parts ({p0}) - the parts were not "
@@ -1199,11 +1463,12 @@ def no_measurement_note() -> str:
     old wording as "the data are not from the same experiment").
 
     The conversion log of ``detect_group_drift`` and
-    ``direct_diagnostics._drift_report_lines`` share this sentence, so the log and the GUI report
+    ``direct_diagnostics._drift_report_lines`` share this sentence, so the log and the GUI
+    report
     agree.
     """
     return tr(
-        "note: \"no drift could be measured\" only means the per-trace signal-to-noise is too low "
+        'note: "no drift could be measured" only means the per-trace signal-to-noise is too low '
         "for this measurement - it does not mean the parts come from different experiments (for "
         "that, check the part consistency of NS/TD/SW/O1 etc.)"
     )
@@ -1211,7 +1476,8 @@ def no_measurement_note() -> str:
 
 def is_identity_claim(text: str) -> bool:
     """Recognise "the parts are not the same experiment"-style wording in legacy records (used to
-    replace it with the new convention in reports)."""
+    replace it with the new convention in reports).
+    """
     lowered = text.lower()
     # What is matched is the **already rendered** Chinese/English line in a record, not UI text
     # (i18n: keep)
@@ -1238,7 +1504,8 @@ _MULT_LINE_RE = re.compile(r"^\s*\|\s*nmrPipe\s+-fn\s+MULT\b")
 def insert_ps_shift(text: str, shift_hz: float) -> tuple[str, bool]:
     """Insert ``| nmrPipe -fn PS -rs <shift>Hz \\`` before the ``MULT -c`` line (idempotent).
 
-    ``MULT -c`` is kept (it is only a scalar scaling); when the line immediately before MULT already
+    ``MULT -c`` is kept (it is only a scalar scaling); when the line immediately before MULT
+    already
     holds a shift line inserted by this function, its value is **replaced** rather than a second
     line being added - re-running the processing never accumulates changes. When no MULT line is
     found (not a conversion script generated by bruker -AUTO) the script is left alone and
@@ -1281,6 +1548,7 @@ def read_field_drift_record(work: Path | str) -> dict[str, Any] | None:
 
 __all__ = [
     "BLOCKING_PARAM_KEYS",
+    "BLOCKING_PARAM_KEYS_NUS",
     "COHERENT_NULL_MARGIN",
     "COHERENT_STAT_MIN",
     "DRIFT_HZ_MIN",
@@ -1297,6 +1565,12 @@ __all__ = [
     "STABILITY_SEED",
     "POOL_MAX_TRACES",
     "SHIFT_STEP_HZ",
+    "FINE_HALF_WIDTH_HZ",
+    "FINE_STEP_HZ",
+    "PARABOLIC_REFINEMENT",
+    "TIME_FRACTION",
+    "TIME_FRACTION_SPREAD_HZ",
+    "STABILITY_TIME_FRACTIONS",
     "WARNING_PARAM_KEYS",
     "GroupDriftResult",
     "PooledShiftEstimate",

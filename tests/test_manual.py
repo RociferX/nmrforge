@@ -35,9 +35,7 @@ class _FakeRuntime:
         work = Path(cwd)
         if name == "fid.com":
             (work / "test.fid").write_bytes(b"fid")
-        elif name in ("process.com", "nus.com") or name.endswith(
-            ("_process.com", "_nus.com")
-        ):
+        elif name in ("process.com", "nus.com") or name.endswith(("_process.com", "_nus.com")):
             (work / self.spectrum_name).write_bytes(b"ft2")
         return SimpleNamespace(returncode=0, stderr="", stdout="")
 
@@ -49,7 +47,9 @@ class _FakeBackend:
     work_dir: str | None = None
     last_overrides: dict | None = None
 
-    def convert_to_fid(self, experiment, data_dir, progress=None, fid_com_overrides=None):
+    def convert_to_fid(
+        self, experiment, data_dir, progress=None, params=None, fid_com_overrides=None
+    ):
         work = Path(self.work_dir) if self.work_dir else Path(data_dir)
         (work / "fid.com").write_text("#!/bin/csh\n# auto fid.com\n", encoding="utf-8")
         fid = work / f"{experiment.dataset_id}.fid"
@@ -75,9 +75,7 @@ def _manager_with_raw(tmp_path: Path, bruker_dir: Path):
     return manager, entry.id, data.id, raw
 
 
-def test_manual_fid_com_requires_auto_generated(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_manual_fid_com_requires_auto_generated(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.199-patch29dm: a missing auto-generated fid.com is reported clearly instead
     of converting automatically."""
     manager, exp_id, data_id, _raw = _manager_with_raw(tmp_path, bruker_dir)
@@ -85,24 +83,18 @@ def test_manual_fid_com_requires_auto_generated(
         manual_fid_com(manager, exp_id, data_id, _FakeBackend())
 
 
-def test_manual_fid_com_reads_existing(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_manual_fid_com_reads_existing(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.199-patch29dm: an already generated fid.com is read directly, with no conversion."""
     manager, exp_id, data_id, _raw = _manager_with_raw(tmp_path, bruker_dir)
     work = manager.data_dir(exp_id, data_id, "process")
     work.mkdir(parents=True, exist_ok=True)
-    (work / "fid.com").write_text(
-        "#!/bin/csh\n# existing fid.com\n", encoding="utf-8"
-    )
+    (work / "fid.com").write_text("#!/bin/csh\n# existing fid.com\n", encoding="utf-8")
     content = manual_fid_com(manager, exp_id, data_id, _FakeBackend())
     assert "# existing fid.com" in content
     assert "# auto fid.com" not in content  # not converted again
 
 
-def test_run_manual_fid_com_registers(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_run_manual_fid_com_registers(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.199-patch2: a single-dataset manual fid.com matches the segmented path, with
     the parameters handed to the backend as overrides."""
     manager, exp_id, data_id, _raw = _manager_with_raw(tmp_path, bruker_dir)
@@ -124,9 +116,7 @@ def test_run_manual_fid_com_registers(
     assert any(r.workflow_ref == "manual_fid" for r in manager.project.workflow_runs)
 
 
-def test_manual_scripts_renders(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_manual_scripts_renders(tmp_path: Path, bruker_dir: Path) -> None:
     manager, exp_id, data_id, _raw = _manager_with_raw(tmp_path, bruker_dir)
     work = manager.data_dir(exp_id, data_id, "process")
     work.mkdir(parents=True, exist_ok=True)
@@ -191,9 +181,7 @@ def test_run_manual_spectrum_failure(
             data_id,
             {"process.com": "#!/bin/csh\n"},
         )
-    run = next(
-        r for r in manager.project.workflow_runs if r.workflow_ref == "manual_process"
-    )
+    run = next(r for r in manager.project.workflow_runs if r.workflow_ref == "manual_process")
     assert run.status == "failed"
 
 
@@ -223,14 +211,8 @@ def test_run_manual_spectrum_missing_fid(
     runtime = _FakeRuntime(spectrum_name="d_001.ft2")
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
     with pytest.raises(ManualRunError, match="请先生成 FID"):
-        run_manual_spectrum(
-            manager, exp_id, data_id, {"process.com": "#!/bin/csh\n"}
-        )
-    run = next(
-        r
-        for r in manager.project.workflow_runs
-        if r.workflow_ref == "manual_process"
-    )
+        run_manual_spectrum(manager, exp_id, data_id, {"process.com": "#!/bin/csh\n"})
+    run = next(r for r in manager.project.workflow_runs if r.workflow_ref == "manual_process")
     assert run.status == "failed"
 
 
@@ -257,9 +239,7 @@ def test_run_manual_spectrum_accepts_slice_fid(
     assert manager.data(exp_id, data_id).status == "processed"
 
 
-def test_run_manual_fid_com_registers_slice_fid(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_run_manual_fid_com_registers_slice_fid(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.163-patch7/0.2.199-patch2: a single-dataset sliced product is put back into
     work/fid/ by the backend."""
     manager, exp_id, data_id, raw = _manager_with_raw(tmp_path, bruker_dir)
@@ -268,7 +248,7 @@ def test_run_manual_fid_com_registers_slice_fid(
         work_dir: str | None = None
 
         def convert_to_fid(
-            self, experiment, data_dir, progress=None, fid_com_overrides=None
+            self, experiment, data_dir, progress=None, params=None, fid_com_overrides=None
         ):
             slice_dir = Path(self.work_dir) / "fid"
             slice_dir.mkdir(parents=True, exist_ok=True)
@@ -295,9 +275,7 @@ def test_run_manual_fid_com_registers_slice_fid(
     assert any(r.workflow_ref == "manual_fid" for r in manager.project.workflow_runs)
 
 
-def test_run_manual_fid_com_accepts_data_id_output(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_run_manual_fid_com_accepts_data_id_output(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.163-patch13/0.2.199-patch2: fid naming is unified as {data_id}.fid and put
     back into place by the backend."""
     from workflow.manual import run_manual_fid_com
@@ -308,7 +286,7 @@ def test_run_manual_fid_com_accepts_data_id_output(
         work_dir: str | None = None
 
         def convert_to_fid(
-            self, experiment, data_dir, progress=None, fid_com_overrides=None
+            self, experiment, data_dir, progress=None, params=None, fid_com_overrides=None
         ):
             fid = Path(self.work_dir) / f"{experiment.dataset_id}.fid"
             fid.write_bytes(b"fid")
@@ -355,14 +333,12 @@ class _SegFakeBackend:
     last_overrides: dict | None = None
 
     def convert_to_fid(
-        self, experiment, data_dir, progress=None, fid_com_overrides=None
+        self, experiment, data_dir, progress=None, params=None, fid_com_overrides=None
     ):
         work = Path(self.work_dir)
         seg = work / "seg_001"
         seg.mkdir(parents=True, exist_ok=True)
-        (seg / "fid.com").write_text(
-            "#!/bin/csh\n# seg fid.com\n", encoding="utf-8"
-        )
+        (seg / "fid.com").write_text("#!/bin/csh\n# seg fid.com\n", encoding="utf-8")
         merged = work / "merged" / "fid"
         merged.mkdir(parents=True, exist_ok=True)
         (merged / "test001.fid").write_bytes(b"fid")
@@ -376,9 +352,7 @@ class _SegFakeBackend:
         }
 
 
-def test_manual_fid_com_segmented_returns_reference(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_manual_fid_com_segmented_returns_reference(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.199-patch29dm: a segmented manual fid.com is read from the reference segment
     (seg_001), with no conversion."""
     from workflow.manual import manual_fid_com
@@ -387,17 +361,13 @@ def test_manual_fid_com_segmented_returns_reference(
     work = manager.data_dir(exp_id, data_id, "process")
     seg = work / "seg_001"
     seg.mkdir(parents=True, exist_ok=True)
-    (seg / "fid.com").write_text(
-        "#!/bin/csh\n# seg fid.com\n", encoding="utf-8"
-    )
+    (seg / "fid.com").write_text("#!/bin/csh\n# seg fid.com\n", encoding="utf-8")
     content = manual_fid_com(manager, exp_id, data_id, _SegFakeBackend())
     assert "# 分段采集" in content
     assert "# seg fid.com" in content
 
 
-def test_run_manual_fid_com_segmented_merges(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_run_manual_fid_com_segmented_merges(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.163-patch13: a segmented manual fid.com is converted/merged by the backend
     (no longer an error); the manual parameters go to the per-segment scripts as
     overrides."""
@@ -422,11 +392,7 @@ def test_run_manual_fid_com_segmented_merges(
     assert backend.last_overrides == {"ySW": "2800.000"}
 
 
-
-
-def test_run_manual_fid_com_only_reports_changed_params(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_run_manual_fid_com_only_reports_changed_params(tmp_path: Path, bruker_dir: Path) -> None:
     """2026-09-24 (user): editing the script by hand = hand only the parameters that
     changed relative to the automatic baseline to the backend.
 
@@ -452,10 +418,14 @@ def test_run_manual_fid_com_only_reports_changed_params(
     # Second run: the user already sees "baseline + previous overrides"; changing one more
     # parameter keeps both changes
     (seg / "fid.com").write_text(shown, encoding="utf-8")
-    run_manual_fid_com(
-        manager, exp_id, data_id, shown.replace("-yN 36", "-yN 40"), backend=backend
-    )
+    run_manual_fid_com(manager, exp_id, data_id, shown.replace("-yN 36", "-yN 40"), backend=backend)
     assert backend.last_overrides == {"xSW": "11904.762", "yN": "40"}
+    run = manager.project.workflow_runs[-1]
+    assert run.params["fid_com_overrides"] == backend.last_overrides
+    changes = run.params["manual_script_changes"][0]["changes"]
+    assert any(
+        c["parameter"] == "-yN" and c["before"] == "36" and c["after"] == "40" for c in changes
+    )
 
 
 def test_run_manual_spectrum_finds_merged_slice_fid(
@@ -484,9 +454,7 @@ def test_run_manual_spectrum_finds_merged_slice_fid(
     assert Path(spectrum).parent == manager.data_dir(exp_id, data_id, "spectra")
 
 
-def test_manual_scripts_missing_fid_requires_generate_fid(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_manual_scripts_missing_fid_requires_generate_fid(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.163-patch14: a missing fid on manual spectrum generation -> the user is asked
     to run the "Generate FID" step first; the spectrum entry point does not sneak in a
     conversion."""
@@ -520,9 +488,7 @@ def test_quality_check_runs_on_manual_run_not_open(
         called["work"] = str(work_dir)
         return SimpleNamespace(reports=["测试报告"], metrics={"snr": 10})
 
-    monkeypatch.setattr(
-        "workflow.direct_diagnostics.run_direct_diagnostics", fake_diagnostics
-    )
+    monkeypatch.setattr("workflow.direct_diagnostics.run_direct_diagnostics", fake_diagnostics)
     # Open: only read the existing scripts; no diagnosis, no quality log written
     scripts = manual_scripts(manager, exp_id, data_id)
     assert final in scripts
@@ -532,9 +498,7 @@ def test_quality_check_runs_on_manual_run_not_open(
     # Run: do the quality diagnosis first, then execute the script
     runtime = _FakeRuntime(spectrum_name=f"{data_id}.ft2")
     monkeypatch.setattr("workflow.manual.CshRuntime", lambda: runtime)
-    run_manual_spectrum(
-        manager, exp_id, data_id, {final: "#!/bin/csh\n# process\n"}
-    )
+    run_manual_spectrum(manager, exp_id, data_id, {final: "#!/bin/csh\n# process\n"})
     assert called.get("work") == str(work)
     log = (work / "manual_quality.log").read_text(encoding="utf-8")
     assert "测试报告" in log

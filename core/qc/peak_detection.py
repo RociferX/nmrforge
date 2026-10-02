@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 
 from core.qc import noise
+from ui_support.i18n import tr
 
 # importing scipy.ndimage costs about 150ms the first time (measured on the VM): peak
 # detection is needed only when peaks are really picked or snapped, so a top-level import
@@ -114,6 +115,28 @@ def _candidates(
     if ring.any():
         neighbor_max = maximum_filter(value, footprint=ring, mode="constant")
         mask = (value > neighbor_max) & (value > sigma * params.sigma_multiplier)
+        # A peak centered between samples has a compact equal-height top. Keep
+        # one representative, but not a flat baseline or a long ridge. Check the
+        # entire surrounding region so a plateau beside a taller peak is rejected.
+        tied = (value == neighbor_max) & (value > sigma * params.sigma_multiplier)
+        if np.any(tied):
+            from scipy.ndimage import find_objects, label
+
+            components, _ = label(tied, structure=np.ones([3] * real.ndim, dtype=bool))
+            for component, bounds in enumerate(find_objects(components), start=1):
+                if bounds is None or any(s.stop - s.start > 2 for s in bounds):
+                    continue
+                local = np.argwhere(components[bounds] == component)
+                idx = tuple(int(s.start + v) for s, v in zip(bounds, local[0]))
+                surrounding = tuple(
+                    slice(
+                        max(0, s.start - params.neighborhood // 2),
+                        min(value.shape[a], s.stop + params.neighborhood // 2),
+                    )
+                    for a, s in enumerate(bounds)
+                )
+                if np.max(value[surrounding]) <= value[idx]:
+                    mask[idx] = True
     else:
         maxima = maximum_filter(value, footprint=footprint, mode="constant")
         mask = (value == maxima) & (value > sigma * params.sigma_multiplier)
@@ -125,9 +148,7 @@ def _candidates(
         val = float(real[tuple(idx)])
         snr_value = abs(val) / sigma if sigma > 0 else 0.0
         if snr_value >= params.min_snr:
-            position = tuple(
-                _refined_index(value, idx, a) for a in range(real.ndim)
-            )
+            position = tuple(_refined_index(value, idx, a) for a in range(real.ndim))
             peaks.append(
                 Peak(
                     position=position,
@@ -143,7 +164,8 @@ def keep_dominant(candidates: list[Peak]) -> list[Peak]:
     """dominant mode: keep only the sign with more candidate peaks (ties by the sum of the
     absolute intensities, then positive).
     Picking may detect with both and let the spectrum share decide whether to call this
-    function (0.2.199-patch29fc)."""
+    function (0.2.199-patch29fc).
+    """
     counts: dict[int, int] = {1: 0, -1: 0}
     totals: dict[int, float] = {1: 0.0, -1: 0.0}
     for peak in candidates:
@@ -156,16 +178,10 @@ def keep_dominant(candidates: list[Peak]) -> list[Peak]:
             dominant = s
         elif counts[s] == counts[dominant] and totals[s] > totals[dominant]:
             dominant = s
-    return [
-        peak
-        for peak in candidates
-        if (1 if peak.height >= 0 else -1) == dominant
-    ]
+    return [peak for peak in candidates if (1 if peak.height >= 0 else -1) == dominant]
 
 
-def snap_to_peak_top(
-    data: Any, row: int, col: int, radius: int = 6
-) -> tuple[int, int]:
+def snap_to_peak_top(data: Any, row: int, col: int, radius: int = 6) -> tuple[int, int]:
     """Snap a click onto the nearby peak top (the local maximum of |value|).
 
     Look for the largest |value| inside a radius window around (row, col); when that point
@@ -204,8 +220,24 @@ def detect(data: Any, params: PeakDetectionParams | None = None) -> list[Peak]:
     """
     arr = np.asarray(data)
     params = params or PeakDetectionParams()
-    sigma = noise.estimate(arr).global_sigma
-    real = np.real(arr)
+    if arr.size == 0:
+        return []
+    if arr.ndim < 1 or any(size == 0 for size in arr.shape):
+        raise ValueError(tr("Peak detection requires a non-empty spectral array"))
+    if (
+        not np.isfinite(params.sigma_multiplier)
+        or params.sigma_multiplier <= 0
+        or not np.isfinite(params.min_snr)
+        or params.min_snr < 0
+        or params.neighborhood < 1
+        or params.neighborhood % 2 != 1
+    ):
+        raise ValueError(tr("Invalid peak-detection threshold or neighborhood"))
+    if params.sign_mode not in ("positive", "negative", "both", "dominant"):
+        raise ValueError(tr("Unknown peak sign mode: {p0}", p0=params.sign_mode))
+    estimate = noise.estimate(arr)
+    sigma = estimate.global_sigma
+    real = np.real(arr) - estimate.baseline
     mode = params.sign_mode
     signs = {
         "positive": (1,),

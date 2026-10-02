@@ -101,8 +101,13 @@ def _window(ppm_a: np.ndarray, ppm_b: np.ndarray) -> tuple[float, float]:
 
 
 def _crop(
-    plane: np.ndarray, ppm_h: np.ndarray, ppm_n: np.ndarray, low_h: float, high_h: float,
-    low_n: float, high_n: float,
+    plane: np.ndarray,
+    ppm_h: np.ndarray,
+    ppm_n: np.ndarray,
+    low_h: float,
+    high_h: float,
+    low_n: float,
+    high_n: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Crop to the shared window and turn it into increasing ppm (flipped back when plotting)."""
     rows = np.where((ppm_n >= low_n) & (ppm_n <= high_n))[0]
@@ -186,9 +191,7 @@ def main(argv: list[str] | None = None) -> int:
             (grid[index][1], hand_plane, hand_h, hand_n, f"{tag} - manual"),
         )
         for ax, plane, ppm_h, ppm_n, title in panels:
-            block, block_h, block_n = _crop(
-                plane, ppm_h, ppm_n, low_h, high_h, low_n, high_n
-            )
+            block, block_h, block_n = _crop(plane, ppm_h, ppm_n, low_h, high_h, low_n, high_n)
             shape = "x".join(str(int(v)) for v in plane.shape)
             _draw(ax, block, block_h, block_n, f"{title} ({shape})")
             ax.set_xlim(high_h, low_h)

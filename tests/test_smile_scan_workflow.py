@@ -61,8 +61,7 @@ class _FakeBackend:
                     "index": index,
                     "params": dict(combo),
                     "metrics": metrics,
-                    "script": f"# smile script nSigma={combo['nsigma']} "
-                    f"thresh={combo['thresh']}\n",
+                    "script": f"# smile script nSigma={combo['nsigma']} thresh={combo['thresh']}\n",
                     "ok": True,
                 }
             )
@@ -83,15 +82,15 @@ def test_scan_ranks_and_deletes_candidates(tmp_path: Path) -> None:
 
     assert result["n_combos"] == 16  # default 4x4 (0.2.199-patch29hz-fix5)
     assert len(result["rows"]) == 16
-    assert len(backend.deleted) == 16          # candidate spectra deleted after evaluation
-    assert not any(scan_dir.glob("*.ft2"))     # no spectra left in the scan dir
+    assert len(backend.deleted) == 16  # candidate spectra deleted after evaluation
+    assert not any(scan_dir.glob("*.ft2"))  # no spectra left in the scan dir
 
     # shared peaks appear in all 25 combos → each combo has ≥1 stable peak; rank by mean S/N desc
     ranks = [row["rank"] for row in result["rows"]]
     assert ranks == list(range(1, 17))
     assert all(row["stable_count"] >= 1 for row in result["rows"])
     assert result["rows"][0]["mean_snr"] >= result["rows"][-1]["mean_snr"]
-    assert "script" not in result["rows"][0]   # script text not leaked into the ranking table
+    assert "script" not in result["rows"][0]  # script text not leaked into the ranking table
     assert "smile_rms_ratio" in result["rows"][0]
     assert "holdout_rmse" in result["rows"][0]
     assert "holdout_corr" in result["rows"][0]
@@ -125,9 +124,7 @@ def test_write_scan_output_layout(tmp_path: Path) -> None:
         scan_dir=tmp_path / "scan2",
     )
 
-    paths = write_smile_scan_output(
-        manager, exp.id, data.id, result["rows"], result["scripts"]
-    )
+    paths = write_smile_scan_output(manager, exp.id, data.id, result["rows"], result["scripts"])
 
     csv_path = Path(paths["csv"])
     json_path = Path(paths["json"])
@@ -140,8 +137,6 @@ def test_write_scan_output_layout(tmp_path: Path) -> None:
     assert json.loads(json_path.read_text(encoding="utf-8"))["count"] == 16
 
     for rank in (1, 2, 3):
-        script = manager.data_dir(exp.id, data.id, "process") / (
-            f"{data.id}_nus_rank{rank}.com"
-        )
+        script = manager.data_dir(exp.id, data.id, "process") / (f"{data.id}_nus_rank{rank}.com")
         assert script.is_file()
         assert "nsigma" in script.read_text(encoding="utf-8").lower()

@@ -91,7 +91,8 @@ _AA_LETTERS = "ACDEFGHIKLMNPQRSTVWY"
 
 def _poky_part(part: str) -> str | None:
     """Normalise one assignment part to single-letter amino acid + residue number +
-    nucleus name, upper-cased; returns None when the part does not match."""
+    nucleus name, upper-cased; returns None when the part does not match.
+    """
     m = re.fullmatch(r"([A-Za-z])(\d+)([A-Za-z]+)", part)
     if m and m.group(1).upper() in _AA_LETTERS:
         return f"{m.group(1).upper()}{m.group(2)}{m.group(3).upper()}"
@@ -126,7 +127,8 @@ def normalize_poky_label(text: str | None, ndim: int = 2) -> str:
 
 def poky_label_is_valid(text: str | None, ndim: int = 2) -> bool:
     """Whether the text is a valid Poky assignment for this dimension
-    (part count = ndim and every part well formed)."""
+    (part count = ndim and every part well formed).
+    """
     if text is None:
         return True
     raw = str(text).strip()
@@ -153,7 +155,8 @@ class PeakTable:
 
     def add(self, peak: dict[str, Any]) -> int:
         """Append a row; a numeric Peak_ID is assigned automatically
-        (``len(rows)+1`` when none is given)."""
+        (``len(rows)+1`` when none is given).
+        """
         peak_id = int(peak.get("Peak_ID", 0) or 0) or (len(self.rows) + 1)
         row = dict(peak)
         row["Peak_ID"] = peak_id
@@ -162,9 +165,7 @@ class PeakTable:
 
     def remove(self, peak_id: int) -> None:
         """Remove one row by Peak_ID."""
-        self.rows = [
-            r for r in self.rows if int(r.get("Peak_ID", -1)) != peak_id
-        ]
+        self.rows = [r for r in self.rows if int(r.get("Peak_ID", -1)) != peak_id]
 
 
 def save_peaks(
@@ -173,6 +174,7 @@ def save_peaks(
     extra_columns: tuple[str, ...] = (),
     *,
     nuclei: list[str] | None = None,
+    ndim: int | None = None,
 ) -> Path:
     """Write the peak list as a Poky/Sparky ``.list`` (contract §6: the peak file is
     itself .list).
@@ -182,13 +184,17 @@ def save_peaks(
     order) and 3D export orders the w columns by the external convention
     (0.2.199-patch29dk); returns the path actually written (.list suffix added).
     """
+    if ndim is not None and ndim not in (2, 3):
+        raise ValueError("ndim must be 2 or 3")
     path = Path(path)
     if path.suffix.lower() != ".list":
         path = path.with_suffix(".list")
-    is_3d = bool(peaks) and "F1_shift" in peaks[0]
-    return export_peaks_poky(
-        path, peaks, ndim=3 if is_3d else 2, nuclei=nuclei
+    is_3d = (
+        "F1_shift" in peaks[0]
+        if peaks
+        else ndim == 3 or (ndim is None and nuclei is not None and len(nuclei) == 3)
     )
+    return export_peaks_poky(path, peaks, ndim=3 if is_3d else 2, nuclei=nuclei)
 
 
 def _load_csv_rows(path: Path) -> list[dict[str, Any]]:
@@ -227,9 +233,7 @@ def load_peaks(path: Path | str) -> list[dict[str, Any]]:
     text = path.read_text(encoding="utf-8")
     # .list is always parsed as Poky (including trimmed files without a header); other
     # suffixes are decided by the header (0.2.199-patch29fx: case-insensitive).
-    is_poky = path.suffix.lower() == ".list" or bool(
-        _POKY_HEADER_RE.match(text.lstrip())
-    )
+    is_poky = path.suffix.lower() == ".list" or bool(_POKY_HEADER_RE.match(text.lstrip()))
     rows = import_peaks_poky(path) if is_poky else _load_csv_rows(path)
     for i, row in enumerate(rows, start=1):
         if not (row.get("Peak_ID") or ""):
@@ -246,7 +250,8 @@ def load_peaks(path: Path | str) -> list[dict[str, Any]]:
 
 def _poky_num(value: Any) -> float:
     """Lenient parsing of exported Poky numbers: empty/None/invalid falls back to 0.0
-    (peak-table cells may be left blank)."""
+    (peak-table cells may be left blank).
+    """
     if value in (None, ""):
         return 0.0
     try:
@@ -274,25 +279,18 @@ def export_peaks_poky(
     path.parent.mkdir(parents=True, exist_ok=True)
     is_3d = ndim >= 3 or (bool(peaks) and "F1_shift" in peaks[0])
     header = (
-        "Assignment w1 w2 w3 Data Height Volume"
-        if is_3d
-        else "Assignment w1 w2 Data Height Volume"
+        "Assignment w1 w2 w3 Data Height Volume" if is_3d else "Assignment w1 w2 Data Height Volume"
     )
     lines = [header]
     order = (
-        _external_w_to_internal_axes(nuclei, _EXTERNAL_3D_NUCLEI, 3)
-        if is_3d
-        else list(range(2))
+        _external_w_to_internal_axes(nuclei, _EXTERNAL_3D_NUCLEI, 3) if is_3d else list(range(2))
     )
     for peak in peaks:
         label = str(peak.get("label", "") or "").strip().replace(" ", "_")
         if not label:
             label = "?-?-?" if is_3d else "?-?"
         if is_3d:
-            shifts = [
-                _poky_num(peak.get(f"F{order[j] + 1}_shift", 0.0))
-                for j in range(3)
-            ]
+            shifts = [_poky_num(peak.get(f"F{order[j] + 1}_shift", 0.0)) for j in range(3)]
         else:
             shifts = [
                 _poky_num(peak.get("N_shift", 0.0)),
@@ -307,7 +305,8 @@ def export_peaks_poky(
 
 def _poky_header_ndim(line: str) -> int | None:
     """Number of coordinate columns in a Poky header (2 or 3 w columns); None when the
-    line is not a header."""
+    line is not a header.
+    """
     if not _POKY_HEADER_RE.match(line):
         return None
     cols = line.split()
@@ -337,7 +336,8 @@ def _parse_poky_row(
     tokens: list[str], ndim: int, nuclei: list[str] | None
 ) -> dict[str, Any] | None:
     """One Poky data line -> peak dict; the coordinate columns must parse, Data/Height/
-    Volume default to 0.0 and surplus trailing columns are ignored (0.2.199-patch29fx)."""
+    Volume default to 0.0 and surplus trailing columns are ignored (0.2.199-patch29fx).
+    """
     if len(tokens) < ndim + 1:
         return None
     try:
@@ -348,9 +348,7 @@ def _parse_poky_row(
     if ndim == 2:
         row.update({"N_shift": coords[0], "H_shift": coords[1]})
     else:
-        order = _external_w_to_internal_axes(
-            nuclei, _EXTERNAL_3D_NUCLEI, 3
-        )
+        order = _external_w_to_internal_axes(nuclei, _EXTERNAL_3D_NUCLEI, 3)
         for j in range(3):
             row[f"F{order[j] + 1}_shift"] = coords[j]
     data = _poky_num(tokens[ndim + 1]) if len(tokens) > ndim + 1 else 0.0
@@ -367,9 +365,7 @@ def _parse_poky_row(
     return row
 
 
-def import_peaks_poky(
-    path: Path | str, *, nuclei: list[str] | None = None
-) -> list[dict[str, Any]]:
+def import_peaks_poky(path: Path | str, *, nuclei: list[str] | None = None) -> list[dict[str, Any]]:
     """Parse a Poky/Sparky .list back (header line + row parsing) into peak dicts.
 
     3D defaults to the external convention w1=15N/w2=13C/w3=1H (0.2.199-patch29dk,
@@ -397,11 +393,7 @@ def import_peaks_poky(
         tokens = stripped.split()
         if len(tokens) < 3:
             continue
-        ndim = (
-            header_ndim
-            if header_ndim is not None
-            else _infer_poky_ndim(tokens)
-        )
+        ndim = header_ndim if header_ndim is not None else _infer_poky_ndim(tokens)
         if ndim is None:
             continue
         row = _parse_poky_row(tokens, ndim, nuclei)

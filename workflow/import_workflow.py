@@ -12,12 +12,14 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from core.data.bruker_reader import read_dataset
-from core.data.internal_data_model import Experiment
+from core.data.internal_data_model import Experiment, SamplingMode
+from core.data.raw_fingerprint import raw_key_files
 from core.experiment.pulse_pathways import review_lines
 from core.project import ProjectManager, WorkflowRun
 from core.project.manager import atomic_write_json, sha256_file
@@ -90,6 +92,9 @@ def _dataset_summary(experiment: Experiment) -> dict[str, Any]:
             "mode": experiment.sampling.mode.value,
             "sampling_fraction": experiment.sampling.sampling_fraction,
             "schedule_type": experiment.sampling.schedule_type,
+            "schedule_file": experiment.sampling.schedule_file,
+            "schedule_source": experiment.sampling.schedule_source,
+            "evidence": list(experiment.sampling.evidence),
         },
         "experiment_type": {
             "name": experiment.experiment_type.name,
@@ -106,7 +111,8 @@ def _iter_files(root: Path) -> list[Path]:
 
 def _manifest(root: Path) -> tuple[dict[str, str], int, int]:
     """Calculate SHA-256 for each file in directory and return (relative path -> summary, number of
-    files, number of bytes)."""
+    files, number of bytes).
+    """
     checksums: dict[str, str] = {}
     total_bytes = 0
     for path in _iter_files(root):
@@ -119,24 +125,24 @@ def _manifest(root: Path) -> tuple[dict[str, str], int, int]:
 def _key_checksums(root: Path) -> dict[str, str]:
     """Authoritative Bruker file fingerprint (ser/fid large files only count as existing ones)."""
     return {
-        name: sha256_file(root / name)
-        for name in KEY_FILES
-        if (root / name).is_file()
+        name: sha256_file(root / name) for name in raw_key_files(root) if (root / name).is_file()
     }
 
 
 def _validate_dataset_dir(path: Path) -> None:
     if not (path / "acqus").is_file():
-        raise ImportWorkflowError(tr(
-            "Not a Bruker dataset directory (acqus is missing): "
-            "{p0}",
-            p0=path,
-        ))
+        raise ImportWorkflowError(
+            tr(
+                "Not a Bruker dataset directory (acqus is missing): {p0}",
+                p0=path,
+            )
+        )
 
 
 def _link_one(src: Path, dst: Path) -> str:
     """Link a single file: symbolic link -> hard link -> copy fallback (G2B-009, user-specified
-    soft link takes precedence)."""
+    soft link takes precedence).
+    """
     try:
         os.symlink(src, dst)
         return "symlink"
@@ -170,9 +176,44 @@ def _link_tree(src: Path, dst: Path, stats: dict[str, int]) -> None:
             stats[_link_one(source_item, dest_item)] += 1
 
 
+def _human_bytes(count: int) -> str:
+    """Format a byte count for readability (one decimal place, or integer bytes below 1 KB).
+
+    Unit symbols are technical notation; the report uses them only to show the data size and
+    indicate how much data will be copied.
+    """
+    value = float(max(int(count), 0))
+    if value < 1024:
+        return f"{int(value)} B"
+    for unit in ("KB", "MB", "GB"):
+        value /= 1024
+        if value < 1024 or unit == "GB":
+            return f"{value:.1f} {unit}"
+    return f"{value:.1f} GB"
+
+
+def _experiment_brief(experiment: Experiment) -> str:
+    """Format a one-line summary of dimension count, nuclei and ``TD`` for the import report.
+
+    For example: ``2D, 1H/13C, TD 1024×256``. This lets users see the parsed parameters before
+    large files are copied. Missing fields are omitted, and report formatting never fails an
+    import.
+    """
+    parts = [f"{int(getattr(experiment, 'ndim', 0))}D"]
+    dims = list(getattr(experiment, "dimensions", None) or [])
+    nuclei = [str(dim.nucleus) for dim in dims if str(getattr(dim, "nucleus", ""))]
+    if nuclei:
+        parts.append("/".join(nuclei))
+    tds = [str(int(dim.td)) for dim in dims if int(getattr(dim, "td", 0) or 0)]
+    if tds:
+        parts.append("TD " + "×".join(tds))
+    return ", ".join(parts)
+
+
 def _raise_if_kinetics(experiment) -> None:
     """Kinetics / variable-delay series are barred from import; caught before creating the entry
-    and copying files."""
+    and copying files.
+    """
     from core.experiment.experiment_classifier import is_kinetics
 
     if is_kinetics(experiment):
@@ -185,6 +226,51 @@ def _raise_if_kinetics(experiment) -> None:
         )
 
 
+def _raise_if_kinetics_source(source: Path | str) -> None:
+    """Read ``acqus`` and reject kinetics data before building an experiment or classifying
+    sampling.
+    """
+    from core.experiment.experiment_classifier import is_kinetics_source
+
+    if is_kinetics_source(source):
+        raise KineticsUnsupportedError(
+            tr(
+                "a kinetics experiment was detected (variable delay / time series); the current "
+                "product does not support importing "
+                "it",
+            )
+        )
+
+
+def _raise_if_nus_schedule_missing(experiment: Experiment) -> None:
+    """Block 2D/3D NUS import before copying or registering data when its schedule is invalid or
+    missing.
+
+    NUS ``ser`` rows are written in schedule order. Even at 100% sampling, the trace count
+    cannot prove that this order matches the regular grid. Continuing would defer the failure to
+    SMILE and could produce a plausible-looking spectrum with incorrect coordinates, so reject
+    the dataset at the earliest import boundary.
+    """
+    sampling = experiment.sampling
+    if (
+        int(getattr(experiment, "ndim", 0) or 0) not in (2, 3)
+        or sampling.mode is not SamplingMode.NUS
+        or bool(sampling.nus_list)
+    ):
+        return
+    evidence = "; ".join(str(line) for line in sampling.evidence[-2:] if line)
+    raise ImportWorkflowError(
+        tr(
+            "NUS data was detected, but no valid sampling schedule was found in {p0}. "
+            "Import was stopped because the sampling order cannot be recovered; "
+            "put the nuslist file (or the file explicitly named by acqus.NUSLIST) in the dataset "
+            "directory and import again. Detection evidence: {p1}",
+            p0=experiment.source_path,
+            p1=evidence or sampling.schedule_source,
+        )
+    )
+
+
 def import_data(
     manager: ProjectManager,
     exp_id: str,
@@ -193,6 +279,7 @@ def import_data(
     segments: list[Path | str] | None = None,
     copy: bool = True,
     segmented: bool = False,
+    progress: Callable[[str], None] | None = None,
 ) -> ImportResult:
     """Import data into an experiment: read the parameters + link raw/<exp_id>/<data_id>/ +
     metadata + import run.
@@ -204,7 +291,13 @@ def import_data(
     """
     if manager.project is None or manager.root is None:
         raise ImportWorkflowError(tr("Project is not loaded and data cannot be imported"))
+
+    def _progress(message: str) -> None:
+        if progress is not None:
+            progress(message)
+
     src = Path(source).resolve()
+    _progress(tr("== import start: {p0} → {p1} ==", p0=src, p1=exp_id))
     segment_paths: list[Path] = []
     segment_kind: str | None = None
     segment_label: str | None = None
@@ -214,11 +307,16 @@ def import_data(
         # here they are merged into one DataEntry).
         from core.data.bruker_reader import (
             classify_segment_kind,
+            discover_segment_dirs,
             read_dataset_container,
         )
 
+        preflight_dirs = [src] if (src / "acqus").is_file() else discover_segment_dirs(src)
+        for candidate in preflight_dirs:
+            _raise_if_kinetics_source(candidate)
         experiment, discovered = read_dataset_container(src)
         _raise_if_kinetics(experiment)
+        _raise_if_nus_schedule_missing(experiment)
         if len(discovered) < 2:
             raise ImportWorkflowError(
                 tr(
@@ -241,12 +339,35 @@ def import_data(
         experiment.sampling.evidence.append(tr("Multi-segment type: {p0}", p0=segment_label))
     else:
         _validate_dataset_dir(src)
-        experiment = read_dataset(src)
-        _raise_if_kinetics(experiment)
         segment_paths = [Path(seg).resolve() for seg in (segments or [])]
         for seg in segment_paths:
             _validate_dataset_dir(seg)
+        for candidate in [src, *segment_paths]:
+            _raise_if_kinetics_source(candidate)
+        experiment = read_dataset(src)
+        _raise_if_kinetics(experiment)
+        _raise_if_nus_schedule_missing(experiment)
 
+    _progress(tr("◆ parameters: {p0}", p0=_experiment_brief(experiment)))
+    if segment_label is not None:
+        _progress(
+            tr(
+                "◆ segments: {p0}",
+                p0=f"{len(segment_paths)} ({segment_label})",
+            )
+        )
+    elif segment_paths:
+        _progress(tr("◆ segments: {p0}", p0=str(len(segment_paths))))
+    else:
+        data_name = next((name for name in ("ser", "fid") if (src / name).is_file()), "")
+        if data_name:
+            _progress(
+                tr(
+                    "◆ data: {p0} {p1}",
+                    p0=data_name,
+                    p1=_human_bytes((src / data_name).stat().st_size),
+                )
+            )
 
     warnings: list[str] = []
     # 2026-09-24: when acqus SW_h contradicts SW(ppm)×SFO1, take the sweep width from the ppm
@@ -260,12 +381,14 @@ def import_data(
     link_stats = {"hardlink": 0, "symlink": 0, "copy": 0, "writable": 0}
     should_copy = copy
     if should_copy and src.is_relative_to(manager.root):
-        warnings.append(tr(
-            "The source directory is already in the project, skip copying (refer to the original "
-            "path): "
-            "{p0}",
-            p0=src,
-        ))
+        warnings.append(
+            tr(
+                "The source directory is already in the project, skip copying (refer to the "
+                "original path): "
+                "{p0}",
+                p0=src,
+            )
+        )
         should_copy = False
 
     data_entry = manager.import_data(exp_id, str(src), segments=segment_paths)
@@ -308,11 +431,20 @@ def import_data(
             if link_stats["copy"]:
                 warnings.append(
                     tr(
-                        "{p0} file(s) could not be linked and were copied "
-                        "instead",
-                        p0=link_stats['copy'],
+                        "{p0} file(s) could not be linked and were copied instead",
+                        p0=link_stats["copy"],
                     )
                 )
+            _progress(
+                tr(
+                    "◆ raw: {p0} file(s) → {p1} ({p2})",
+                    p0=sum(link_stats.values()),
+                    p1=copied_dir.relative_to(manager.root).as_posix(),
+                    p2=", ".join(f"{kind} {count}" for kind, count in link_stats.items() if count),
+                )
+            )
+        else:
+            _progress(tr("◆ raw: refer to the source in place, no copy"))
 
         if segmented and segment_paths:
             checksums = {}
@@ -323,11 +455,17 @@ def import_data(
             checksums = _key_checksums(effective_root)
         manifest_checksums, file_count, total_bytes = _manifest(effective_root)
         data_entry.checksums = checksums
+        _progress(
+            tr(
+                "◆ fingerprints: {p0} key file(s), manifest {p1} file(s) / {p2}",
+                p0=len(checksums),
+                p1=file_count,
+                p2=_human_bytes(total_bytes),
+            )
+        )
 
         inputs = {"source_path": str(src)}
-        inputs.update(
-            {f"sha256:{name}": digest for name, digest in sorted(checksums.items())}
-        )
+        inputs.update({f"sha256:{name}": digest for name, digest in sorted(checksums.items())})
         run = manager.start_run(
             exp_id,
             workflow_ref=IMPORT_WORKFLOW_REF,
@@ -349,9 +487,7 @@ def import_data(
             "data_id": data_id,
             "source_path": str(src),
             "copied_to": (
-                copied_dir.relative_to(manager.root).as_posix()
-                if copied_dir is not None
-                else None
+                copied_dir.relative_to(manager.root).as_posix() if copied_dir is not None else None
             ),
             "imported_at": data_entry.imported_at,
             "dataset": _dataset_summary(experiment),
@@ -380,14 +516,22 @@ def import_data(
             if segment_label is None
             else tr("import complete({p0})", p0=segment_label),
         )
+        _progress(
+            tr(
+                "◆ import record: {p0} (run {p1})",
+                p0=data_entry.metadata_path,
+                p1=run.run_id,
+            )
+        )
     except Exception:
         if run is not None:
             try:
                 manager.finish_run(
-                    run.run_id, "failed", message=tr(
-                        "Import failed, registration has been rolled "
-                        "back",
-                    )
+                    run.run_id,
+                    "failed",
+                    message=tr(
+                        "Import failed, registration has been rolled back",
+                    ),
                 )
             except Exception:  # noqa: BLE001 - Rollback failure does not mask original error.
                 pass
@@ -401,6 +545,14 @@ def import_data(
                 entry.data.remove(data_entry)
         raise
 
+    _progress(
+        tr(
+            "== import completed: {p0} ({p1} file(s), {p2}) ==",
+            p0=f"{exp_id}/{data_id}",
+            p1=file_count,
+            p2=_human_bytes(total_bytes),
+        )
+    )
     return ImportResult(
         experiment_id=exp_id,
         run_id=run.run_id,
@@ -423,20 +575,20 @@ def import_bruker_dataset(
     sample_id: str = "",
     segments: list[Path | str] | None = None,
     copy: bool = True,
+    progress: Callable[[str], None] | None = None,
 ) -> ImportResult:
     """Convenience entry (backwards compatible): Create an experiment and import the first data.
-    Equivalent to create_experiment + import_data; remove blank experiments on failure."""
+    Equivalent to create_experiment + import_data; remove blank experiments on failure.
+    """
     if manager.project is None:
         raise ImportWorkflowError(tr("project is not loaded, cannot import experiment"))
     entry = manager.create_experiment(title=title, sample_id=sample_id)
     try:
-        return import_data(manager, entry.id, source, segments=segments, copy=copy)
+        return import_data(
+            manager, entry.id, source, segments=segments, copy=copy, progress=progress
+        )
     except Exception:
-        if (
-            manager.project is not None
-            and entry in manager.project.experiments
-            and not entry.data
-        ):
+        if manager.project is not None and entry in manager.project.experiments and not entry.data:
             manager.project.experiments.remove(entry)
         raise
 
@@ -449,12 +601,15 @@ def import_segmented_dataset(
     sample_id: str = "",
     copy: bool = True,
     exp_id: str = "",
+    progress: Callable[[str], None] | None = None,
 ) -> ImportResult:
     """Single-dataset segmented import: source is a container directory holding every segment, and
     the segments are merged into one DataEntry.
 
-    Clearly distinguished from batch import: batch import creates one entry per independent dataset
-    under the container, while this entry treats each subdirectory directly containing acqus as an
+    Clearly distinguished from batch import: batch import creates one entry per independent
+    dataset
+    under the container, while this entry treats each subdirectory directly containing acqus as
+    an
     acquisition segment of the same experiment (read_segments checks that dimension count /
     nucleus / TD / sweep width agree) and merges them into a single piece of data, converted
     segment by segment by the backend and merged with addNMR.
@@ -467,16 +622,12 @@ def import_segmented_dataset(
     if exp_id:
         if manager.project.experiment(exp_id) is None:
             raise ImportWorkflowError(tr("experiment type does not exist: {p0}", p0=exp_id))
-        return import_data(manager, exp_id, source, segmented=True, copy=copy)
+        return import_data(manager, exp_id, source, segmented=True, copy=copy, progress=progress)
     entry = manager.create_experiment(title=title, sample_id=sample_id)
     try:
-        return import_data(manager, entry.id, source, segmented=True, copy=copy)
+        return import_data(manager, entry.id, source, segmented=True, copy=copy, progress=progress)
     except Exception:
-        if (
-            manager.project is not None
-            and entry in manager.project.experiments
-            and not entry.data
-        ):
+        if manager.project is not None and entry in manager.project.experiments and not entry.data:
             manager.project.experiments.remove(entry)
         raise
 
@@ -498,7 +649,8 @@ def apply_user_experiment_type(
     name: str,
 ) -> bool:
     """Authoritatively write the experiment type chosen by the GUI user back into metadata
-    (0.2.199-patch29fd)."""
+    (0.2.199-patch29fd).
+    """
     if manager.project is None or manager.root is None:
         return False
     try:

@@ -7,12 +7,12 @@
 | uniform 1D/2D/3D data | yes, combinations run | goes through NMRPipe `process()`; studies are mostly 2D |
 | NUS **2D** data | yes, combinations run | goes through `reconstruct_nus()` (SMILE); candidates are isolated; SMILE parameters can be swept |
 | NUS 3D data | reference spectrum only | running combinations raises `SweepError` (see 9.2) |
-| reference workflow (1 script + 2 peak tables) | yes | the reference is a baseline, not a claimed optimum |
+| reference workflow (script + parabolic peak table) | yes | the reference is a baseline, not a claimed optimum |
 | batch execution by `workflow_id` | yes | `W0001...`; two conditions A/B share parameters and peak identity |
-| localisation: parabolic / 2D gaussian | yes | both methods run on the same candidate, producing two isomorphic tables |
+| peak localisation | yes | three-point parabolic method only |
 | multiple conditions (A/B) | yes | one reference per condition; peak identity and user parameters shared |
-| **full sampling labelled as NUS** | yes, treated as uniform | a `nuslist` covering the whole grid, or a 2D `ser` that is full-grid-with-zero-fill and has no zero rows, is treated as full sampling and goes through the ordinary FT (no SMILE); the evidence is written to `sampling_evidence` |
-| peak overlap / deconvolution | no | the window extremum plus parabola or single-peak Gaussian only |
+| full sampling labelled as NUS | schedule-dependent | a valid full grid in standard order may use uniform processing; full coverage in a different order still requires schedule-based placement |
+| peak overlap / deconvolution | no | localisation uses a detected extremum and three-point parabola only |
 | Lorentzian / Voigt / multi-peak fitting | no | on the roadmap |
 | parallel or cluster scheduling | no | serial with resume; shard along a parameter axis (see 8.4) |
 | validation of parameter-axis keys | partial | locked keys raise, deterministic and unknown keys warn; key validity is mostly reported in `notes` |
@@ -20,11 +20,11 @@
 
 ## 9.2 What NUS support covers
 
-> **Full sampling wins.** When a dataset is labelled NUS but is actually fully sampled
-> (the `nuslist` covers the whole grid, or a 2D `ser` is full-grid with no zero rows), it is
-> processed as **uniform** and the evidence is recorded (`sampling="uniform"`,
-> `sampling_schedule="full_sampling"`, details in `sampling_evidence`). Only genuine NUS
-> (a sampling subset, or a sparse file) takes the SMILE path below.
+> Sampling is not inferred from a nominal percentage or data length alone. Only a standard
+> `nuslist` or the file explicitly named by `acqus.NUSLIST` is used. A valid complete schedule in
+> standard order may use uniform processing; a complete but reordered schedule still needs
+> schedule-based placement. Explicit NUS without a recoverable schedule is rejected at import.
+> Trailing zero padding is not treated as a missing sample.
 
 **Supported: 2D NUS.** Both the reference and the workflows call `reconstruct_nus()`; the only
 difference is that batch execution isolates the candidate output per combination:
@@ -56,7 +56,7 @@ and finalises with independent names).
 | Priority | Item | Deliverable shape |
 | --- | --- | --- |
 | high | 3D NUS in combination mode | slice stream keyed by `workflow_id` plus isolated finalise output |
-| medium | extend peak fitting to Lorentzian/Voigt/multi-peak | today only a 2D single-peak Gaussian |
+| medium | extend peak fitting to Lorentzian/Voigt/multi-peak | current sub-grid localisation is a three-point parabola |
 | medium | schema validation of parameter keys | raise instead of only warning about unknown keys |
 | medium | progress file | update `records/progress.json` per combination for external monitoring |
 | medium | explicit 3D plane selection | measure on a named plane when the peak table fixes the dimension values |
@@ -78,8 +78,7 @@ reproducible)
 | Full suite on a machine that has NMRPipe | `bash scripts/vm_test.sh` (the same suite as above: the engine boundary stays stubbed) | a test log; bytecode and ruff caches are redirected to a temporary directory so the working copy stays clean |
 | CI | `.github/workflows/ci.yml` jobs `static` (ruff) / `tests` (3.12, 3.13) / `release-readiness` | GitHub Actions logs |
 | CI job on a machine that has NMRPipe | `external-engine`: re-runs the same stubbed suite on a self-hosted runner that has NMRPipe and uploads the log. It does **not** invoke the engine | **skipped unless** a self-hosted runner is registered and the repository variable `NMRFORGE_SELF_HOSTED_CI` is `true`; a licensed dependency must not become a PR gate, and a GitHub-hosted runner cannot install NMRPipe |
-| Real-engine API smoke | `python scripts/vm_api_smoke.py --data <Bruker dir> [--data b ...] [--fresh]` on a machine that has NMRPipe | the study root is given by `--study` (default `~/studies/nmrforge_api_smoke`, overridable with the environment variable `NMRFORGE_API_STUDY`); it is an ordinary study root: `records/reference.json`, `records/manifest.json`, `workflows/W0001/<condition>/peak_table_{parabolic,gaussian}.csv`, `run.json`; the last stdout line is `RESULT_JSON {...}` (per-run `peak_tables`/`peak_localization`/`window`/`detection` plus `summary` and `records`) |
-| Targeted real-engine validators | `scripts/vm_validate_zero_fill.py`, `vm_validate_nus_indirect_equiv.py`, `vm_validate_phase_score.py`, `vm_sample_regression.py` (with `vm_sample_compare.py`) | prints the per-item metrics directly (zero-fill SI, memory/backend equivalence relative error, phase-score margin, main-peak and water direction); the conclusions are written back to ../API_CONTRACT.md |
+| Real-engine acceptance | Run a documented workflow on a system where NMRPipe and, for NUS, SMILE are installed | Record inputs, software revision, engine versions, parameters and resulting QC; this page makes no current benchmark claim |
 
 Run real-engine acceptances **serially**: concurrent runs compete for CPU and overwrite each
 other's logs, which produces failures unrelated to the code.
@@ -98,11 +97,12 @@ other's logs, which produces failures unrelated to the code.
   (`compat` / `behavior_digest`), (2) whether the processing flow is covered by the engineering
   regression (the table above), (3) whether the scientific conclusion holds (downstream analysis).
 
-### The external truth check the maintainer ran (evidence, not a guarantee)
+### Historical external truth check (not a current-source validation)
 
-"Outside the scope of this software" means the software **does not draw the conclusion for you**;
-it does not mean the check was never made. The maintainer ran one layer of external truth checking on
-**public data**; the conventions and the numbers are in
+This is a **2026-09-22 historical snapshot**; its recorded values are retained and have not been
+recalculated against the current source revision. "Outside the scope of this software" means the
+software **does not draw the conclusion for you**. The conventions and values from that dated
+check on **public data** are in
 [Real-data evidence](../evidence/real-data-comparison.md) section 2:
 
 | Element | How it is done |
@@ -133,23 +133,16 @@ three things above separately when you cite a product.
 - so this interface document only states what goes in, what comes out and how errors are
   reported; the quality of the processing, and the evidence that it works, belong to the main
   program (documentation entry point in README) and are not duplicated here;
-- the evidence for "how well the processing program works" lives with the main program: the external
-  truth check against the **published deposited chemical shifts** (public data, entry 53374) is in
-  `docs/evidence/real-data-comparison.md`, and the maintainer has additionally validated the
-  program against **more than a dozen data sets that cannot be published yet**, all of them
-  reaching an optimisation quality comparable to manual processing - that last point is a
-  **maintainer statement** and cannot be recomputed from this snapshot.
+- historical public-data evidence is linked from the documentation index; it is not a validation
+  guarantee for the current source tree or other data.
 
 ## 9.7 Reading the boundary: common misreadings
 
 - "It ran" is not "it is correct": the engineering regression in 9.5 only shows the pipeline is
   self-consistent and traceable. Scientific conclusions still come from downstream analysis
   against your own criteria.
-- "CI is green" is not "the engine is green": no job in this repository calls NMRPipe - the
-  engine boundary is stubbed everywhere, including in the `external-engine` job, which merely
-  re-runs the same suite on a machine that has the engine. Engine-level conclusions come from
-  your own acceptance run on a machine that has NMRPipe (`scripts/vm_test.sh`,
-  `scripts/vm_api_smoke.py`, `scripts/vm_realdata_report.py`).
+- "CI is green" is not "the engine is green": mocked tests do not call NMRPipe. Engine-level
+  conclusions require separate acceptance on a system with the required external tools.
 - "The tool rewrote my data" is not "my dataset is gone": the source-level NUS cleanup writes
   into the project's own `raw/` copy, keeps `ser.bak` / `nuslist.bak`, and uses `os.replace`,
   which breaks the link to the original; the scope is stated in the README limitations section.
@@ -158,8 +151,6 @@ three things above separately when you cite a product.
   fingerprints and the conformance golden vectors) and the release-readiness checks. A
   code-coverage percentage is deliberately not a gate, and `pytest -m unit` takes about 45 s
   (mostly collection) rather than the "seconds" a logic-only suite would suggest.
-- "One snapshot commit" is not "no history": the public history was restarted to keep internal
-  material and real sample names out; the version history is in the release notes.
 - "No number" is not "fast": the four skipped benchmark rows are deliberately not estimated.
 - "The conversion record matched" is not "the input was not touched": above 8 MiB the recorded
   fingerprint degrades to `size + mtime_ns` (see `core/data/raw_fingerprint.py`), so it proves

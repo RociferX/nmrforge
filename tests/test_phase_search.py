@@ -30,9 +30,7 @@ def test_search_direct_spectrum_phase_recovers_p0_p1() -> None:
         spec = np.zeros(n, dtype=complex)
         for peak in (140, 260, 380):
             spec += np.exp(-((k - peak) ** 2) / (2 * 6.0**2))
-        spec *= np.exp(
-            1j * np.deg2rad(sig_p0 + sig_p1 * k / max(n - 1, 1))
-        )
+        spec *= np.exp(1j * np.deg2rad(sig_p0 + sig_p1 * k / max(n - 1, 1)))
         spec += rng.normal(0.0, 0.02, size=n)
         spec += 1j * rng.normal(0.0, 0.02, size=n)
         traces.append(spec)
@@ -63,17 +61,11 @@ def test_nus_direct_phase_matches_existing_sign_convention() -> None:
         d = -np.imag(hilbert(a))
         spectrum = (a + 1j * d) * np.exp(1j * np.deg2rad(theta_true))
         return np.array(
-            [
-                np.fft.ifft(spectrum)
-                * np.exp(1j * 2.0 * np.pi * 16 * i / n1)
-                for i in range(n1)
-            ]
+            [np.fft.ifft(spectrum) * np.exp(1j * 2.0 * np.pi * 16 * i / n1) for i in range(n1)]
         )
 
     for theta, expected in ((-120.0, 120.0), (33.0, 327.0), (90.0, 270.0)):
-        est = nus_direct_phase(
-            make_slices(theta), [(i,) for i in range(32)], 32, 1
-        )
+        est = nus_direct_phase(make_slices(theta), [(i,) for i in range(32)], 32, 1)
         assert est is not None
         p0, p1, score, _gain, _kstar = est
         assert abs(((p0 - expected + 180.0) % 360.0) - 180.0) <= 7.5, p0
@@ -113,14 +105,15 @@ def test_search_direct_phase_on_spectrum_recovers() -> None:
     p0, p1, score = est
     # For clean symmetric peaks the net/|Re| metric saturates on a plateau within ±90° (the
     # same trait as the existing optimizer; real spectra discriminate through overlap or
-    # asymmetry, and on the VM the sampleI case recovers -52.5°). Here we verify: 1) a high
+    # asymmetry, and on the VM the data/8 case recovers -52.5°). Here we verify: 1) a high
     # score (>90) means the positive-peak solution, the ±180 inversion (score≈0) being ruled
     # out; 2) the result lies on the plateau that contains the true value (120) (±90°).
     assert score > 90.0, score
     assert abs(((p0 - 120.0 + 180.0) % 360.0) - 180.0) <= 90.0, p0
 
+
 def test_direct_phase_search_progress_and_result() -> None:
-    '''Direct-dimension search: parallel candidates + progress messages (running/done).'''
+    """Direct-dimension search: parallel candidates + progress messages (running/done)."""
     import numpy as np
 
     from core.optimization.phase_search import search_direct_phase_on_spectrum
@@ -130,9 +123,7 @@ def test_direct_phase_search_progress_and_result() -> None:
     # Inject one strong direct-dimension peak
     arr[10, 8, :] = np.exp(1j * np.deg2rad(30.0)) * 10.0
     messages: list[str] = []
-    res = search_direct_phase_on_spectrum(
-        arr, axis=0, metric="symmetry", progress=messages.append
-    )
+    res = search_direct_phase_on_spectrum(arr, axis=0, metric="symmetry", progress=messages.append)
     assert res is None or len(res) == 3
     if messages:
         assert "直接维相位搜索中" in messages[0]
@@ -150,7 +141,4 @@ def test_direct_phase_search_cancelled_raises() -> None:
     arr = rng.normal(size=(24, 18, 14)).astype(np.complex128)
     arr[10, 8, :] = np.exp(1j * np.deg2rad(20.0)) * 10.0
     with pytest.raises(RuntimeError, match="任务已取消"):
-        search_direct_phase_on_spectrum(
-            arr, axis=0, metric="symmetry", cancel=lambda: True
-        )
-
+        search_direct_phase_on_spectrum(arr, axis=0, metric="symmetry", cancel=lambda: True)

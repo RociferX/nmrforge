@@ -1,7 +1,8 @@
 """The welcome page for starting the workspace for the first time (G2B-003 / Contract v1.3 §9.4).
 Displays the workspace path, recent project list and new project entry. The workspace uses
 core/workspace.WorkspaceManager (remove the compatibility layer _FallbackWorkspaceManager and
-the duplicate workspace_manager factory from 0.2.164 onwards)."""
+the duplicate workspace_manager factory from 0.2.164 onwards).
+"""
 
 from __future__ import annotations
 
@@ -29,9 +30,7 @@ class WelcomePage(QWidget):
     new_project_requested = Signal(str)  # Project name.
     open_project_requested = Signal(str)  # Project path.
 
-    def __init__(
-        self, parent: QWidget | None = None, workspace=None
-    ) -> None:
+    def __init__(self, parent: QWidget | None = None, workspace=None) -> None:
         super().__init__(parent)
         if workspace is None:
             from core.workspace import WorkspaceManager
@@ -43,17 +42,17 @@ class WelcomePage(QWidget):
         layout.setContentsMargins(32, 32, 32, 32)
 
         title = QLabel("NMRForge")
-        title.setStyleSheet(
-            f"font-size: 28px; font-weight: bold; color: {TEXT_PRIMARY};"
-        )
+        title.setStyleSheet(f"font-size: 28px; font-weight: bold; color: {TEXT_PRIMARY};")
         layout.addWidget(title)
 
         subtitle = QLabel(
             tr(
-            "Automated processing, parameter optimisation and quality control platform for Bruker "
-            "2D/3D "
-            "NMR",
-        ))
+                "Automated processing, parameter optimisation and quality control platform for "
+                "Bruker "
+                "2D/3D "
+                "NMR",
+            )
+        )
         subtitle.setStyleSheet(f"color: {TEXT_SECONDARY};")
         layout.addWidget(subtitle)
         layout.addSpacing(18)
@@ -105,7 +104,8 @@ class WelcomePage(QWidget):
             self.recent_list.addItem(item)
         if self.recent_list.count() == 0:
             self.recent_list.addItem(
-                tr("(There is no project in the workspace yet, click \"New Project\" to start)"))
+                tr('(There is no project in the workspace yet, click "New Project" to start)')
+            )
 
     def refresh(self) -> None:
         self._refresh()
@@ -124,7 +124,8 @@ class WelcomePage(QWidget):
 
     def begin_inline_name(self, initial: str = "") -> None:
         """Inline naming within the page (no pop-up window): Display the name input line + OK
-        button and focus, press Enter to submit / Esc to cancel."""
+        button and focus, press Enter to submit / Esc to cancel.
+        """
         self._name_edit.setText(initial)
         self._name_edit.selectAll()
         self._name_edit.setVisible(True)
@@ -161,8 +162,4 @@ class WelcomePage(QWidget):
         return super().eventFilter(obj, event)
 
     def recent_paths(self) -> list[str]:
-        return [
-            str(item.data(0x0100))
-            for item in self.recent_list
-            if item.data(0x0100)
-        ]
+        return [str(item.data(0x0100)) for item in self.recent_list if item.data(0x0100)]

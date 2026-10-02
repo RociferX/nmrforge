@@ -60,12 +60,8 @@ class GroupBatchPanel(QWidget):
         # annotation content is no longer squashed when it is long.
         self._scroll = QScrollArea(self)
         self._scroll.setWidgetResizable(True)
-        self._scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
-        self._scroll.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._content = QWidget()
         self._scroll.setWidget(self._content)
         _outer = QVBoxLayout(self)
@@ -75,9 +71,7 @@ class GroupBatchPanel(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
 
         title = QLabel(tr("data group batch processing"))
-        title.setStyleSheet(
-            f"font-size: 15px; font-weight: bold; color: {TEXT_PRIMARY};"
-        )
+        title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {TEXT_PRIMARY};")
         layout.addWidget(title)
 
         self.context_label = QLabel("")
@@ -92,19 +86,13 @@ class GroupBatchPanel(QWidget):
         # 0.2.199-patch29gw: Data annotation within the group (field x data grid), placed above
         # "Process by reference data".
         self.notes_label = QLabel(tr("In-group data annotation"))
-        self.notes_label.setStyleSheet(
-            f"font-weight: bold; color: {TEXT_PRIMARY};"
-        )
+        self.notes_label.setStyleSheet(f"font-weight: bold; color: {TEXT_PRIMARY};")
         self.notes_label.setVisible(False)
         layout.addWidget(self.notes_label)
         self.notes_scroll = QScrollArea()
         self.notes_scroll.setWidgetResizable(True)
-        self.notes_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
-        self.notes_scroll.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
+        self.notes_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.notes_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.notes_scroll.setStyleSheet(
             "background: #1e1e1e; color: #ffffff; border: 1px solid #3c3c3c;"
         )
@@ -194,9 +182,7 @@ class GroupBatchPanel(QWidget):
         self.thresh_edit.setPlaceholderText(tr("Leave blank to use default"))
         thr_row.addWidget(self.thresh_edit)
         opt_layout.addWidget(self.thresh_group)
-        self.opt_stop_combo.currentIndexChanged.connect(
-            self._on_opt_stop_changed
-        )
+        self.opt_stop_combo.currentIndexChanged.connect(self._on_opt_stop_changed)
         # 0.2.199-patch29gp: Initially press the default cut-off step (generate FID)Hidden
         # range/Threshold setting.
         self._on_opt_stop_changed()
@@ -214,9 +200,7 @@ class GroupBatchPanel(QWidget):
         layout.addStretch(1)
 
     # ------------------------------------------------------------------
-    def set_context(
-        self, manager, exp_id: str, group_id: str
-    ) -> None:
+    def set_context(self, manager, exp_id: str, group_id: str) -> None:
         """Bind project context and refresh group information/Reference data drop-down."""
         self._manager = manager
         self._exp_id = exp_id
@@ -239,7 +223,7 @@ class GroupBatchPanel(QWidget):
         group = manager.group(exp_id, group_id) if exp is not None else None
         if group is None:
             return
-        member_ids = (group.data_ids or [])
+        member_ids = group.data_ids or []
         if not member_ids:
             return
         cols_data: list[tuple[str, str, dict]] = []
@@ -283,9 +267,7 @@ class GroupBatchPanel(QWidget):
                 val_lb = QLabel(str(val) if val not in (None, "") else "—")
                 val_lb.setWordWrap(True)
                 val_lb.setFixedWidth(190)
-                val_lb.setStyleSheet(
-                    "color: #ffffff; border: none; background: transparent;"
-                )
+                val_lb.setStyleSheet("color: #ffffff; border: none; background: transparent;")
                 grid.addWidget(val_lb, ri, ci)
         grid.setColumnStretch(0, 0)
         grid.setColumnStretch(len(cols_data) + 1, 0)
@@ -306,26 +288,20 @@ class GroupBatchPanel(QWidget):
             self.run_optimize_button.setEnabled(False)
             return
         title = group.title or f"Group {group_id}"
-        self.context_label.setText(tr(
-            "experiment: {p0} · Group: "
-            "{p1}",
-            p0=exp.title or exp_id,
-            p1=title,
-        ))
-        members = [
-            d
-            for d in exp.data
-            if d.id in (group.data_ids or [])
-        ]
-        names = ",".join(
-            f"{d.title or 'Data ' + d.id}" for d in members
+        self.context_label.setText(
+            tr(
+                "experiment: {p0} · Group: {p1}",
+                p0=exp.title or exp_id,
+                p1=title,
+            )
         )
+        members = [d for d in exp.data if d.id in (group.data_ids or [])]
+        names = ",".join(f"{d.title or 'Data ' + d.id}" for d in members)
         self.member_label.setText(
             tr(
-                "Data within the group ({p0} indivual): "
-                "{p1}",
+                "Data within the group ({p0} indivual): {p1}",
                 p0=len(members),
-                p1=names or '(empty group)',
+                p1=names or "(empty group)",
             )
         )
         self.run_optimize_button.setEnabled(bool(members))
@@ -361,9 +337,7 @@ class GroupBatchPanel(QWidget):
             self.log_message.emit(tr("Please select reference data first"))
             return
         steps = self._stop_steps()
-        self.run_group_batch_requested.emit(
-            self._exp_id, self._group_id, steps, ref_id, {}
-        )
+        self.run_group_batch_requested.emit(self._exp_id, self._group_id, steps, ref_id, {})
 
     def _opt_steps(self) -> list[str]:
         """The cut-off steps of the optimisation mode (prefixed by fid) are followed in turn."""

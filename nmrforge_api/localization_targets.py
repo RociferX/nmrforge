@@ -95,10 +95,9 @@ def _check_on_missing(value: Any) -> str:
     if policy not in ON_MISSING_POLICIES:
         raise SweepError(
             tr(
-                "unknown on_missing policy: {p0!r}; allowed "
-                "{p1}",
+                "unknown on_missing policy: {p0!r}; allowed {p1}",
                 p0=value,
-                p1=', '.join(ON_MISSING_POLICIES),
+                p1=", ".join(ON_MISSING_POLICIES),
             )
         )
     return policy
@@ -169,9 +168,7 @@ class LocalizationTargets:
         if self.condition:
             payload["condition"] = str(self.condition)
         if self.line_ranges:
-            payload["line_ranges"] = [
-                [int(start), int(end)] for start, end in self.line_ranges
-            ]
+            payload["line_ranges"] = [[int(start), int(end)] for start, end in self.line_ranges]
         return payload
 
     def describe(self) -> str:
@@ -235,9 +232,7 @@ def _read_target_rows(
         # single-column file: one peak_id per line; drop it when it spells an alias header
         first_is_header = lines[0][1].strip().lower() in _HEADER_ALIASES
         body = lines[1:] if first_is_header else lines
-        return (PEAK_ID_COLUMN,), [
-            (index, {PEAK_ID_COLUMN: line.strip()}) for index, line in body
-        ]
+        return (PEAK_ID_COLUMN,), [(index, {PEAK_ID_COLUMN: line.strip()}) for index, line in body]
     body = lines[1:]
     rows: list[tuple[int, dict[str, str]]] = []
     for index, line in body:
@@ -267,11 +262,12 @@ def _load_target_file(path: Path | str) -> _TargetFile:
     text = raw.decode("utf-8-sig")
     columns, rows = _read_target_rows(target, text)
     if not rows:
-        raise SweepError(tr(
-            "target peak list is empty: {p0} (give at least one "
-            "peak_id)",
-            p0=target,
-        ))
+        raise SweepError(
+            tr(
+                "target peak list is empty: {p0} (give at least one peak_id)",
+                p0=target,
+            )
+        )
     return _TargetFile(
         path=target,
         sha256=hashlib.sha256(raw).hexdigest(),
@@ -336,9 +332,7 @@ def _unknown_conditions(
         )
 
 
-def _validated(
-    result: ConditionalTargets, conditions: Sequence[str] | None
-) -> ConditionalTargets:
+def _validated(result: ConditionalTargets, conditions: Sequence[str] | None) -> ConditionalTargets:
     """With study conditions given, parse every condition (missing rows fail early)."""
     if conditions is not None:
         for name in conditions:
@@ -373,8 +367,8 @@ def _missing_targets(
         tr(
             "target peak list {p0} has no rows for condition {p1!r}: every condition needsits own "
             "target rows (a missing row is never read as the whole spectrum). To letthrough, "
-            "declare on_missing=\"all\" (that condition is unlimited = whole-spectrumrefinement) "
-            "or on_missing=\"none\" (refines nothing); the strategy goes into the "
+            'declare on_missing="all" (that condition is unlimited = whole-spectrumrefinement) '
+            'or on_missing="none" (refines nothing); the strategy goes into the '
             "record.",
             p0=where,
             p1=condition,
@@ -461,21 +455,26 @@ class ConditionalTargets:
             resolved = self.entries.get(name)
             origin = str(self.origins.get(name, ""))
             if resolved is None:
-                parts.append(tr("{p0}: unlimited ({p1})", p0=name, p1=origin or 'on_missing=all'))
+                parts.append(tr("{p0}: unlimited ({p1})", p0=name, p1=origin or "on_missing=all"))
             elif not resolved.peak_ids:
-                parts.append(tr(
-                    "{p0}: refines nothing "
-                    "({p1})",
-                    p0=name,
-                    p1=origin or 'on_missing=none',
-                ))
+                parts.append(
+                    tr(
+                        "{p0}: refines nothing ({p1})",
+                        p0=name,
+                        p1=origin or "on_missing=none",
+                    )
+                )
             else:
                 span = ""
                 if resolved.line_ranges:
-                    span = tr(" (line ") + ",".join(
-                        f"{start}-{end}" if start != end else str(start)
-                        for start, end in resolved.line_ranges
-                    ) + tr(")")
+                    span = (
+                        tr(" (line ")
+                        + ",".join(
+                            f"{start}-{end}" if start != end else str(start)
+                            for start, end in resolved.line_ranges
+                        )
+                        + tr(")")
+                    )
                 parts.append(tr("{p0}: {p1} peaks{p2}", p0=name, p1=resolved.n_targets, p2=span))
         head = tr("per condition ") + (tr("(separate files)") if self.mode == "mapping" else "")
         return f"{head}: " + "; ".join(parts)
@@ -516,9 +515,7 @@ class ConditionalTargets:
         return {
             "peak_ids": [int(value) for value in resolved.peak_ids],
             "n_targets": resolved.n_targets,
-            "line_ranges": [
-                [int(start), int(end)] for start, end in resolved.line_ranges
-            ],
+            "line_ranges": [[int(start), int(end)] for start, end in resolved.line_ranges],
             "path": str(resolved.path),
             "sha256": str(resolved.sha256),
             "from": origin,
@@ -593,9 +590,7 @@ class ConditionalTargets:
             view["sha256"] = str(resolved.sha256)
         view["targets"] = {
             "peak_ids": [int(value) for value in resolved.peak_ids],
-            "line_ranges": [
-                [int(start), int(end)] for start, end in resolved.line_ranges
-            ],
+            "line_ranges": [[int(start), int(end)] for start, end in resolved.line_ranges],
         }
         return view
 
@@ -813,19 +808,19 @@ def _spec_targets(
         if inside is None:
             raise SweepError(
                 tr(
-                    "unrecognised target peak list: {p0!r}(needs either path or "
-                    "peak_ids)",
+                    "unrecognised target peak list: {p0!r}(needs either path or peak_ids)",
                     p0=dict(spec),
                 )
             )
         return localization_targets_from_ids(inside, source=source)
     if isinstance(spec, Iterable):
         return localization_targets_from_ids(spec, source=source)
-    raise SweepError(tr(
-        "unrecognised target peak list: {p0!r} (give a CSV path or peak "
-        "numbers)",
-        p0=spec,
-    ))
+    raise SweepError(
+        tr(
+            "unrecognised target peak list: {p0!r} (give a CSV path or peak numbers)",
+            p0=spec,
+        )
+    )
 
 
 def _mapping_conditional_targets(
@@ -840,10 +835,13 @@ def _mapping_conditional_targets(
     """The "one file/list per condition" form -> :class:`ConditionalTargets`."""
     policy = _check_on_missing(on_missing)
     declared = tuple(str(key) for key in entries)
-    _unknown_conditions(declared, conditions, where=tr(
-        "(combination table / call-argument "
-        "mapping)",
-    ))
+    _unknown_conditions(
+        declared,
+        conditions,
+        where=tr(
+            "(combination table / call-argument mapping)",
+        ),
+    )
     resolved_entries: dict[str, LocalizationTargets | None] = {}
     origins: dict[str, str] = {}
     for name in declared:
@@ -895,7 +893,8 @@ def resolve_conditional_targets(
     and a condition mapping ``{"A": "a.csv", "B": "b.csv"}`` /
     ``{"default": "x.csv", "by_condition": {"A": "a.csv"}}``.
 
-    When ``conditions`` is given, condition names and missing rows are validated too (both raise);
+    When ``conditions`` is given, condition names and missing rows are validated too (both
+    raise);
     otherwise validation is deferred to :meth:`ConditionalTargets.for_condition`.
     """
     if spec is None:
@@ -930,8 +929,7 @@ def resolve_conditional_targets(
             extra = sorted(
                 str(key)
                 for key in spec
-                if str(key).strip().lower()
-                not in {"by_condition", "default", "on_missing"}
+                if str(key).strip().lower() not in {"by_condition", "default", "on_missing"}
             )
             if extra:
                 raise SweepError(
@@ -1010,8 +1008,7 @@ def localization_targets_from_ids(
         except TypeError:
             raise SweepError(
                 tr(
-                    "unrecognised target peak list: {p0!r} (give a CSV path or peak "
-                    "numbers)",
+                    "unrecognised target peak list: {p0!r} (give a CSV path or peak numbers)",
                     p0=peak_ids,
                 )
             ) from None
@@ -1059,14 +1056,10 @@ def resolve_localization_targets(
         token = str(spec).strip()
         if not token:
             return None
-        return read_localization_targets(
-            _resolve_input_path(token, base_dir), source=source
-        )
+        return read_localization_targets(_resolve_input_path(token, base_dir), source=source)
     if isinstance(spec, Mapping):
         if spec.get("path"):
-            return resolve_localization_targets(
-                spec["path"], base_dir=base_dir, source=source
-            )
+            return resolve_localization_targets(spec["path"], base_dir=base_dir, source=source)
         inside = spec.get("peak_ids", spec.get("peak_id", spec.get("ids")))
         if inside is None:
             raise SweepError(
@@ -1079,17 +1072,17 @@ def resolve_localization_targets(
         return localization_targets_from_ids(inside, source=source)
     if isinstance(spec, Iterable):
         return localization_targets_from_ids(spec, source=source)
-    raise SweepError(tr(
-        "unrecognised target peak list: {p0!r} (give a CSV path or peak "
-        "numbers)",
-        p0=spec,
-    ))
+    raise SweepError(
+        tr(
+            "unrecognised target peak list: {p0!r} (give a CSV path or peak numbers)",
+            p0=spec,
+        )
+    )
 
 
-#: per-method forms that go straight into a combination table (``localization.targets.<method>``)
-METHOD_KEYS: tuple[str, ...] = ("parabolic", "gaussian")
-#: the form that applies to every method
-ALL_METHOD_KEYS: tuple[str, ...] = ("all", "*", "both")
+METHOD_KEYS: tuple[str, ...] = ()
+ALL_METHOD_KEYS: tuple[str, ...] = ("all", "*")
+REMOVED_METHOD_KEYS: tuple[str, ...] = ("gaussian", "both")
 
 
 def split_target_specs(spec: Any) -> tuple[Any, dict[str, Any]]:
@@ -1105,8 +1098,17 @@ def split_target_specs(spec: Any) -> tuple[Any, dict[str, Any]]:
     general: dict[str, Any] = {}
     for key, value in spec.items():
         name = str(key).strip().lower()
+        if name in REMOVED_METHOD_KEYS:
+            raise SweepError(
+                tr(
+                    "localization target key {p0!r}: the Gaussian peak-fitting method was "
+                    "removed and peak localisation is parabolic only (write a plain target "
+                    "list instead of a per-method mapping)",
+                    p0=str(key),
+                )
+            )
         if name in METHOD_KEYS or name in ALL_METHOD_KEYS:
-            per_method["all" if name == "both" else name] = value
+            per_method[name] = value
         else:
             general[str(key)] = value
     if not per_method:
@@ -1137,13 +1139,15 @@ def resolve_localization_targets_by_method(
 ) -> dict[str, ConditionalTargets | None]:
     """Resolve targets per method -> ``{method: ConditionalTargets | None}``.
 
-    Priority: ``localization.targets.<method>`` > ``localization.targets.all`` (or an
-    ``all`` / ``*`` / ``both`` key) > ``localization.targets`` (method-independent).
-    An explicit empty string means **unlimited** for that method (distinct from "not given",
-    which inherits the method-independent list). Given ``conditions``, names and missing rows
-are validated too (failing before processing).
-    The result is **per condition**: the list in force comes from
-    :meth:`ConditionalTargets.for_condition`.
+        Priority: ``localization.targets.<method>`` > ``localization.targets.all`` (or an
+        ``all`` / ``*`` / ``both`` key) > ``localization.targets`` (method-independent).
+        An explicit empty string means **unlimited** for that method (distinct from "not given",
+        which inherits the method-independent list). Given ``conditions``, names and missing
+        rows
+    are validated too (failing before processing).
+        The result is **per condition**: the list in force comes from
+        :meth:`ConditionalTargets.for_condition`.
+
     """
     general, per_method = split_target_specs(spec)
     shared = resolve_conditional_targets(
@@ -1210,20 +1214,14 @@ def localization_targets_record(
                 "source": "none",
                 "path": "",
                 "sha256": "",
-                "n_targets": int(
-                    info.get("n_peaks", info.get("n_targeted", 0))
-                ),
+                "n_targets": int(info.get("n_peaks", info.get("n_targeted", 0))),
                 "n_skipped": 0,
                 "peak_ids": [],
                 "by_condition": "all",
             }
             continue
         entries[method] = resolved.record_entry(condition=condition, info=info)
-    restricted = {
-        method: entry
-        for method, entry in entries.items()
-        if entry["scope"] != "all"
-    }
+    restricted = {method: entry for method, entry in entries.items() if entry["scope"] != "all"}
     if not restricted:
         scope = "all"
     elif all(entry["scope"] == "none" for entry in restricted.values()):
@@ -1240,11 +1238,7 @@ def localization_targets_record(
     record: dict[str, Any] = {
         "schema": LOCALIZATION_TARGETS_SCHEMA,
         "scope": scope,
-        "source": (
-            (next(iter(sources)) if len(sources) == 1 else "mixed")
-            if sources
-            else "none"
-        ),
+        "source": ((next(iter(sources)) if len(sources) == 1 else "mixed") if sources else "none"),
         "path": "",
         "sha256": "",
         "n_targets": 0,
@@ -1325,6 +1319,7 @@ __all__ = [
     "ON_MISSING_POLICIES",
     "PEAK_ID_COLUMN",
     "REFERENCE_ID_COLUMN",
+    "REMOVED_METHOD_KEYS",
     "RESERVED_SPEC_KEYS",
     "ConditionalTargets",
     "LocalizationTargets",

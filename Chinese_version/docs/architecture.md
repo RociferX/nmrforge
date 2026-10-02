@@ -71,7 +71,7 @@ Bruker 目录 → core/data/bruker_reader.read_dataset → Experiment(Shared)
 - `generate_spectrum(data, exp_id, data_id, params, progress)` →
   `workflow.stepwise.generate_spectrum` → `phase_routes.unified_route`
   (Backend,统一相位优化),返回谱图路径;
-- `manual_param_table()` / `manual_script_editor()`:人工路径占位接口。
+- 人工脚本经 `workflow.manual` 执行，记录实际脚本、参数差异、运行状态与产物；不是占位入口。
 
 除此外,`gui/` 与 `viewer/` 只依赖 Shared Contract,无其它 Backend import。
 契约变化见 docs/API_CONTRACT.md,必须走 Proposal。

@@ -40,7 +40,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Missing fid: {fid}")
         return 1
     script = generate_process_script(
-        experiment, plan, in_file="raw.fid", out_file="raw_noext.ft2",
+        experiment,
+        plan,
+        in_file="raw.fid",
+        out_file="raw_noext.ft2",
         extract=False,
     )
     com = process_dir / "raw_noext_process.com"

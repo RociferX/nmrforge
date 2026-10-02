@@ -18,7 +18,7 @@ class _EffectiveBackend:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"x")
 
-    def convert_to_fid(self, experiment, data_dir, progress=None) -> dict:
+    def convert_to_fid(self, experiment, data_dir, progress=None, params=None) -> dict:
         fid_path = Path(self.work_dir) / f"{experiment.dataset_id}.fid"
         self._touch(fid_path)
         return {
@@ -65,9 +65,7 @@ class _EffectiveBackend:
         }
 
 
-def _manager_with_data(
-    tmp_path: Path, source: Path
-) -> tuple[ProjectManager, str, str]:
+def _manager_with_data(tmp_path: Path, source: Path) -> tuple[ProjectManager, str, str]:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment(title="eff")
     data = manager.import_data(entry.id, str(source))
@@ -85,13 +83,9 @@ def _last_run(manager: ProjectManager, exp_id: str, workflow_ref: str):
     return runs[-1]
 
 
-def test_generate_spectrum_records_effective_params(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_generate_spectrum_records_effective_params(tmp_path: Path, bruker_dir: Path) -> None:
     """New run params = effective_params + caller params (caller takes precedence)."""
-    manager, exp_id, data_id = _manager_with_data(
-        tmp_path, bruker_dir / "hsqc_2d"
-    )
+    manager, exp_id, data_id = _manager_with_data(tmp_path, bruker_dir / "hsqc_2d")
     backend = _EffectiveBackend(tmp_path / "work")
     generate_fid(manager, exp_id, data_id, backend)
     generate_spectrum(
@@ -113,12 +107,8 @@ def test_generate_spectrum_records_effective_params(
     assert "baseline" in params and "window" in params
 
 
-def test_generate_fid_records_effective_params(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
-    manager, exp_id, data_id = _manager_with_data(
-        tmp_path, bruker_dir / "hsqc_2d"
-    )
+def test_generate_fid_records_effective_params(tmp_path: Path, bruker_dir: Path) -> None:
+    manager, exp_id, data_id = _manager_with_data(tmp_path, bruker_dir / "hsqc_2d")
     backend = _EffectiveBackend(tmp_path / "work")
     generate_fid(manager, exp_id, data_id, backend)
     run = _last_run(manager, exp_id, "convert_to_fid")
@@ -132,13 +122,13 @@ def test_legacy_backend_params_unchanged(tmp_path: Path, bruker_dir: Path) -> No
 
     class _LegacyBackend(_EffectiveBackend):
         def process(
-        self,
-        experiment,
-        plan,
-        direct_phase_override=None,
-        params=None,
-        progress=None,
-    ) -> dict:
+            self,
+            experiment,
+            plan,
+            direct_phase_override=None,
+            params=None,
+            progress=None,
+        ) -> dict:
             spectrum = Path(self.work_dir) / f"{experiment.dataset_id}.ft2"
             self._touch(spectrum)
             return {
@@ -148,9 +138,7 @@ def test_legacy_backend_params_unchanged(tmp_path: Path, bruker_dir: Path) -> No
                 "logs": [],
             }
 
-    manager, exp_id, data_id = _manager_with_data(
-        tmp_path, bruker_dir / "hsqc_2d"
-    )
+    manager, exp_id, data_id = _manager_with_data(tmp_path, bruker_dir / "hsqc_2d")
     backend = _LegacyBackend(tmp_path / "work")
     generate_fid(manager, exp_id, data_id, backend)
     generate_spectrum(
@@ -170,9 +158,7 @@ def test_generate_spectrum_records_ucsf_output(
     """0.2.162-patch15: after generating a spectrum, also emit UCSF into run outputs."""
     import workflow.stepwise as stepwise_mod
 
-    manager, exp_id, data_id = _manager_with_data(
-        tmp_path, bruker_dir / "hsqc_2d"
-    )
+    manager, exp_id, data_id = _manager_with_data(tmp_path, bruker_dir / "hsqc_2d")
     backend = _EffectiveBackend(tmp_path / "work")
     spectra = manager.data_dir(exp_id, data_id, "spectra")
     fake_ucsf = spectra / f"{data_id}.ucsf"
@@ -219,9 +205,7 @@ def test_generate_spectrum_none_route_maps_final_ext(
                 progress=progress,
             )
 
-    manager, exp_id, data_id = _manager_with_data(
-        tmp_path, bruker_dir / "hsqc_2d"
-    )
+    manager, exp_id, data_id = _manager_with_data(tmp_path, bruker_dir / "hsqc_2d")
     backend = _CaptureBackend(tmp_path / "work")
     monkeypatch.setattr(
         stepwise_mod,

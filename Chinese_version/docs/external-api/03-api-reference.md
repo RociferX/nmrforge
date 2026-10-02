@@ -28,19 +28,13 @@ build_reference(session, dataset=None, *, params=None, phase_route=None,
 load_reference(session, dataset=None) -> ReferenceSpectrum | None
 load_references(session) -> dict[str, ReferenceSpectrum]        # key = "exp/data"
 pick_reference_peaks(session, *, sigma_multiplier=None, out_path=None,
-                     details=None, localization_method="parabolic",
-                     gaussian_roi_f1_ppm=None, gaussian_roi_f2_ppm=None,
-                     dataset=None) -> Path
+                     details=None, dataset=None) -> Path
 set_reference_peaks(session, peak_table, reference=None, *,
                     source="external", params=None) -> ReferenceSpectrum
 ensure_reference_peaks(session, reference=None, *, sigma_multiplier=None,
-                       max_peaks=0, force=False,
-                       localization_method="parabolic",
-                       gaussian_roi_f1_ppm=None,
-                       gaussian_roi_f2_ppm=None) -> ReferenceSpectrum
+                       max_peaks=0, force=False) -> ReferenceSpectrum
 build_reference_peak_tables(session, reference, *, window_pts=None,
-                            window_ppm=None, roi_f1_ppm=None,
-                            roi_f2_ppm=None) -> ReferenceSpectrum
+                            window_ppm=None) -> ReferenceSpectrum
 ```
 
 - `build_reference` 走完整自动链(`generate_fid` → `generate_spectrum`,含统一
@@ -48,8 +42,8 @@ build_reference_peak_tables(session, reference, *, window_pts=None,
   `direct_phase`(`ReferenceSpectrum.phase_record()` 给出 `phase_mode="auto"` +
   `actual_p0/actual_p1`);
 - `ensure_reference_peaks`:主条件自动选峰(或外部峰表)建立峰身份
-  `reference.list`;其他条件复制同一身份表;**随后总是**写两张参考峰表
-  (`reference_peak_table_parabolic.csv` / `_gaussian.csv`);
+  `reference.list`;其他条件复制同一身份表;**随后总是**写一张参考峰表
+  `reference_peak_table_parabolic.csv`;
 - `sigma_multiplier`(选峰阈值,σ 倍数)**在生成参考时可外部指定**:缺省 35σ;
   参考峰表一旦冻结,后续所有 workflow 只能沿用参考阈值——再给不同阈值抛
   `ReferenceError`(改阈值属于重建参考:`force=True` 或删除该条件的
@@ -57,17 +51,18 @@ build_reference_peak_tables(session, reference, *, window_pts=None,
   `peak_params.previous_sigma_multiplier` /
   `peak_params.detection.sigma_multiplier` /
   `peak_params.detection.threshold_source`;
-- `localization_method` 只决定参考峰位取法(默认抛物线);高斯在非 2D 数据上
-  不静默跳过:高斯表写 `fallback=true` +
-  `fallback_reason="gaussian_unsupported_ndim"`。
+- 峰定位只有三点抛物线一种方法(2026-09-26 用户需求⑦:二维高斯拟合算法已删除):
+  参考层不再有 `localization_method` / `gaussian_roi_*` 参数,请求 `"gaussian"`
+  抛 `LocalizationError`(不静默降级)。
 
 `ReferenceSpectrum` 关键字段:`dataset_key`、`condition`、`ndim`、`sampling`、
 `frozen_spectrum`、`script_path`、`script_sha256`、`spectrum_sha256`、`params`、
 `sweep_params`、`direct_phase`、`peak_table_path`(身份表)、`peak_count`、
 `peak_source`(`auto|external|shared:<条件>`)、`peak_params`、`peak_tables`
-(两张表的路径/哈希/行数/detected 数)、`peak_localization`(定位 QC)、
+(只有 `parabolic` 一个键:路径/哈希/行数/detected 数)、`peak_localization`
+(定位 QC,只有 `parabolic` 键)、
 `tool_versions`;方法:`direct_phase_override()`、`phase_record()`、
-`peak_table_parabolic_path`、`peak_table_gaussian_path`。
+`peak_table_parabolic_path`。
 
 ## 3.3 参数组合与 workflow 计划
 
@@ -102,7 +97,7 @@ run_sweep(session, plan, *, reference=None, datasets=None,
           localization="parabolic", localize_peaks=None,
           edge_margin_ppm=None,
           sign="abs",            # 历史参数(检测符号口径固定 dominant)
-          roi_f1_ppm=None, roi_f2_ppm=None, resume=True,
+          resume=True,
           stop_on_error=False, progress=None, on_run=None) -> list[SweepRun]
 ```
 
@@ -115,54 +110,59 @@ run_sweep(session, plan, *, reference=None, datasets=None,
 - `parameters_used` 基底 = 该条件参考运行的有效参数(相位锁定),随后应用批次
   `base_overrides`,组合表最后只覆盖它显式指定的键;阈值类键(`sigma_multiplier`/`min_snr`/`threshold_sigma`/
   `detection.sigma_multiplier`)写进组合表 → `SweepError`(阈值锁定在参考);
-- `localization` = `parabolic`(默认)/ `gaussian`(仅 2D)/ `both`:只输出被选中的
-  峰表;逐组合可用组合表的 `localization` 键覆盖;
+- `localization` 只接受 `"parabolic"`(唯一方法,2026-09-26 起);`"gaussian"` /
+  `"both"` 抛 `SweepError`,不静默降级;逐组合可用组合表的 `localization` 键覆盖;
 - `localize_peaks`(**targeted localization**,2026-09-19):CSV 路径(至少含
-  `peak_id` 列)/ 峰序号序列 / `LocalizationTargets`,**只让这些峰参与所选方法的
-  精修**;检出、行数、`peak_id` 编号不变,未列入的峰保留(位置取检出阶段抛物线,
-  该方法 QC 列写 NaN=没做,不是失败);逐组合可用组合表 `localization.targets`
-  覆盖;缺省 = 全谱;
+  `peak_id` 列)/ 峰序号序列 / `LocalizationTargets`,**只让这些峰参与抛物线
+  精修**;检出、行数、`peak_id` 编号不变,未列入的峰保留(位置取检出阶段的
+  整数格极大值,定位 QC 列写 NaN=没做,不是失败);逐组合可用组合表
+  `localization.targets` 覆盖;缺省 = 全谱;逐方法映射写法(如
+  `{"gaussian": …}`)已随高斯删除,给了抛 `SweepError`;
 - `localize_peaks`(**条件粒度**,2026-09-20):CSV 可带 `condition` 列,每个条件
   只取自己的行(`peak_id` 按该条件的谱校验);没有该列 = 整批共用(留档
   `by_condition: "all"`);某条件缺行默认**处理前**报错,放行要显式给
   `on_missing="all"`(不限定)/ `"none"`(不精修)。也接受条件映射
   `{"A": "a.csv", "B": "b.csv"}` 或 `{"default": "x.csv", "by_condition":
   {"A": "a.csv"}}`;
-- `edge_margin_ppm` = 选峰时排除边缘轴峰的物理宽度(缺省 3×该轴核素线宽),
+- `edge_margin_ppm` = 显式人工边缘排除宽度；缺省为采集参数与谱面证据筛查，不设整带遮罩，
   逐谱按点距换算点数并写进 `run.json.window`;
 - 组合峰表**不跟踪参考峰表**:`reference_peak_id`/`assignment` 留空,`detected`
   恒为 true(表里只有该组合检出的峰)。
 
-`SweepRun` 关键字段与方法见 06;`run.peak_table_path("parabolic"|"gaussian")`
-给出被选中方法的峰表路径(未选中的方法返回空串)。
+`SweepRun` 关键字段与方法见 06;`run.peak_table_path("parabolic")`
+给出峰表路径(表只有这一种,其他键返回空串)。
 
 ## 3.5 峰位测量(低层)
 
 ```python
 measure_peak_positions(spectrum_path, peaks, *, window_pts=None,
                        window_ppm=None, axes=None, sign="abs",
-                       refine="parabolic", nuclei=None, roi_f1_ppm=None,
-                       roi_f2_ppm=None, noise_sigma=None,
+                       refine="parabolic", nuclei=None, noise_sigma=None,
                        exclusive_windows=True) -> list[PeakMeasurement]
-detect_and_localize(spectrum_path, *, method="parabolic",
+detect_and_localize(spectrum_path, *,
                     sigma_multiplier=None, edge_margin_ppm=None,
-                    edge_margin_points=None, roi_f1_ppm=None,
-                    roi_f2_ppm=None, sign_mode="dominant", axes=None)
+                    edge_margin_points=None, sign_mode="auto", axes=None,
+                    targets=None, allow_empty_targets=False, experiment=None)
     -> (list[dict], dict)     # 组合模式的独立选峰:peak_id=本谱序号,reference_peak_id=""
 read_reference_peaks(path) -> list[dict]      # 补 reference_peak_id
 window_points_by_axis(axes, *, window_pts=None, window_ppm=None) -> dict
 ```
 
-- `detect_and_localize` 是组合模式的选峰入口:物理边距 + `sigma_multiplier`
-  (同时作 `min_snr`)+ dominant 符号口径,再按 `method` 精修;没有 `max_peaks`
-  (锁定阈值下检出多少峰就写多少峰);非 2D 请求 `gaussian` 抛 `MeasurementError`;
-- `refine`:`parabolic`(默认)|`none`|`gaussian`(**仅 2D**,非 2D 抛
-  `MeasurementError("Gaussian peak fitting is currently supported only for
-  2D spectra.")`,不降级);
-- Gaussian 失败逐峰回退抛物线,`PeakMeasurement.localization` 记录
-  `requested_method`/`actual_method`/`fit_success`/`fallback`/
-  `fallback_reason`/`fit_rmse`/`boundary_hit` 与按**核名**的
-  `fwhm_by_nucleus`/`sigma_by_nucleus`;
+- `detect_and_localize` 是组合模式的选峰入口：实验/采集参数和边缘证据 + `sigma_multiplier`
+  (同时作 `min_snr`)及实验/谱面证据决定的 auto 符号口径，再做三点抛物线精修(不再有
+  `method=` 参数:高斯删除后没有算法选择);没有 `max_peaks`
+  (锁定阈值下检出多少峰就写多少峰);`targets=(1,2,…)` 只精修这些 `peak_id`
+  (targeted localization),`allow_empty_targets=True` 时显式空集合表示
+  「这一条件不做任何精修」;
+- `refine`:`parabolic`(默认,三点抛物线顶点)|`none`(只取整数格极大值);
+  `refine="gaussian"` 抛 `MeasurementError`(高斯拟合算法已删除,不降级);
+- 显式 `sign_mode=positive/negative/both/dominant` 按请求执行；auto 才使用模板/双符号证据。
+  检测及参考测量强度/SNR 相对中位数背景，结果记录 `baseline_offset` 与
+  `height_reference="global_median_baseline"`；不改变源谱。非有限输入明确失败。
+- 抛物线的定位 QC 逐峰记录在 `PeakMeasurement.localization`:
+  `requested_method`/`actual_method`(恒为 `parabolic`)/`fit_success`/
+  `fallback`/`fallback_reason`/`boundary_hit` 与按**核名**的
+  `fwhm_by_nucleus`(等效线宽 `FWHM = 2.3548σ`);`fit_rmse` 已随高斯删除;
 - `PeakMeasurement`:`peak_id`、`reference_peak_id`、`assignment`、`reference`、
   `positions`、`deltas`、`intensity`、`noise_sigma`、`snr`、`found`、
   `window_edge`、`boundary`、`out_of_range`、`localization`。
@@ -178,16 +178,14 @@ write_peak_table(path, rows) -> Path       # 表头 = PEAK_TABLE_COLUMNS(含 pea
 read_peak_table(path) -> list[dict]        # NaN → float("nan")
 peak_table_rows(measurements, *, workflow_id, condition="", dataset="",
                 method="parabolic") -> list[dict]
-gaussian_fallback_rows(measurements, *, workflow_id, condition="", dataset="",
-                       reason) -> list[dict]
 reference_peak_id(peak_id) -> str          # 1 → "R0001"
 write_records(session, *, reference=None, references=None, plan, runs,
               peaks=None) -> dict[str, str]
 ```
 
 字段与语义见 06;`write_records` 产 `manifest.json`、`sweep_plan.json`、
-`runs.json`、`workflows.json`、`measurement.json`、两张长表
-`peak_table_{parabolic,gaussian}.csv`。
+`runs.json`、`workflows.json`、`measurement.json`、唯一的组合长表
+`peak_table_parabolic.csv`(27 列;`gaussian_fallback_rows` 已随高斯删除)。
 
 ## 3.9 两种模式:参考模式 / 组合模式(2026-09-14)
 
@@ -202,17 +200,18 @@ run_reference_study(root, datasets={"A": "~/data/a"},
                     phase_route=None, peaks=None,
                     direct_range=(10.5, 6.5),         # 直接维范围(high, low;ppm)
                     sigma_multiplier=25,              # 选峰阈值(仅此模式可定)
-                    max_peaks=0, localization_method="parabolic",
-                    gaussian_roi_f1_ppm=None, gaussian_roi_f2_ppm=None,
+                    max_peaks=0,
                     backend=None, write=True, progress=None) -> ReferenceResult
 ```
 
-- 导入条件数据(可选)→ 自动优化参考谱与参考脚本 → 两张参考峰表;不做任何参数
+- 导入条件数据(可选)→ 自动优化参考谱与参考脚本 → 一张参考峰表;不做任何参数
   组合;
-- 选峰阈值、参考峰表(外部峰表)、localization 都在这阶段确定,之后**锁定**;
+- 选峰阈值、参考峰表(外部峰表)都在这阶段确定,之后**锁定**;峰定位固定为
+  三点抛物线(2026-09-26 起不再有 `localization_method` / `gaussian_roi_*`);
 - 参考阶段的窗/基线**自动优化**默认开启;`params["reference_optimize"]` 可关闭或
   限定候选(仅测试/复现/审计;真实实验不可用,用后必须在记录里说明);
-- 产物:`study/reference/<key>/`(脚本/谱/两张峰表)+ `study/records/reference.json`;
+- 产物:`study/reference/<key>/`(脚本/谱/`reference_peak_table_parabolic.csv`)+
+  `study/records/reference.json`;
 - `ReferenceResult`:`session` / `references`(key → `ReferenceSpectrum`)、
   `conditions`、`reference(condition="")`、`peak_tables`、`records`。
 
@@ -222,11 +221,11 @@ run_reference_study(root, datasets={"A": "~/data/a"},
 run_combination_study(reference,                  # ← 必填:显式指定参考
                       combos=[{"zero_fill": 1}],  # 或 axes=...
                       max_runs=256,
-                      localization="parabolic",       # parabolic / gaussian / both
+                      localization="parabolic",       # 只有 parabolic
                       localize_peaks=None,               # 只精修指定峰(CSV/序号序列)
-                      edge_margin_ppm=None,             # 缺省 3×核素线宽(物理宽度)
+                      edge_margin_ppm=None,             # 缺省证据筛查；显式值为人工覆盖
                       direct_range=(10.0, 6.5),        # 覆盖本批 workflow 基值
-                      roi_f1_ppm=None, roi_f2_ppm=None,
+                      allow_ext_override=False,
                       resume=True, backend=None, write=True,
                       progress=None) -> StudyResult
 ```
@@ -246,17 +245,18 @@ run_combination_study(reference,                  # ← 必填:显式指定参�
   (`peak_id` = 本谱序号,`reference_peak_id`/`assignment` 留空),峰与参考峰表的
   匹配由使用者自己的分析完成;逐组合记录 `parameters_resolved.detection`(锁定阈值来源
   `source="reference(locked)"`、边距、噪声 σ、精修方法列表);
-- `localization` 只输出被选中的峰表;逐组合可用组合表 `localization` 键覆盖;
+- `localization` 只接受 `parabolic`:峰表只有一张,逐组合可用组合表
+  `localization` 键覆盖(`gaussian`/`both` → `SweepError`);
 - `localize_peaks` / 组合表 `localization.targets`:限定峰的定位(只精修指定
-  峰;检出不变)。**逐方法写法**:映射 `{"gaussian": …, "parabolic": …}`
-  (可用 `"all"`/`"*"` 给公共默认,方法键优先),组合表对应
-  `localization.targets.<方法>`;`both` 模式下最常用的是「parabolic 全谱 +
-  只对目标峰做 gaussian」。**条件粒度**:目标 CSV 带 `condition` 列,或给
+  峰;检出不变)。**写法是方法无关的那一种**:CSV 路径 / 峰序号序列 /
+  `{"all": …}` 公共默认;逐方法映射(如 `{"gaussian": …}`)与组合表
+  `localization.targets.<方法>` 已随高斯删除,给了抛 `SweepError`。
+  **条件粒度**:目标 CSV 带 `condition` 列,或给
   `{"A": "a.csv", "B": "b.csv"}` / `{"default": …, "by_condition": {…}}`
   映射,每个条件用自己的峰序号(缺行默认报错,`on_missing` 决定放行方式)。
-  留档 `parameters_resolved.detection.localization_targets`(顶层 + `by_method`
-  逐方法明细 + `by_condition` 逐条件明细)与
-  `peak_localization.<method>.n_targeted`/`n_skipped`(逐 run);
+  留档 `parameters_resolved.detection.localization_targets`(顶层 +
+  `by_condition` 逐条件明细)与
+  `peak_localization.parabolic.n_targeted`/`n_skipped`(逐 run);
 - 参考不存在/峰表缺失 → `ReferenceError`,错误信息指明先跑参考模式;
 - 每条运行记录写明参考:`run.json.base_script`(脚本/谱哈希)、
   `parameters_resolved.reference`(参考峰表哈希等),`manifest.json` 记
@@ -284,7 +284,7 @@ run_combination_study(reference,                  # ← 必填:显式指定参�
 | --- | --- |
 | `DatasetError` | 数据目录不可识别、条件标签重复、研究里没有数据集 |
 | `ReferenceError` | 参考谱/产物缺失、峰表不存在 |
-| `MeasurementError` | 谱不存在、参数非法、Gaussian 用在非 2D |
+| `MeasurementError` | 谱不存在、参数非法、请求已删除的高斯拟合方法 |
 | `SweepError` | 组合表/网格非法(锁定键、超上限、无设计输入)、不支持的数据类型 |
 
 四者都继承 `SensitivityError`。

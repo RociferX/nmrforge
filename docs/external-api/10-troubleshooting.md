@@ -8,7 +8,7 @@
 | `DatasetError: condition label 'A' is taken by ...` | two datasets were bound to one label | use another label (B/C/...) or a second study root |
 | `ReferenceError: reference artefacts are missing; rebuild with force=True` | `study/reference/<key>/` was moved or deleted | remove that directory, or call `build_reference(..., force=True)` |
 | `ReferenceError: a non-primary condition needs the primary condition picked first` | peaks were picked for B while the primary condition A had none | call `ensure_reference_peaks` on A first |
-| `MeasurementError: Gaussian peak fitting is currently supported only for 2D spectra.` | `measure_peak_positions(refine="gaussian")` was called on non-2D data | combination mode does not fail (it writes a fallback Gaussian table); a direct call should use `refine="parabolic"` |
+| `MeasurementError` or `SweepError` mentions a removed localisation method | a caller requested Gaussian or another removed peak-fitting method | use the supported three-point parabolic method; the API does not silently substitute a method |
 | `SweepError: ... exceeds the max_runs limit` | too many combinations | shrink the grid, raise `max_runs` explicitly, or run in batches |
 | `SweepError: 'phases'/'direct_phase' in the grid would break phase locking` | a phase dictionary was given directly | use `phase_delta.<axis>.p0|p1` or `phase.<axis>.p0|p1` |
 | `SweepError: only 2D NUS parameter combinations are supported` | 3D NUS | build the reference only; combination execution is on the roadmap |
@@ -22,16 +22,14 @@ block of `log.txt`):
 | Code | What to do |
 | --- | --- |
 | `peak_count_zero` | this combination detected no peak at the locked threshold: check that its spectrum is sound, or rebuild the reference with a different threshold |
-| `gaussian_fallback` | read `fallback_reason` (roi_too_small / not_converged / center_at_boundary / sigma_at_bound ...); widen the ROI or accept the parabolic fallback |
-| `gaussian_boundary_hit` | the peak is too wide or too narrow, or the ROI does not fit; adjust the ROI radius |
 | (removed) | `peak_not_detected` / `peak_window_edge` / `peak_out_of_range` / `window_points_fallback`: combination mode has picked independently since 2026-09-14 and no longer emits them |
 
 ## 10.3 Resuming and re-running
 
 A successful run is reused only when the execution fingerprint matches. The fingerprint covers
 the condition dataset, the parameter combination and its actual parameters, the locked phases,
-the reference script/spectrum/peak-table hashes, and the **locked threshold, the refinement
-method (`localization`) and the picking margin**, plus the Gaussian ROI options. A record
+the reference script/spectrum/peak-table hashes, and the **locked threshold, the parabolic
+localisation setting and the manual picking margin**. A record
 without a fingerprint, or any changed input, re-runs safely. After shortening a combination
 table, old `Wxxxx` directories outside the active plan may be kept as history; they no longer
 enter the current summary.

@@ -67,10 +67,10 @@ def parse_param_file(path: Path) -> dict[str, Any]:
             key, _, raw_value = rest.partition("=")
             current_key = key.strip()
             raw_value = raw_value.strip()
-            if raw_value.startswith(("\"", "'")):
+            if raw_value.startswith(('"', "'")):
                 quoted = True
                 raw_value = raw_value[1:]
-                if raw_value.endswith(("\"", "'")):
+                if raw_value.endswith(('"', "'")):
                     raw_value = raw_value[:-1]
             raw_value = raw_value.strip("<>")
             current_tokens = raw_value.split()

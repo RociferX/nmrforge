@@ -43,9 +43,7 @@ def test_raw_quality_segmented_checks_first_segment(tmp_path: Path) -> None:
     raw = manager.data_dir(entry.id, data.id, "raw")
     seg0 = raw / "segments" / "01"
     seg0.mkdir(parents=True)
-    (seg0 / "acqus").write_text(
-        "##$NUC1= 1H\n##$TD= 908\n", encoding="latin-1"
-    )
+    (seg0 / "acqus").write_text("##$NUC1= 1H\n##$TD= 908\n", encoding="latin-1")
     (seg0 / "ser").write_bytes(b"x")
     data.segments = [str(seg0)]
     manager.save()

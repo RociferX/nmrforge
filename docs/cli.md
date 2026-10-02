@@ -1,81 +1,94 @@
 # Command-line reference
 
-The processing command line lives in the `nmrforge_api` package and is the same engine the GUI
-drives:
+The command line is part of the versioned `nmrforge_api` package and uses the same processing
+implementation as the desktop application. It does not require Qt:
 
 ```bash
 python -m nmrforge_api --help
 ```
 
-Use the command line from the 1.0.1 source checkout after its editable install; see
-[installation.md](installation.md).
+Install from source or use a released package as described in
+[Installation](installation.md). Processing requires separately installed NMRPipe; NUS
+reconstruction also requires SMILE.
 
-## Sub-commands
+## Commands
 
-| Sub-command | Purpose |
+| Command | Purpose |
 | --- | --- |
-| `init` | Create a study and register one condition's Bruker dataset. |
-| `reference` | Generate and freeze the reference spectrum, reference script and reference peak tables. |
-| `peaks` | Select peaks on the reference spectrum, or register an external peak table. |
-| `sweep` (alias `workflows`) | Run parameter combinations against the frozen reference. |
-| `report` | Recompute summaries from existing records without re-processing anything. |
-| `status` | Print the current state of the study. |
+| `init` | Create a study and register a Bruker dataset under a condition. |
+| `reference` | Build and freeze the reference spectrum, processing script, and reference metadata. |
+| `peaks` | Select reference peaks or register an external peak list; writes one parabolic reference table. |
+| `sweep` (alias `workflows`) | Execute user-specified parameter combinations against an explicit frozen reference. |
+| `report` | Rebuild summaries from existing records without reprocessing spectra. |
+| `status` | Show the study's registered conditions, references, workflows, and statuses. |
+| `compat` | Print the compatibility manifest and optionally run the deterministic golden vector. |
 
 ## Typical sequence
 
 ```bash
-python -m nmrforge_api init      --study ./study --dataset /path/to/bruker/dataset
+python -m nmrforge_api init --study ./study --dataset /path/to/bruker/dataset --condition A
 python -m nmrforge_api reference --study ./study
-python -m nmrforge_api peaks     --study ./study
-python -m nmrforge_api sweep     --study ./study --grid grid.yaml --reference study/reference.json
-python -m nmrforge_api report    --study ./study
-python -m nmrforge_api status    --study ./study
+python -m nmrforge_api peaks --study ./study
+python -m nmrforge_api sweep --study ./study --reference ./study --combos design.csv
+python -m nmrforge_api report --study ./study
+python -m nmrforge_api status --study ./study
 ```
+
+For multiple conditions, register each dataset with a unique condition label before building
+references. The reference stage creates the peak identities; the sweep stage requires the reference
+explicitly and independently detects peaks on each candidate spectrum under the locked reference
+threshold.
 
 ## `sweep` options
 
 ```text
 --study STUDY                     study root directory
 --name NAME                       study name when creating a new one
---condition CONDITION             condition label (A/B/...); default runs all conditions
---grid GRID                       parameter grid as YAML/JSON (cartesian expansion)
---reference REFERENCE             reference to sweep against, e.g. study or study#condition
---combos COMBOS                   explicit combination table (CSV/TSV/YAML/JSON)
---direct-range HIGH_PPM LOW_PPM   direct-dimension window, applied over workflow defaults
---max-runs MAX_RUNS               cap the number of workflows executed
---localization {parabolic,gaussian,both}
-                                  peak localisation method for the combinations
---edge-margin-ppm EDGE_MARGIN_PPM peak-selection edge exclusion
---gaussian-roi-f1-ppm / --gaussian-roi-f2-ppm
-                                  Gaussian fitting ROI radii (indirect / direct, ppm)
---no-resume                       ignore previously completed workflows and rerun
+--condition CONDITION             select a condition; by default, process all registered conditions
+--grid GRID                       YAML/JSON axes expanded as a Cartesian product
+--reference REFERENCE             required frozen reference: study, study#condition, or reference.json
+--combos COMBOS                   explicit CSV/TSV/YAML/JSON parameter rows
+--direct-range HIGH_PPM LOW_PPM   direct-dimension extraction window in ppm
+--allow-ext-override              allow a direct range that differs from the frozen reference; records a warning
+--max-runs MAX_RUNS                cap the number of workflows
+--localize-peaks FILE              refine only listed detected peaks (CSV must contain peak_id)
+--edge-margin-ppm PPM              explicit manual edge margin for peak selection
+--no-resume                        rerun completed workflows
 ```
 
-Example `grid.yaml`:
+Supply exactly one of `--grid` and `--combos`. Combination order follows the input table/grid
+order. Peak localization supports only the three-point parabolic method; Gaussian and mixed-method
+flags were removed. Use `--localize-peaks` to target peaks without changing detection, row count,
+or per-spectrum `peak_id` numbering. A target CSV may include `condition` to provide condition-
+specific peak IDs.
 
-```yaml
-zero_fill: [1, 2, 4]
-window.F1.off: [0.35, 0.45, 0.55]
-```
+An explicit `--edge-margin-ppm` is a user override. Without it, the default does not exclude a
+fixed edge band: a conservative axial screen uses experiment/acquisition evidence and many narrow,
+aligned candidates at the original data edges. Isolated edge peaks, internal carrier peaks, and
+unknown or ambiguous cases are retained. See [Peak picking](peak-picking.md).
 
-## Peak localisation methods
+## Sampling gate
 
-| Value | Meaning |
-| --- | --- |
-| `parabolic` | Default. Three-point parabolic refinement, works on any dimensionality. |
-| `gaussian` | 2D Gaussian fit; rejected with an explicit error on non-2D spectra. |
-| `both` | Run both and keep both peak tables. |
+Sampling classification is not inferred from a nominal percentage or data length alone. The
+importer uses a standard `nuslist` or a file explicitly named by `acqus.NUSLIST`. A complete
+schedule in standard order can use uniform processing; a complete but reordered schedule still
+requires schedule-based placement. Explicit NUS data with a missing or unrecoverable schedule is
+rejected at import. Trailing block padding is not treated as missing data. NUS sweep support is
+2D; 3D NUS currently supports reference construction only.
 
-## Sampling classification is a hard gate
+## Outputs and errors
 
-`sweep` refuses to proceed on a dataset whose sampling classification is `uncertain`. Resolve the
-metadata conflict first: a wrong uniform/NUS decision changes the meaning of every parameter in
-the grid, so this is deliberately not overridable by a flag.
+A successful sweep writes per-workflow records and one unified
+`peak_table_parabolic.csv`, plus a study manifest and status summaries. See
+[Outputs and records](external-api/06-outputs-and-records.md) for the current schema.
 
-## Full reference
+Exit code `0` indicates success. Invalid inputs, unresolved sampling metadata, incompatible
+references, or invalid target lists produce an actionable error and a nonzero exit code. CLI
+diagnostics go to stderr; keep stdout available for machine-readable output when using JSON modes.
 
-- [external-api/04-cli-reference.md](external-api/04-cli-reference.md) - complete options,
-  including conditions, combo tables and resumption.
-- [external-api/06-outputs-and-records.md](external-api/06-outputs-and-records.md) - what each
-  sub-command writes.
-- [external-api/10-troubleshooting.md](external-api/10-troubleshooting.md) - CLI-specific errors.
+## Full API details
+
+- [External API CLI reference](external-api/04-cli-reference.md)
+- [Inputs and parameter tables](external-api/05-inputs-and-data.md)
+- [Outputs and records](external-api/06-outputs-and-records.md)
+- [Troubleshooting](external-api/10-troubleshooting.md)

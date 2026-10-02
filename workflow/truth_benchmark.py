@@ -2,10 +2,12 @@
 instead of comparing a processing result with itself (2026-09-22).
 
 Why this layer exists: if window/parameter selection is scored only on *its own* spectrum (for
-example "peak height / noise after apodisation"), the metric moves together with the candidate --
+example "peak height / noise after apodisation"), the metric moves together with the candidate
+--
 it can say which candidate fits that score best, but not which candidate is closer to the truth.
 For the same reason, "a peak that shows up in every independent reconstruction of the same data"
-only proves **repeatability**, not **truth**: a systematic artefact is reconstructed consistently
+only proves **repeatability**, not **truth**: a systematic artefact is reconstructed
+consistently
 and would be counted as a real peak. There are only two ways to get truth:
 
 1. **synthetic data**: positions/intensities/line widths are injected, so the truth is exact
@@ -16,14 +18,18 @@ and would be counted as a real peak. There are only two ways to get truth:
 Conventions (changing them means changing the tests too):
 
 * match distance ``d = hypot(dH / tol_H, dN / tol_N)``; only ``d <= 1`` counts as a match;
-* **one-to-one greedy nearest matching** (sorted by d, stable): a detected peak can be used by one
+* **one-to-one greedy nearest matching** (sorted by d, stable): a detected peak can be used by
+one
   expected peak only, and an expected peak that was stolen is reported as ``not_detected``;
 * **naming discipline**: an unmatched detected peak is ``unmatched_detection`` (**not** a false
   peak -- it may be an unassigned real peak, a side-chain NH2, an impurity or an artefact); an
-  unmatched expected peak is ``not_detected`` (**not** "it does not exist" -- it may be too weak,
+  unmatched expected peak is ``not_detected`` (**not** "it does not exist" -- it may be too
+  weak,
   broadened, overlapped or shifted);
-* **the referencing is aligned once and then frozen**: deposited shifts and the spectrum differ by
-  a constant, estimated once by a grid scan (``estimate_offset``) and never re-aligned afterwards.
+* **the referencing is aligned once and then frozen**: deposited shifts and the spectrum differ
+by
+  a constant, estimated once by a grid scan (``estimate_offset``) and never re-aligned
+  afterwards.
   To test "could this still match by chance *after* re-alignment", the decoys must be **per-peak
   independent shifts** (``per_peak=True``) -- a rigid translation is absorbed by the alignment;
 * **chance matching needs a background control**: shift the expected table (rigid translation,
@@ -33,7 +39,8 @@ Conventions (changing them means changing the tests too):
   apart.
 
 This module only matches, aggregates and synthesises. It never changes processing parameters.
-Uses: (1) locking window/localisation behaviour in tests; (2) producing numbers on real data from
+Uses: (1) locking window/localisation behaviour in tests; (2) producing numbers on real data
+from
 the evidence scripts.
 """
 
@@ -82,7 +89,8 @@ def detect_peaks(
 
     Returns ``[(position, height)]`` sorted by position. The "merging" criterion of the window
     scoring and the detection of the truth benchmark both call this one function -- the two
-    conventions must agree, otherwise "the optimiser did not merge peaks" and "the benchmark says
+    conventions must agree, otherwise "the optimiser did not merge peaks" and "the benchmark
+    says
     it merged peaks" would contradict each other.
     """
     data = np.asarray(amplitude, dtype=float).ravel()
@@ -121,12 +129,14 @@ def synthetic_fid(
 ) -> tuple[np.ndarray, list[dict[str, float]]]:
     """Build a synthetic FID from a known peak table (complex, exponential decay, white noise).
 
-    Each entry of ``peaks``: ``{"offset": frequency (spectral point position, may be fractional),
+    Each entry of ``peaks``: ``{"offset": frequency (spectral point position, may be
+    fractional),
     "amp": amplitude, "lw": line width (points)}``. The time-domain samples follow
     ``exp(2j*pi*offset*k/n) * exp(-pi*lw*k/n)``, so after the FFT the peak sits near ``offset``
     with a half-height width of about ``lw`` points -- the truth is known **to the point**.
 
-    Returns ``(fid, truth)``; each entry of ``truth`` is ``{"peak_id", "offset", "amp"}`` (sorted).
+    Returns ``(fid, truth)``; each entry of ``truth`` is ``{"peak_id", "offset", "amp"}``
+    (sorted).
     """
     rng = np.random.default_rng(seed)
     n = int(n_points)
@@ -303,12 +313,15 @@ def translated_decoys(
 
     The shift is normalised by the **matching radius**:
     ``sqrt((dH/tol_H)^2 + (dN/tol_N)^2) >= shift_radii``, so shifted positions are guaranteed to
-    be far from the original truth; if ``span_*`` is given the shifted points are folded back into
+    be far from the original truth; if ``span_*`` is given the shifted points are folded back
+    into
     the spectral range, otherwise they are unconstrained.
 
     ``per_peak=False`` (default) is a **rigid translation**: every peak shares one vector. It is
-    only a control for matching in a *frozen* reference frame -- as soon as the referencing may be
-    re-estimated, a rigid translation is absorbed by the alignment and the control is meaningless.
+    only a control for matching in a *frozen* reference frame -- as soon as the referencing may
+    be
+    re-estimated, a rigid translation is absorbed by the alignment and the control is
+    meaningless.
     To ask "could this still match by chance *after* re-alignment", use ``per_peak=True``: each
     peak draws its own shift, so the marginal distribution is unchanged but the peak-to-peak
     correspondence is destroyed.
@@ -395,9 +408,11 @@ def _matched_within(
     """Fast counter for the grid scan: expected peaks that have **at least one** detection in
     tolerance.
 
-    ``diff_h[j, i] = detected[i].H - expected[j].H`` (precomputed), so a shifted grid point costs
+    ``diff_h[j, i] = detected[i].H - expected[j].H`` (precomputed), so a shifted grid point
+    costs
     one subtraction and one comparison. It is not the same convention as the reported
-    ``match_one_to_one`` (no one-to-one), it is only the scan objective; every reported number uses
+    ``match_one_to_one`` (no one-to-one), it is only the scan objective; every reported number
+    uses
     the one-to-one matcher.
     """
     mask = (np.abs(diff_h - d_h) <= tol_h) & (np.abs(diff_n - d_n) <= tol_n)
@@ -439,7 +454,8 @@ def _scan(
     distance.
 
     Maximising the count alone lands on the wrong shift when the tolerance is wide and the peaks
-    are dense (measured: 0.14 ppm off in 15N); breaking ties by the median distance is the standard
+    are dense (measured: 0.14 ppm off in 15N); breaking ties by the median distance is the
+    standard
     fix (same convention as the external reference calibration).
     """
     shifts_h = np.arange(-half_h, half_h + step_h * 0.5, step_h) + center_h
@@ -449,9 +465,7 @@ def _scan(
     counts: list[float] = []
     for shift_h in shifts_h:
         for shift_n in shifts_n:
-            count = _matched_within(
-                diff_h, diff_n, float(shift_h), float(shift_n), tol_h, tol_n
-            )
+            count = _matched_within(diff_h, diff_n, float(shift_h), float(shift_n), tol_h, tol_n)
             counts.append(float(count))
             if count > best_count:
                 best_count = count
@@ -461,8 +475,11 @@ def _scan(
     array = np.array(counts, dtype=float)
     if best_count < 0 or not candidates:
         return {
-            "dH": float(center_h), "dN": float(center_n), "count": -1,
-            "distance": float("inf"), "counts": array,
+            "dH": float(center_h),
+            "dN": float(center_n),
+            "count": -1,
+            "distance": float("inf"),
+            "counts": array,
         }
 
     def _key(item: tuple[float, float]) -> float:
@@ -470,8 +487,11 @@ def _scan(
 
     best_h, best_n = min(candidates, key=_key)
     return {
-        "dH": float(best_h), "dN": float(best_n), "count": int(best_count),
-        "distance": float(_key((best_h, best_n))), "counts": array,
+        "dH": float(best_h),
+        "dN": float(best_n),
+        "count": int(best_count),
+        "distance": float(_key((best_h, best_n))),
+        "counts": array,
     }
 
 
@@ -492,33 +512,48 @@ def estimate_offset(
     Why one tolerance is not enough: deposited shifts and the spectrum differ by a constant
     (different lab / different script), so matching the deposited coordinates directly misses
     everything; but **the looser the tolerance, the flatter the objective** -- when the peak
-    spacing is comparable to the tolerance, a shift half a spacing away matches just as many peaks
+    spacing is comparable to the tolerance, a shift half a spacing away matches just as many
+    peaks
     (measured: 0.14 ppm off in 15N, and it can even push the reference the wrong way). So: the
-    first stage scans the full span at a **moderate tolerance** (``min(tol, 0.02/0.10)``), then two
+    first stage scans the full span at a **moderate tolerance** (``min(tol, 0.02/0.10)``), then
+    two
     more stages tighten to ``0.4x/0.2x -> 0.2x/0.1x``, each searching the neighbourhood of the
     previous stage; the objective is "expected peaks with at least one detection in tolerance",
-    ties broken by smallest **median distance**. A tightening stage that yields nothing means the
-    assumption does not hold, so that stage is dropped and the previous result is kept; if even the
+    ties broken by smallest **median distance**. A tightening stage that yields nothing means
+    the
+    assumption does not hold, so that stage is dropped and the previous result is kept; if even
+    the
     first stage is empty the caller's tolerance is used as a fallback.
 
     This never scores candidates and never selects parameters; it aligns the reference once. The
-    ``dH``/``dN`` returned to the caller is what should be **added to the expected peaks**. Returns:
+    ``dH``/``dN`` returned to the caller is what should be **added to the expected peaks**.
+    Returns:
 
     * ``matched_at_best`` / ``matched_at_zero``: matches at the caller's tolerance after
       calibration vs without any shift;
-    * ``null_median`` / ``null_p95``: distribution of the match count over the **full-span grid**
-      of the first stage -- the level a random shift would reach (a grid instead of random draws:
+    * ``null_median`` / ``null_p95``: distribution of the match count over the **full-span
+    grid**
+      of the first stage -- the level a random shift would reach (a grid instead of random
+      draws:
       cheaper and reproducible);
-    * ``refine_stages``: tolerance, match count and landing point of every stage (evidence that the
+    * ``refine_stages``: tolerance, match count and landing point of every stage (evidence that
+    the
       calibration converged instead of getting lucky).
     """
     det = _check_peaks(detected, "detected")
     exp = _check_peaks(expected, "expected")
     if not det or not exp:
         return {
-            "dH": 0.0, "dN": 0.0, "matched_at_best": 0.0, "matched_at_zero": 0.0,
-            "median_distance_at_best": float("inf"), "null_median": 0.0, "null_p95": 0.0,
-            "n_expected": float(len(exp)), "grid_points": 0.0, "refine_stages": [],
+            "dH": 0.0,
+            "dN": 0.0,
+            "matched_at_best": 0.0,
+            "matched_at_zero": 0.0,
+            "median_distance_at_best": float("inf"),
+            "null_median": 0.0,
+            "null_p95": 0.0,
+            "n_expected": float(len(exp)),
+            "grid_points": 0.0,
+            "refine_stages": [],
         }
     det_h = np.array([float(row["H_ppm"]) for row in det], dtype=float)
     det_n = np.array([float(row["N_ppm"]) for row in det], dtype=float)
@@ -542,17 +577,13 @@ def estimate_offset(
             }
         )
 
-    found = _scan(
-        diff_h, diff_n, 0.0, 0.0, span_h, span_n, coarse_h, coarse_n, *start_tol
-    )
+    found = _scan(diff_h, diff_n, 0.0, 0.0, span_h, span_n, coarse_h, coarse_n, *start_tol)
     null_counts = found["counts"]
     _record(found, start_tol)
     current_tol = start_tol
     if found["count"] <= 0:
         fallback = (float(tol_h), float(tol_n))
-        found = _scan(
-            diff_h, diff_n, 0.0, 0.0, span_h, span_n, coarse_h, coarse_n, *fallback
-        )
+        found = _scan(diff_h, diff_n, 0.0, 0.0, span_h, span_n, coarse_h, coarse_n, *fallback)
         _record(found, fallback)
         current_tol = fallback
     center_h, center_n = float(found["dH"]), float(found["dN"])
@@ -562,8 +593,15 @@ def estimate_offset(
         next_tol = (current_tol[0] * factor_h, current_tol[1] * factor_n)
         step_h, step_n = half_h / 5.0, half_n / 5.0
         found = _scan(
-            diff_h, diff_n, center_h, center_n, half_h, half_n,
-            step_h, step_n, *next_tol,
+            diff_h,
+            diff_n,
+            center_h,
+            center_n,
+            half_h,
+            half_n,
+            step_h,
+            step_n,
+            *next_tol,
         )
         _record(found, next_tol)
         if found["count"] <= 0:
@@ -576,9 +614,7 @@ def estimate_offset(
     return {
         "dH": float(center_h),
         "dN": float(center_n),
-        "matched_at_best": float(
-            _matched_within(diff_h, diff_n, center_h, center_n, tol_h, tol_n)
-        ),
+        "matched_at_best": float(_matched_within(diff_h, diff_n, center_h, center_n, tol_h, tol_n)),
         "matched_at_zero": float(_matched_within(diff_h, diff_n, 0.0, 0.0, tol_h, tol_n)),
         "median_distance_at_best": float(
             _median_inlier_distance(diff_h, diff_n, center_h, center_n, tol_h, tol_n)
@@ -654,8 +690,15 @@ def write_matches_csv(path: Path | str, matches: Sequence[dict[str, Any]]) -> No
         writer = csv.DictWriter(
             handle,
             fieldnames=[
-                "level", "expected_id", "detected_id", "status", "dH", "dN", "scaled_distance",
-                "nearest_id", "nearest_distance",
+                "level",
+                "expected_id",
+                "detected_id",
+                "status",
+                "dH",
+                "dN",
+                "scaled_distance",
+                "nearest_id",
+                "nearest_distance",
             ],
         )
         writer.writeheader()

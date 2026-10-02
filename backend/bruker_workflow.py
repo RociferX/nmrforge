@@ -43,6 +43,8 @@ logger = logging.getLogger("nmrforge.backend.bruker_workflow")
 #: pulse program (com/pprog.tcl).
 _MODE_KEYS = ("xMODE", "yMODE", "zMODE")
 _EA_MODES = ("Echo-AntiEcho", "Rance-Kay")
+_ROW_GEOMETRY_KEYS = ("xN", "yN", "zN", "xT", "yT", "zT")
+_DSP_KEYS = ("decim", "dspfvs", "grpdly")
 
 # ----------------------------------------------------------- acquisition mode (MODE) convention
 # 2026-09-24 (maintainer's parameter-source table + real-data review): the indirect dimensions'
@@ -143,7 +145,8 @@ def gamma_mapped_car(
     target_nucleus: str,
 ) -> float | None:
     """Map the direct-dimension carrier (ppm) onto the target nucleus' ppm axis by the gamma
-    ratio (equivalent to the ``conv.tcl`` algorithm)."""
+    ratio (equivalent to the ``conv.tcl`` algorithm).
+    """
     gx = gamma_ratio(reference_nucleus)
     gy = gamma_ratio(target_nucleus)
     if not gx or not gy or not target_sf:
@@ -168,10 +171,6 @@ def _float_or_none(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def _fmt_axes(values: list[tuple[str, float]]) -> str:
-    return ", ".join(f"{axis}={value:g}" for axis, value in values)
 
 
 def _temperature_kelvin(value: Any) -> float | None:
@@ -272,9 +271,7 @@ def carrier_reference_block(
     label_delta = tr("Δ")
     label_status = tr("status")
     width = max(len(label_acq), len(label_cfg), len(label_delta), len(label_status)) + 1
-    acquisition_text = (
-        f"{acquisition:.2f} ppm" if acquisition is not None else tr("unknown")
-    )
+    acquisition_text = f"{acquisition:.2f} ppm" if acquisition is not None else tr("unknown")
     configured_text = f"{configured:.2f} ppm" if configured is not None else tr("absent")
     if acquisition is not None and configured is not None:
         delta_text = f"{configured - acquisition:+.2f} ppm"
@@ -288,11 +285,10 @@ def carrier_reference_block(
     ]
 
 
-def carrier_fix_note(
-    key: str, acquisition: float, configured: float | None, status: str
-) -> str:
+def carrier_fix_note(key: str, acquisition: float, configured: float | None, status: str) -> str:
     """One line for the correction list of a dimension whose CAR was overridden (same wording in
-    the log and the report)."""
+    the log and the report).
+    """
     return tr(
         "{p0}: fid.com={p1} -> acqus O1/BF1={p2:.3f} (CAR reference = the computed "
         "acquisition centre; status: {p3})",
@@ -312,7 +308,8 @@ def carrier_audit(
     """Per-dimension carrier (CAR) decision, record and report (2026-09-24; the convention and
     report design are described below).
 
-    **Adopted convention (software design fixed by the maintainer 2026-09-24)**: CAR always comes
+    **Adopted convention (software design fixed by the maintainer 2026-09-24)**: CAR always
+    comes
     from that dimension's acqus ``O1/BF1`` -- i.e. **the computed spectral centre the operator
     set**; spectra of one experiment acquired at different times therefore share one referencing
     convention. The "water peak (TE) + gamma ratio" value of ``bruker -AUTO`` is corroborating
@@ -341,7 +338,8 @@ def carrier_audit(
       dimensions follow the water-peak convention) and why no spectral centre was available;
     - ``fix_lines``: overridden/backfilled dimensions, one sentence each (into the "parameter
       corrections" list and the report);
-    - ``blocks``: the referencing-convention block of each overridden dimension (multi-line text,
+    - ``blocks``: the referencing-convention block of each overridden dimension (multi-line
+    text,
       rendered indented in report and log);
     - ``dims``: per dimension ``axis``/``logical_axis``/``nucleus``/``acquisition_center``/
       ``configured_target``/``delta_ppm``(configured − acquisition)/``status``/
@@ -356,16 +354,13 @@ def carrier_audit(
     reference = carrier_values(experiment)
     water_values = dict(reference["water_values"] or {})
     records: list[dict[str, Any]] = []
-    fix_lines: list[str] = []
     blocks: list[str] = []
-    water_sourced: list[tuple[str, float]] = []
     for dim in dims:
         letter = letters[dim.logical_axis]
         key = f"{letter}CAR"
         configured = _float_or_none(fid_params.get(key))
         acquisition = float(reference["values"].get(letter, dim.o1p or 0.0) or 0.0)
         water_value = water_values.get(letter)
-        label = str(dim.nucleus or "").strip("<>") or letter
         if key in manual_keys:
             status = REFERENCE_MANUAL
         elif not acquisition:
@@ -376,39 +371,19 @@ def carrier_audit(
             status = REFERENCE_KEPT
         else:
             status = REFERENCE_OVERRIDE
-        if status in _REFERENCE_WRITTEN:
-            fix_lines.append(carrier_fix_note(key, acquisition, configured, status))
-        if (
-            water_value is not None
-            and configured is not None
-            and abs(configured - water_value) <= CAR_MATCH_TOLERANCE
-        ):
-            water_sourced.append((letter, float(water_value)))
-        if status != REFERENCE_KEPT:
-            blocks.append(
-                "\n".join(
-                    carrier_reference_block(
-                        label, acquisition or None, configured, status=status
-                    )
-                )
-            )
         records.append(
             {
                 "axis": letter,
                 "logical_axis": dim.logical_axis,
                 "nucleus": dim.nucleus,
                 "acquisition_center": round(acquisition, 6) if acquisition else None,
-                "configured_target": (
-                    round(configured, 6) if configured is not None else None
-                ),
+                "configured_target": (round(configured, 6) if configured is not None else None),
                 "delta_ppm": (
                     round(configured - acquisition, 6)
                     if configured is not None and acquisition
                     else None
                 ),
-                "water_value": (
-                    round(water_value, 6) if water_value is not None else None
-                ),
+                "water_value": (round(water_value, 6) if water_value is not None else None),
                 "configured_source": (
                     "water_gamma"
                     if water_value is not None
@@ -425,37 +400,81 @@ def carrier_audit(
                 }.get(status, "write"),
             }
         )
-    summary = tr(
-        "CAR reference = the computed acquisition centre (acqus O1/BF1) of each dimension "
-        "({p0}), so spectra acquired at different times share one referencing convention",
-        p0=_fmt_axes([(rec["axis"], rec["acquisition_center"] or 0.0) for rec in records])
-        or "-",
-    )
+    #
+    #
     notes: list[str] = []
-    if water_sourced:
-        notes.append(
+    grouped: dict[str, list[str]] = {
+        "manual": [],
+        "water": [],
+        "centre": [],
+        "script": [],
+        "missing": [],
+        "unknown": [],
+    }
+    for rec in records:
+        axis = str(rec["axis"])
+        status = str(rec["status"])
+        if status == REFERENCE_MANUAL:
+            grouped["manual"].append(axis)
+        elif status == REFERENCE_MISSING:
+            grouped["missing"].append(axis)
+        elif status == REFERENCE_UNKNOWN:
+            grouped["unknown"].append(axis)
+        elif status == REFERENCE_KEPT:
+            grouped["centre"].append(axis)
+        elif rec["configured_source"] == "water_gamma":
+            grouped["water"].append(axis)
+        else:
+            grouped["script"].append(axis)
+
+    clauses: list[str] = []
+    if grouped["manual"]:
+        clauses.append(tr("{p0}: manually set value", p0=", ".join(grouped["manual"])))
+    if grouped["water"]:
+        clauses.append(
             tr(
-                "the conversion script's CAR for {p0} came from its water-peak + gamma-ratio "
-                "convention ({p1}); this run uses the acquisition centre instead",
-                p0=", ".join(axis for axis, _value in water_sourced),
-                p1=_fmt_axes(water_sourced),
+                "{p0}: conversion script's water-peak + gamma-ratio value",
+                p0=", ".join(grouped["water"]),
             )
         )
-    unknown = [rec["axis"] for rec in records if rec["status"] == REFERENCE_UNKNOWN]
-    if unknown:
-        notes.append(
+    if grouped["centre"]:
+        clauses.append(
             tr(
-                "CAR could not be computed for {p0} (acqus O1/BF1 unavailable); the conversion "
-                "script's value was kept",
-                p0=", ".join(unknown),
+                "{p0}: acquisition centre (acqus O1/BF1)",
+                p0=", ".join(grouped["centre"]),
             )
         )
+    if grouped["script"]:
+        clauses.append(tr("{p0}: conversion script value", p0=", ".join(grouped["script"])))
+    if grouped["missing"]:
+        clauses.append(
+            tr(
+                "{p0}: CAR is missing from the conversion script",
+                p0=", ".join(grouped["missing"]),
+            )
+        )
+    if grouped["unknown"]:
+        clauses.append(
+            tr(
+                "{p0}: conversion script value (acquisition centre unavailable)",
+                p0=", ".join(grouped["unknown"]),
+            )
+        )
+    summary = (
+        tr(
+            "CAR currently uses {p0}. To use another reference, edit CAR manually in the "
+            "Spectrum step",
+            p0="; ".join(clauses),
+        )
+        if clauses
+        else ""
+    )
     return {
         "rule": CAR_REFERENCE_RULE,
         "convention": "o1bf1",
         "summary": summary,
         "notes": notes,
-        "fix_lines": fix_lines,
+        "fix_lines": [],
         "blocks": blocks,
         "dims": records,
     }
@@ -488,7 +507,10 @@ def carrier_overrides(audit: dict[str, Any]) -> dict[str, str]:
 
 def carrier_patch_notes(audit: dict[str, Any]) -> list[str]:
     """Overridden / backfilled dimensions (patch warnings; same sentence as ``fix_lines``)."""
-    return [str(line) for line in audit.get("fix_lines") or [] if str(line)]
+    lines: list[str] = []
+    lines += [str(line) for line in audit.get("notes") or [] if str(line)]
+    lines += [str(line) for line in audit.get("conflicts") or [] if str(line)]
+    return lines
 
 
 #: Acquisition mode (MODE) conflict table (round two 2026-09-24, table from the maintainer;
@@ -529,7 +551,8 @@ def mode_audit(
     Background: the mode written by bruker -AUTO comes from the pulse-program parsing in
     ``com/pprog.tcl`` (``acquNs(FnMODE)``==6 -> Echo-AntiEcho, 1/7 -> Real, 2..5 -> Complex), so
     **it does not distinguish** States(4)/States-TPPI(5)/TPPI(3); that distinction lives in our
-    own ``acquisition_mode_detector`` (the bruk2pipe keyword and the FT -alt/-neg/-real flags are
+    own ``acquisition_mode_detector`` (the bruk2pipe keyword and the FT -alt/-neg/-real flags
+    are
     all derived from FnMODE separately). This only resolves "script present value vs
     FnMODE-derived value" contradictions; see the conflict table comment above for the rules.
 
@@ -570,47 +593,56 @@ def mode_audit(
         if direct:
             derived: str | None = DIRECT_BRUK2PIPE_MODE
         else:
-            derived = (
-                bruk2pipe_mode_for(int(fnmode or 0), axis=letter) if known else None
-            )
+            derived = bruk2pipe_mode_for(int(fnmode or 0), axis=letter) if known else None
         script_is_ea = script in MODE_KINDS
         decision = "ok"
         if script is None:
             decision = "missing"
-            notes.append(tr("-{p0} is missing from fid.com (this dimension's acquisition "
-                              "mode comes from the conversion script only)", p0=key))
+            notes.append(
+                tr(
+                    "-{p0} is missing from fid.com (this dimension's acquisition "
+                    "mode comes from the conversion script only)",
+                    p0=key,
+                )
+            )
         elif key in manual_keys:
             decision = "manual"
         elif direct:
             if script != DIRECT_BRUK2PIPE_MODE:
                 decision = "write"
-                fix_lines.append(tr(
-                    "{p0}: fid.com={p1} -> {p2} (corrected: the direct dimension of a "
-                    "Bruker dataset is always DQD)",
-                    p0=key,
-                    p1=script,
-                    p2=DIRECT_BRUK2PIPE_MODE,
-                ))
+                fix_lines.append(
+                    tr(
+                        "{p0}: fid.com={p1} -> {p2} (corrected: the direct dimension of a "
+                        "Bruker dataset is always DQD)",
+                        p0=key,
+                        p1=script,
+                        p2=DIRECT_BRUK2PIPE_MODE,
+                    )
+                )
         elif known and int(fnmode) == 6:
             if not script_is_ea:
                 decision = "force_ea"
-                fix_lines.append(tr(
-                    "{p0}: fid.com={p1} -> Echo-AntiEcho (corrected: acquNs FnMODE=6 is "
-                    "Echo-Antiecho; the conversion script did not detect it)",
-                    p0=key,
-                    p1=script,
-                ))
+                fix_lines.append(
+                    tr(
+                        "{p0}: fid.com={p1} -> Echo-AntiEcho (corrected: acquNs FnMODE=6 is "
+                        "Echo-Antiecho; the conversion script did not detect it)",
+                        p0=key,
+                        p1=script,
+                    )
+                )
         elif known:
             if script_is_ea:
                 decision = "conflict"
-                conflicts.append(tr(
-                    "{p0}: fid.com={p1} vs acquNs FnMODE={p2} - the conversion script and the "
-                    "acquisition metadata disagree; kept the conversion script value, confirm "
-                    "the acquisition mode",
-                    p0=key,
-                    p1=script,
-                    p2=int(fnmode),
-                ))
+                conflicts.append(
+                    tr(
+                        "{p0}: fid.com={p1} vs acquNs FnMODE={p2} - the conversion script and the "
+                        "acquisition metadata disagree; kept the conversion script value, confirm "
+                        "the acquisition mode",
+                        p0=key,
+                        p1=script,
+                        p2=int(fnmode),
+                    )
+                )
             elif canonical_negated(script):
                 # Final round 2026-09-24: the `-N` variant (Complex-N/States-N/States-TPPI-N)
                 # carries the canonical "imaginaries negated" meaning, so it is **kept as
@@ -621,21 +653,26 @@ def mode_audit(
                 decision = "negated"
                 if judged.determined and not judged.needs_neg:
                     decision = "conflict"
-                    conflicts.append(tr(
-                        "{p0}: fid.com={p1} says the imaginaries are negated (-N), while the "
-                        "coherence-pathway criterion gives {p2} for this dimension - kept the "
-                        "conversion script value, confirm the sign",
-                        p0=key,
-                        p1=script,
-                        p2=judged.handedness,
-                    ))
+                    conflicts.append(
+                        tr(
+                            "{p0}: fid.com={p1} says the imaginaries are negated (-N), while the "
+                            "coherence-pathway criterion gives {p2} for this dimension - kept the "
+                            "conversion script value, confirm the sign",
+                            p0=key,
+                            p1=script,
+                            p2=judged.handedness,
+                        )
+                    )
                 else:
-                    notes.append(tr(
-                        "{p0}: fid.com={p1} kept as written (canonical -N mode: the imaginaries "
-                        "are negated; the sign adjustment is applied by the FT flags)",
-                        p0=key,
-                        p1=script,
-                    ))
+                    notes.append(
+                        tr(
+                            "{p0}: fid.com={p1} kept as written (canonical -N mode: the "
+                            "imaginaries "
+                            "are negated; the sign adjustment is applied by the FT flags)",
+                            p0=key,
+                            p1=script,
+                        )
+                    )
             elif script != derived:
                 decision = "write"
                 if same_mode_family(script, derived):
@@ -643,42 +680,58 @@ def mode_audit(
                     # keyword** (States-TPPI/States/TPPI/Sequential...), no longer Complex --
                     # the keyword only sets the header while the ALT sign adjustment is applied
                     # by the FT flags during processing, so it is never applied twice.
-                    fix_lines.append(tr(
-                        "{p0}: fid.com={p1} -> {p2} (same bruk2pipe mode code, but the specific "
-                        "keyword records the acquisition mode; the sign adjustment is applied by "
-                        "the FT flags, not at conversion)",
-                        p0=key,
-                        p1=script,
-                        p2=derived,
-                    ))
+                    fix_lines.append(
+                        tr(
+                            "{p0}: fid.com={p1} -> {p2} (same bruk2pipe mode code, but "
+                            "the specific "
+                            "keyword records the acquisition mode; the sign adjustment is "
+                            "applied by "
+                            "the FT flags, not at conversion)",
+                            p0=key,
+                            p1=script,
+                            p2=derived,
+                        )
+                    )
                 else:
-                    fix_lines.append(tr("{p0}: fid.com={p1} -> acqus={p2} (corrected)",
-                                        p0=key, p1=script, p2=derived))
+                    fix_lines.append(
+                        tr(
+                            "{p0}: fid.com={p1} -> acqus={p2} (corrected)",
+                            p0=key,
+                            p1=script,
+                            p2=derived,
+                        )
+                    )
         else:
             if pulseprogram is False:
                 decision = "unverified"
-                notes.append(tr(
-                    "{p0}: fid.com={p1} kept (acquNs FnMODE is undefined and there is no "
-                    "pulse program: the acquisition mode is not metadata-confirmed)",
-                    p0=key,
-                    p1=script or "-",
-                ))
+                notes.append(
+                    tr(
+                        "{p0}: fid.com={p1} kept (acquNs FnMODE is undefined and there is no "
+                        "pulse program: the acquisition mode is not metadata-confirmed)",
+                        p0=key,
+                        p1=script or "-",
+                    )
+                )
             elif script_is_ea:
                 decision = "inferred"
-                notes.append(tr(
-                    "{p0}: fid.com={p1} kept (acquNs FnMODE is undefined; inferred from "
-                    "the pulse program, not metadata-confirmed)",
-                    p0=key,
-                    p1=script or "-",
-                ))
+                notes.append(
+                    tr(
+                        "{p0}: fid.com={p1} kept (acquNs FnMODE is undefined; inferred from "
+                        "the pulse program, not metadata-confirmed)",
+                        p0=key,
+                        p1=script or "-",
+                    )
+                )
             else:
                 decision = "low_confidence"
-                notes.append(tr(
-                    "{p0}: fid.com={p1} kept (acquNs FnMODE is undefined: low confidence, "
-                    "not metadata-confirmed)",
-                    p0=key,
-                    p1=script or "-",
-                ))
+                notes.append(
+                    tr(
+                        "{p0}: fid.com={p1} kept (acquNs FnMODE is undefined: low confidence, "
+                        "not metadata-confirmed)",
+                        p0=key,
+                        p1=script or "-",
+                    )
+                )
         records.append(
             {
                 "axis": letter,
@@ -699,7 +752,8 @@ def mode_audit(
 
 def mode_writes(audit: dict[str, Any]) -> dict[str, str]:
     """MODE keys to write into fid.com (force_ea and rewrites from FnMODE; conflicts, inferences
-    and ``-N`` are left alone)."""
+    and ``-N`` are left alone).
+    """
     values: dict[str, str] = {}
     for record in audit.get("dims") or []:
         decision = record.get("decision")
@@ -708,6 +762,7 @@ def mode_writes(audit: dict[str, Any]) -> dict[str, str]:
         elif decision == "write" and record.get("derived"):
             values[f"{record['axis']}MODE"] = str(record["derived"])
     return values
+
 
 def _fnmode(experiment: Experiment, logical_axis: str) -> int:
     if experiment.ndim >= 3:
@@ -735,6 +790,7 @@ def _fnmode_raw(experiment: Experiment, logical_axis: str) -> int | None:
         return int(str(raw).strip("<>").strip())
     except (TypeError, ValueError):
         return None
+
 
 def _dim(experiment: Experiment, logical_axis: str):
     for dim in experiment.dimensions:
@@ -781,7 +837,8 @@ def _effective_td(experiment: Experiment) -> list[int]:
 
 def _two_d_nus_grid(experiment: Experiment) -> int:
     """Complex-point grid of the indirect dimension of a 2D NUS dataset (the
-    ``script_generator.effective_td`` convention, for comparison only)."""
+    ``script_generator.effective_td`` convention, for comparison only).
+    """
     dim = _dim(experiment, "F1")
     if dim is None or not dim.td:
         return 0
@@ -793,9 +850,7 @@ def _two_d_nus_grid(experiment: Experiment) -> int:
 #: table is kept here any more.
 
 
-def direct_row_verified(
-    script_value: Any, td: int, value_bytes: int, size: int
-) -> bool:
+def direct_row_verified(script_value: Any, td: int, value_bytes: int, size: int) -> bool:
     """Whether the ``-xN`` in the script body can be used as is (maintainer's convention
     2026-09-24: verify the present value first, do not rewrite by a fixed rule).
 
@@ -804,7 +859,6 @@ def direct_row_verified(
     datasets out of 292 real ones satisfy this). When it holds, **leave it alone** -- the value
     written by ``bruker -AUTO`` was proved correct twice on real data (d_015 ``1664``, real 2D
     NUS ``1024``); recomputing it from the acqus TD or from a fixed pad would break it.
-
     """
     value = _float_or_none(script_value)
     if value is None or size <= 0 or value_bytes <= 0 or td <= 0:
@@ -817,6 +871,112 @@ def direct_row_verified(
     return row_bytes % 1024 == 0
 
 
+def row_geometry_audit(
+    experiment: Experiment,
+    data_dir: Path | str | None,
+    fid_params: dict[str, str],
+    manual_keys: set[str] | frozenset[str] = frozenset(),
+) -> list[str]:
+    """Audit ``xN/yN/zN`` and ``xT/yT/zT`` without changing their values.
+
+    ``-xN`` counts real plus imaginary values; ``-xT`` counts effective points (``N/2`` for
+    complex data). ``bruker -AUTO`` derives these values from acquisition parameters, so the
+    application must not overwrite them. File-size divisibility is not a reliable alternative:
+    a measured dataset had an 8,388,608-byte ``ser`` file, ``TD=356`` and ``DTYPA=2``; AUTO
+    returned ``-xN 384``, while requiring exact divisibility would imply 512. In controlled
+    comparisons, AUTO was correct when the methods agreed and was the only correct result when
+    they differed; a 228-dataset review matched AUTO in all 228 cases.
+
+    Keys listed in ``manual_keys`` are not checked, matching ``carrier_audit`` and
+    ``mode_audit``. A user-entered value is explicit intent; reporting it as wrong based on an
+    application-side derivation would contradict the manual action.
+
+    Findings are reports only; this function never changes parameters:
+
+    1. Check whether ``N`` is compatible with file geometry without requiring exact divisibility
+       (a partial trailing row is allowed). Report only when ``N < TD`` (below the ``bruk2pipe``
+       minimum) or the trailing remainder is nearly a full row.
+    2. Check that ``T`` is positive and consistent with ``N`` and ``MODE``, using
+       ``time_domain_points`` (``N/2`` for complex data and ``N`` for real data).
+    3. For NUS, ``nusExpand`` determines ``xN`` through ``serPadSize``; report that no geometry
+       check was performed.
+    """
+    lines: list[str] = []
+    if experiment.sampling.mode is SamplingMode.NUS:
+        if "xN" in fid_params and "xN" not in manual_keys:
+            lines.append(
+                tr(
+                    "xN: {p0} kept as-is; for NUS the row length is set by nusExpand "
+                    "(serPadSize), so no geometry check was done",
+                    p0=fid_params.get("xN"),
+                )
+            )
+        return lines
+    td = _effective_td(experiment)
+    if not td or td[0] <= 0:
+        return lines
+    direct_td = int(td[0])
+    xn = _float_or_none(fid_params.get("xN"))
+    if xn is not None and xn > 0 and "xN" not in manual_keys:
+        if xn < direct_td:
+            lines.append(
+                tr(
+                    "xN: {p0} is smaller than the direct TD {p1} - the row length must be at "
+                    "least TD; check this script",
+                    p0=fid_params.get("xN"),
+                    p1=direct_td,
+                )
+            )
+        elif data_dir is not None:
+            try:
+                value_bytes = sample_itemsize(experiment.acquisition_parameters.get("acqus", {}))
+            except UnknownBrukerDtype:
+                value_bytes = 0
+            data_file = Path(data_dir) / ("ser" if experiment.ndim >= 2 else "fid")
+            try:
+                size = data_file.stat().st_size
+            except OSError:
+                size = 0
+            if size > 0 and value_bytes > 0:
+                per_row = xn * value_bytes
+                whole = int(size // per_row)
+                remainder = size - whole * per_row
+                if whole > 0 and remainder >= per_row * 0.9:
+                    lines.append(
+                        tr(
+                            "xN: {p0} leaves {p1} trailing byte(s) in {p2}, nearly a whole "
+                            "{p3}-byte row - the row length may be one row short; check this "
+                            "script",
+                            p0=fid_params.get("xN"),
+                            p1=remainder,
+                            p2=size,
+                            p3=int(per_row),
+                        )
+                    )
+    xt = _float_or_none(fid_params.get("xT"))
+    if xt is not None and "xT" not in manual_keys:
+        fnmode = _fnmode(experiment, "F3" if experiment.ndim >= 3 else "F2")
+        expected_t = float(time_domain_points(fnmode, direct_td))
+        if xt <= 0:
+            lines.append(
+                tr(
+                    "xT: {p0} is not positive; check this script",
+                    p0=fid_params.get("xT"),
+                )
+            )
+        elif abs(xt - expected_t) > 0.5:
+            lines.append(
+                tr(
+                    "xT: fid.com={p0} vs {p1} expected from TD={p2} (MODE {p3}); check this script",
+                    p0=fid_params.get("xT"),
+                    p1=int(expected_t),
+                    p2=direct_td,
+                    p3=fnmode,
+                )
+            )
+    return lines
+
+
 def direct_row_points(
     experiment: Experiment,
     data_dir: Path | str | None,
@@ -826,7 +986,8 @@ def direct_row_points(
 
     Maintainer's convention 2026-09-24: the row length and sample word size of ``ser`` are
     decided by TopSpin case by case, **not by a fixed byte rule**. Therefore: (1) if the present
-    value passes :func:`direct_row_verified` it is used as is (``verified``); (2) otherwise it is
+    value passes :func:`direct_row_verified` it is used as is (``verified``); (2) otherwise it
+    is
     solved from the file size (``derived``, single source ``core.data.ser_layout``); (3) if
     neither is available -> ``(None, "unknown")`` and the caller keeps the original value.
     """
@@ -852,9 +1013,7 @@ def direct_row_points(
     return None, "unknown"
 
 
-def physical_direct_points(
-    experiment: Experiment, data_dir: Path | str | None
-) -> int | None:
+def physical_direct_points(experiment: Experiment, data_dir: Path | str | None) -> int | None:
     """Complex points per row of the direct dimension (physical file view, may exceed the acqus
     TD).
 
@@ -906,9 +1065,7 @@ def patch_nus_expand_count(text: str, nuslist_count: int) -> tuple[str, list[str
         warnings.append(
             tr("sampleCount: fid.com={p0} → nuslist={p1} (corrected)", p0=current, p1=nuslist_count)
         )
-        return match.group(0).replace(
-            f"-sampleCount {current}", f"-sampleCount {nuslist_count}", 1
-        )
+        return match.group(0).replace(f"-sampleCount {current}", f"-sampleCount {nuslist_count}", 1)
 
     patched = _NUSEXPAND_RE.sub(replace, text)
     return patched, warnings
@@ -972,11 +1129,11 @@ def expected_values(
     td = _effective_td(experiment)
     direct = physical_direct_points(experiment, data_dir)
     if data_dir is None:
-        xN: float | None = float(td[0])          # no file information: keep the old convention
+        xN: float | None = float(td[0])  # no file information: keep the old convention
     elif direct is not None:
         xN = float(direct)
     else:
-        xN = None                                 # file not divisible: no guessing, keep original
+        xN = None  # file not divisible: no guessing, keep original
     x = _dim(experiment, "F2" if experiment.ndim == 2 else "F3")
     values: dict[str, tuple[Any, float | None]] = {
         "xN": (xN, 0.0),
@@ -1047,7 +1204,8 @@ def cross_check_fid_com(
     data_dir: Path | str | None = None,
 ) -> list[str]:
     """Check the fid.com parameters against the acqus/acqu2s metadata (including the MODE/DSP
-    flags); returns warnings for the differences."""
+    flags); returns warnings for the differences.
+    """
     warnings: list[str] = []
     for key, (desired, tolerance) in expected_values(experiment, data_dir).items():
         if key not in fid_params:
@@ -1076,9 +1234,7 @@ def cross_check_fid_com(
     return warnings
 
 
-def _acqus_values(
-    experiment: Experiment, data_dir: Path | str | None = None
-) -> dict[str, str]:
+def _acqus_values(experiment: Experiment, data_dir: Path | str | None = None) -> dict[str, str]:
     values: dict[str, str] = {}
     acqus = experiment.acquisition_parameters.get("acqus", {}) or {}
     grpdly = _float_or_none(acqus.get("GRPDLY"))
@@ -1089,10 +1245,11 @@ def _acqus_values(
             # Round two 2026-09-24: acquisition mode is handled separately by mode_audit (the
             # conflict table) and does not go through the generic replacement
             continue
+        if key in _ROW_GEOMETRY_KEYS:
+            continue
+        if key in _DSP_KEYS:
+            continue
         if key.endswith("CAR"):
-            # 2026-09-24: CAR does not go through the generic replacement here -- it is handled
-            # uniformly by the dedicated carrier_audit convention (always written as that
-            # dimension's ``O1/BF1`` = the spectral centre the operator set).
             continue
         if key == "grpdly" and (grpdly is None or grpdly < 0):
             # 2026-09-24 (parameter source table): only GRPDLY >= 0 uses acqus directly; a
@@ -1147,7 +1304,8 @@ def sweep_width_audit(experiment: Experiment) -> list[dict[str, Any]]:
 
 def sweep_width_log_lines(experiment: Experiment) -> list[str]:
     """Log lines describing the sweep-width convention (same source and same sentence as
-    :func:`sweep_width_audit`)."""
+    :func:`sweep_width_audit`).
+    """
     return [dim.sw_note for dim in experiment.dimensions if dim.sw_note]
 
 
@@ -1162,7 +1320,8 @@ def patch_fid_com(
     (0.2.163-patch13: automatic and manual paths use the same fid name, so the fid.com output
     name is final).
 
-    ``manual_keys`` are keys edited by hand (``apply_fid_com_overrides`` writes the manual values
+    ``manual_keys`` are keys edited by hand (``apply_fid_com_overrides`` writes the manual
+    values
     again later): they are marked ``manual`` here and are not rewritten from acqus/derived
     values, so that the log and the report do not say "corrected" while the final script still
     holds the manual value (round two 2026-09-24).
@@ -1180,7 +1339,6 @@ def patch_fid_com(
         if tolerance
     }
     warnings: list[str] = []
-
 
     def replace(match: re.Match) -> str:
         key = match.group(1)
@@ -1208,62 +1366,23 @@ def patch_fid_com(
                     and abs(current_value - desired_value) <= tolerance
                 ):
                     return match.group(0)
-            warnings.append(tr(
-                "{p0}: fid.com={p1} → acqus={p2} "
-                "(corrected)",
-                p0=key,
-                p1=current,
-                p2=desired,
-            ))
+            warnings.append(
+                tr(
+                    "{p0}: fid.com={p1} → acqus={p2} (corrected)",
+                    p0=key,
+                    p1=current,
+                    p2=desired,
+                )
+            )
             return f"-{key} {desired}"
         return match.group(0)
 
     patched = _KEY_RE.sub(replace, text)
-    # 2026-09-24 (software design fixed by the maintainer): CAR always writes that dimension's
-    # acqus ``O1/BF1`` (the computed operator spectral centre); when it differs from the
-    # "water peak + gamma ratio" present value of ``bruker -AUTO`` it goes into the correction
-    # list; the per-dimension acquisition center / Configured target CAR / delta / status stay in
-    # the blocks of ``carrier_audit``, with the same text in report and log.
-    # Rewrites and missing keys both go into warnings (shown as "parameter corrections" in the
-    # log); the record is in carrier_audit.
-    # 2026-09-24 (maintainer's convention): ``-xN`` verifies the present value first -- if it
-    # passes, nothing is touched (the real-data values of bruker -AUTO, d_015 1664 and real 2D
-    # NUS 1024, are correct), and only a failure solves from the file instead of guessing a fixed
-    # pad; NUS is never touched (xN is decided by the nusExpand convention, see the similar
-    # comment in _acqus_values).
-    if experiment.sampling.mode is not SamplingMode.NUS:
-        row_points, row_source = direct_row_points(
-            experiment, data_dir, parse_fid_com(text).get("xN")
-        )
-        if row_source == "derived" and row_points is not None:
-            current_xn = _float_or_none(parse_fid_com(patched).get("xN"))
-            if current_xn is None or current_xn != float(row_points):
-                patched = _KEY_RE.sub(
-                    lambda match: (
-                        f"-{match.group(1)} {row_points}"
-                        if match.group(1) == "xN"
-                        else match.group(0)
-                    ),
-                    patched,
-                )
-                warnings.append(tr(
-                    "xN: fid.com={p0} -> {p1} (the script's row length does not match the file: "
-                    "it must be >= the direct TD and divide the file size)",
-                    p0=parse_fid_com(text).get("xN", "-"),
-                    p1=row_points,
-                ))
+    warnings += row_geometry_audit(
+        experiment, data_dir, parse_fid_com(text), manual_keys=manual_keys
+    )
     audit = carrier_audit(experiment, parse_fid_com(text), manual_keys=manual_keys)
 
-    overrides = carrier_overrides(audit)
-    if overrides:
-        patched = _KEY_RE.sub(
-            lambda match: (
-                f"-{match.group(1)} {overrides[match.group(1)]}"
-                if match.group(1) in overrides
-                else match.group(0)
-            ),
-            patched,
-        )
     warnings += carrier_patch_notes(audit)
     # Round two 2026-09-24 (conflict table from the maintainer): acquisition mode is only handled
     # by mode_audit and the generic replacement no longer touches MODE keys (see _acqus_values);
@@ -1305,10 +1424,12 @@ def patch_fid_com(
     # product after conversion). ser_full is kept (bruk2pipe input).
     patched, mask_removed = _MASK_STAGE_RE.subn("", patched)
     if mask_removed:
-        warnings.append(tr(
-            "Removed the nusExpand -mask stage from fid.com (SMILE does not need a "
-            "mask)",
-        ))
+        warnings.append(
+            tr(
+                "Removed only the trailing nusExpand -mask generation stage from fid.com; the "
+                "earlier nusExpand data-expansion stage is still required before bruk2pipe",
+            )
+        )
     if experiment.sampling.mode is SamplingMode.NUS:
         patched, grid_warnings = _force_nus_expand_grid(patched, experiment)
         warnings += grid_warnings
@@ -1334,9 +1455,7 @@ _MASK_STAGE_RE = re.compile(
 _NUS_EXPAND_RE = re.compile(r"(nusExpand\.tcl[^\n]*?)\\\n")
 
 
-def _force_nus_expand_grid(
-    text: str, experiment: Experiment
-) -> tuple[str, list[str]]:
+def _force_nus_expand_grid(text: str, experiment: Experiment) -> tuple[str, list[str]]:
     """Force nusExpand and bruk2pipe onto the same NusTD grid (0.2.195).
 
     By default nusExpand derives the grid from nuslist (yTNUS/zTNUS); when that disagrees with
@@ -1358,9 +1477,7 @@ def _force_nus_expand_grid(
         line = match.group(1)
         if "-yT" in line or "-zT" in line:
             return match.group(0)
-        warnings.append(
-            tr("nusExpand grid: forced ") + " ".join(grid) + tr(" (same as bruk2pipe)")
-        )
+        warnings.append(tr("NUS data-expansion grid aligned with bruk2pipe: ") + " ".join(grid))
         return line[:-1] + " " + " ".join(grid) + " \\\n"
 
     patched, _count = _NUS_EXPAND_RE.subn(replace, text, count=1)
@@ -1427,22 +1544,25 @@ def apply_fid_com_overrides(
             return match.group(0)
         current = match.group(2)
         if current != desired:
-            warnings.append(tr(
-                "{p0}: fid.com={p1} -> manual={p2} "
-                "(applied)",
-                p0=key,
-                p1=current,
-                p2=desired,
-            ))
+            warnings.append(
+                tr(
+                    "{p0}: fid.com={p1} -> manual={p2} (applied)",
+                    p0=key,
+                    p1=current,
+                    p2=desired,
+                )
+            )
             return f"-{key} {desired}"
         return match.group(0)
 
     patched = _KEY_RE.sub(replace, text)
     for key in overrides:
         if key not in seen:
-            warnings.append(tr(
-                "{p0}: The corresponding parameter was not found in fid.com and has been "
-                "skipped",
-                p0=key,
-            ))
+            warnings.append(
+                tr(
+                    "{p0}: The corresponding parameter was not found in fid.com and has been "
+                    "skipped",
+                    p0=key,
+                )
+            )
     return patched, warnings

@@ -22,6 +22,47 @@ from core.data.internal_data_model import SamplingMode
 ROW_POINTS = 128
 
 
+def test_ser_layout_trailing_zero_helpers() -> None:
+    """Regression coverage: test ser layout trailing zero helpers."""
+    from core.data.ser_layout import (
+        count_trailing_zero_rows,
+        effective_row_count,
+        solve_row_points,
+    )
+
+    value_bytes = 8
+    row_values = 512
+    total_rows, zero_rows = 20, 5
+    size = total_rows * row_values * value_bytes
+
+    values = np.ones(total_rows * row_values, dtype=np.float64)
+    values[(total_rows - zero_rows) * row_values :] = 0.0
+
+    assert count_trailing_zero_rows(values, row_values) == zero_rows
+    assert count_trailing_zero_rows(values, row_values, limit=3) == 3
+    assert effective_row_count(size, row_values, value_bytes, zero_rows) == (total_rows - zero_rows)
+
+    assert effective_row_count(size, row_values, value_bytes, total_rows) == 1
+
+    assert count_trailing_zero_rows(np.ones(row_values * 3), row_values) == 0
+
+    assert solve_row_points(300, value_bytes, size) == 384
+
+    assert solve_row_points(384, value_bytes, size) == 384
+
+    assert solve_row_points(300, 4, 300 * 4 * 10) == 512
+
+
+def test_solve_row_points_follows_nih_tcl_not_file_divisibility() -> None:
+    """Regression coverage: test solve row points follows nih tcl not file divisibility."""
+    from core.data.ser_layout import solve_row_points
+
+    size = 8388608  # d_005 raw/segments/05/ser
+    assert solve_row_points(356, 8, size) == 384
+
+    assert size % (384 * 8) != 0
+
+
 def _pad_rows(fids: np.ndarray, row_points: int = ROW_POINTS) -> np.ndarray:
     """Pad a (n_fids, td) complex FID to whole row_points rows like real data (zeros at the end)."""
     if fids.shape[1] >= row_points:
@@ -31,9 +72,7 @@ def _pad_rows(fids: np.ndarray, row_points: int = ROW_POINTS) -> np.ndarray:
     return padded
 
 
-def _write_ser(
-    path: Path, fids: np.ndarray, byterda: int = 0, *, pad: bool = True
-) -> None:
+def _write_ser(path: Path, fids: np.ndarray, byterda: int = 0, *, pad: bool = True) -> None:
     """Write a complex FID array as Bruker ser (int32 real/imaginary interleaved); fids is
     (n_fids, td).
 
@@ -89,6 +128,54 @@ def test_read_data_2d_big_endian(tmp_path: Path, bruker_dir: Path) -> None:
     assert data.byte_order == "big"
 
 
+def test_read_data_2d_trims_trailing_all_zero_rows(tmp_path: Path, bruker_dir: Path) -> None:
+    """Regression coverage: test read data 2d trims trailing all zero rows."""
+    from core.data.ser_layout import (
+        count_trailing_zero_rows,
+        effective_row_count,
+        solve_row_points,
+    )
+
+    dst = _copy_fixture(bruker_dir, "hsqc_small", tmp_path)
+    _s, fids = _make_states_fids(16, 64)
+    padded = _pad_rows(fids)
+    zero_rows = 4
+    with_zeros = np.vstack([padded, np.zeros((zero_rows, ROW_POINTS), dtype=complex)])
+    _write_ser(dst / "ser", with_zeros)
+    exp = read_dataset(dst)
+    data = read_data(exp)
+
+    assert data.matrix.shape[0] == padded.shape[0]
+    assert data.layout["F1"].n_fids == padded.shape[0]
+
+    assert np.array_equal(data.matrix[:, :64], fids)
+
+    acqus = exp.acquisition_parameters.get("acqus", {})
+    from core.data.bruker_dtype import sample_itemsize
+
+    value_bytes = sample_itemsize(acqus)
+    size = (dst / "ser").stat().st_size
+    row_values = solve_row_points(64, value_bytes, size)
+    assert row_values is not None
+    raw = np.frombuffer((dst / "ser").read_bytes(), dtype="<i4").astype(float)
+    assert count_trailing_zero_rows(raw, row_values) == zero_rows
+    rows_total = size // (row_values * value_bytes)
+    assert effective_row_count(size, row_values, value_bytes, zero_rows) == (rows_total - zero_rows)
+
+
+def test_read_data_2d_keeps_a_mid_file_zero_row(tmp_path: Path, bruker_dir: Path) -> None:
+    """Regression coverage: test read data 2d keeps a mid file zero row."""
+    dst = _copy_fixture(bruker_dir, "hsqc_small", tmp_path)
+    _s, fids = _make_states_fids(16, 64)
+    padded = _pad_rows(fids)
+    padded[3] = 0.0
+    _write_ser(dst / "ser", padded)
+    exp = read_dataset(dst)
+    data = read_data(exp)
+    assert data.matrix.shape[0] == padded.shape[0]
+    assert data.layout["F1"].n_fids == padded.shape[0]
+
+
 def test_read_data_3d(tmp_path: Path, bruker_dir: Path) -> None:
     dst = _copy_fixture(bruker_dir, "hnca_small", tmp_path)
     td1, td2, td3 = 4, 3, 8
@@ -113,7 +200,8 @@ def test_read_data_3d(tmp_path: Path, bruker_dir: Path) -> None:
 
 def test_read_data_size_mismatch(tmp_path: Path, bruker_dir: Path) -> None:
     """Raise when the layout cannot be resolved (row length not a multiple of 1024 bytes),
-    never guess."""
+    never guess.
+    """
     dst = _copy_fixture(bruker_dir, "hsqc_small", tmp_path)
     _write_ser(dst / "ser", np.zeros((2, 8), dtype=complex), byterda=0, pad=False)
     exp = read_dataset(dst)
@@ -136,9 +224,7 @@ def test_read_data_1d(tmp_path: Path, bruker_dir: Path) -> None:
     assert np.allclose(data.matrix, fid)
 
 
-def test_read_data_reads_a_real_shaped_uniform_2d(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_read_data_reads_a_real_shaped_uniform_2d(tmp_path: Path, bruker_dir: Path) -> None:
     """Real-data shape (2026-09-24 review A3): 2D FnMODE=6, direct TD=2048, **1024 rows**.
 
     The old implementation expected 2048 rows from "rows = indirect TD × hypercomplex
@@ -170,6 +256,54 @@ def test_read_segments_ok(tmp_path: Path, bruker_dir: Path) -> None:
     assert len(exp.segments) == 2
     assert exp.ndim == 2
     assert exp.sampling.mode is SamplingMode.NUS
+    assert exp.sampling.sampling_fraction == pytest.approx(5 / 128)
+
+
+def test_read_segments_reports_total_unique_nus_coverage(tmp_path: Path, bruker_dir: Path) -> None:
+    """Regression coverage: test read segments reports total unique nus coverage."""
+    dst_a = tmp_path / "seg_a"
+    dst_b = tmp_path / "seg_b"
+    shutil.copytree(bruker_dir / "nus_2d", dst_a)
+    shutil.copytree(bruker_dir / "nus_2d", dst_b)
+    (dst_b / "nuslist").write_text("2\n4\n5\n6\n8\n", encoding="utf-8")
+
+    exp = read_segments([dst_a, dst_b])
+
+    assert set(exp.sampling.nus_list) == {
+        (0,),
+        (1,),
+        (2,),
+        (3,),
+        (4,),
+        (5,),
+        (6,),
+        (7,),
+        (8,),
+        (15,),
+    }
+    assert exp.sampling.sampling_fraction == pytest.approx(10 / 128)
+    assert any("10" in line and "128" in line for line in exp.sampling.evidence)
+
+
+def test_read_segments_does_not_reuse_first_fraction_when_a_schedule_is_missing(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """Regression coverage: test read segments does not reuse first fraction when a schedule is
+    missing.
+    """
+    dst_a = tmp_path / "seg_a"
+    dst_b = tmp_path / "seg_b"
+    shutil.copytree(bruker_dir / "nus_2d", dst_a)
+    shutil.copytree(bruker_dir / "nus_2d", dst_b)
+    (dst_b / "nuslist").unlink()
+
+    exp = read_segments([dst_a, dst_b])
+
+    assert exp.sampling.mode is SamplingMode.NUS
+    assert exp.sampling.sampling_fraction == 0.0
+    assert exp.sampling.nus_list == []
+    assert exp.sampling.schedule_file == ""
+    assert exp.sampling.schedule_source == ""
 
 
 def test_read_segments_mismatch(tmp_path: Path, bruker_dir: Path) -> None:
@@ -186,12 +320,11 @@ def test_read_segments_mismatch(tmp_path: Path, bruker_dir: Path) -> None:
         read_segments([dst_a, dst_b])
 
 
-def test_read_segments_sw_precision_tolerance(
-    tmp_path: Path, bruker_dir: Path
-) -> None:
+def test_read_segments_sw_precision_tolerance(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.199-patch29cs: segmented SW_h written with a different precision (11904.762 vs
     11904.7619047619) counts as the same experiment (relative spectral-width tolerance);
-    the old strict round(sw, 6) comparison produced false rejections."""
+    the old strict round(sw, 6) comparison produced false rejections.
+    """
     import re as _re
     import shutil
 
@@ -215,7 +348,8 @@ def test_read_segments_sw_precision_tolerance(
 
 def test_classify_segment_kind(tmp_path: Path, bruker_dir: Path) -> None:
     """0.2.199-patch29cu: uniform → repeat superposition; NUS same points → repeat
-    superposition; NUS different points → segmentation."""
+    superposition; NUS different points → segmentation.
+    """
     import shutil
 
     from core.data.bruker_reader import classify_segment_kind
@@ -228,10 +362,7 @@ def test_classify_segment_kind(tmp_path: Path, bruker_dir: Path) -> None:
         return c
 
     c_uniform = _container("c_uniform", "hsqc_2d")
-    assert (
-        classify_segment_kind([c_uniform / "s01", c_uniform / "s02"])
-        == "repeat_uniform"
-    )
+    assert classify_segment_kind([c_uniform / "s01", c_uniform / "s02"]) == "repeat_uniform"
     c_nus = _container("c_nus", "nus_2d")
     segs = [c_nus / "s01", c_nus / "s02"]
     assert classify_segment_kind(segs) == "repeat_nus"  # same nuslist

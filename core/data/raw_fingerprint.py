@@ -26,6 +26,7 @@ __all__ = [
     "RAW_KEY_FILES",
     "SMALL_FILE_LIMIT",
     "file_fingerprint",
+    "raw_key_files",
     "raw_dir_fingerprint",
 ]
 
@@ -59,6 +60,33 @@ def file_fingerprint(path: Path | str) -> str | None:
     return digest.hexdigest()
 
 
+def raw_key_files(raw_dir: Path | str) -> tuple[str, ...]:
+    """Return authoritative input filenames, including a schedule named by ``acqus.NUSLIST``.
+
+    Accept only a bare filename in the current directory. Do not follow absolute paths or
+    ``../`` traversal; this matches the schedule finder's safety boundary.
+    """
+    raw = Path(raw_dir)
+    names = list(RAW_KEY_FILES)
+    try:
+        from core.experiment.bruker_parser import parse_param_file
+
+        declared = str(parse_param_file(raw / "acqus").get("NUSLIST") or "").strip()
+    except (OSError, ValueError):
+        declared = ""
+    declared = declared.strip("<>").strip()
+    candidate = Path(declared) if declared else None
+    if (
+        candidate is not None
+        and not candidate.is_absolute()
+        and candidate.name == declared
+        and declared not in names
+        and (raw / declared).is_file()
+    ):
+        names.append(declared)
+    return tuple(names)
+
+
 def raw_dir_fingerprint(raw_dirs: Any) -> str:
     """Fingerprint of one or more raw directories: names plus the key-file fingerprints."""
     if isinstance(raw_dirs, (str, Path)):
@@ -68,7 +96,7 @@ def raw_dir_fingerprint(raw_dirs: Any) -> str:
     digest = hashlib.sha256()
     for raw in dirs:
         digest.update(f"|dir:{raw.name}".encode())
-        for name in RAW_KEY_FILES:
+        for name in raw_key_files(raw):
             fp = file_fingerprint(raw / name)
             if fp is None:
                 continue

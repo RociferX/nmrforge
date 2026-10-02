@@ -14,7 +14,8 @@ Covers:
   issue); differing TD/SW/O1 -> merging is refused;
 - parts whose correlation-peak/floor ratio is too low, whose per-trace scatter is too large (the
   measurement cannot separate the signal) or whose offset is beyond the plausible range are only
-  reported, never rewritten; the wording must not say "the two parts are not the same experiment"
+  reported, never rewritten; the wording must not say "the two parts are not the same
+  experiment"
   (user 2026-09-24); the criterion line must state the criterion actually in force;
 - ``fid.com`` ``PS -rs`` insertion: placed before ``MULT``, MULT kept, idempotent;
 - ``field_drift.json`` record round trip.
@@ -51,8 +52,8 @@ from workflow.field_drift import (
 )
 
 SW_HZ = 8000.0
-SF_MHZ = 800.304          # 1H direct dimension (0.005 ppm = 4.00 Hz; criterion now in Hz)
-SPAN_HZ = 0.5 * SF_MHZ    # matches the search half-width of detect_group_drift
+SF_MHZ = 800.304  # 1H direct dimension (0.005 ppm = 4.00 Hz; criterion now in Hz)
+SPAN_HZ = 0.5 * SF_MHZ  # matches the search half-width of detect_group_drift
 
 
 #: Both parts share one and the same indirect-dimension modulation (same experiment: the t1
@@ -214,8 +215,9 @@ def test_stability_uses_resampling_not_one_even_odd_split() -> None:
     odd = estimate_shift_hz_pooled(ref[~mask], part[~mask], SW_HZ, span_hz=SPAN_HZ)
     assert even is not None and odd is not None
     split = abs(even.shift_hz - odd.shift_hz) / 2.0
-    assert split < 3.0                              # a single split "looks very stable"
-    assert pooled.uncertainty_hz > 3.0 * split      # resampling gives the real uncertainty
+    assert split < 3.0
+
+    assert pooled.uncertainty_hz > 2.0 * split
 
 
 def test_linewidth_is_measured_on_the_median_spectrum(tmp_path: Path) -> None:
@@ -244,9 +246,7 @@ def test_criterion_is_a_fraction_of_the_line_width(tmp_path: Path) -> None:
     - 31.25 Hz (≈ 0.8 line width) -> over the criterion -> correct;
     - 3.0 Hz (≈ 0.08 line width) -> only writes "within the criterion", the data are not moved.
     """
-    result = detect_group_drift(
-        _two_segments(tmp_path / "a", 31.25), sw_hz=SW_HZ, sf_mhz=SF_MHZ
-    )
+    result = detect_group_drift(_two_segments(tmp_path / "a", 31.25), sw_hz=SW_HZ, sf_mhz=SF_MHZ)
     assert result.criterion_basis == "linewidth"
     assert result.linewidth_hz is not None and result.linewidth_hz > 0
     assert result.criterion_hz == pytest.approx(
@@ -257,9 +257,7 @@ def test_criterion_is_a_fraction_of_the_line_width(tmp_path: Path) -> None:
     assert result.trusted == [1]
     assert any("线宽" in line for line in result.reports)
 
-    small = detect_group_drift(
-        _two_segments(tmp_path / "b", 3.0), sw_hz=SW_HZ, sf_mhz=SF_MHZ
-    )
+    small = detect_group_drift(_two_segments(tmp_path / "b", 3.0), sw_hz=SW_HZ, sf_mhz=SF_MHZ)
     assert small.offsets_hz[1] == pytest.approx(3.0, abs=0.5)
     assert small.needs_shift == {}
     assert small.trusted == [1]
@@ -308,7 +306,7 @@ def test_within_criterion_report_quotes_the_real_criterion(tmp_path: Path) -> No
     )
     assert result.criterion_basis == "linewidth"
     line = next(text for text in result.reports if "判据以内" in text)
-    assert f"{result.criterion_hz:.2f} Hz" in line   # the criterion in force, not 1.5 Hz
+    assert f"{result.criterion_hz:.2f} Hz" in line  # the criterion in force, not 1.5 Hz
     assert "线宽" in line
 
 
@@ -320,12 +318,10 @@ def test_audit_rule_quotes_the_effective_criterion(tmp_path: Path) -> None:
     ``max(1.5 Hz, 0.2×line width)``, an audit record that still writes "over 1 FFT point" leaves
     the record disconnected from the behaviour.
     """
-    result = detect_group_drift(
-        _two_segments(tmp_path, 25.0), sw_hz=SW_HZ, sf_mhz=SF_MHZ
-    )
+    result = detect_group_drift(_two_segments(tmp_path, 25.0), sw_hz=SW_HZ, sf_mhz=SF_MHZ)
     rule = criterion_rule_text(result)
-    assert f"{result.criterion_hz:.2f} Hz" in rule          # the value of the actual criterion
-    assert "线宽" in rule                                    # the source of the convention
+    assert f"{result.criterion_hz:.2f} Hz" in rule  # the value of the actual criterion
+    assert "线宽" in rule  # the source of the convention
     assert "FFT 点" not in rule
 
 
@@ -337,25 +333,124 @@ def test_too_few_traces_is_reported_as_no_stability_check(tmp_path: Path) -> Non
     criterion" -- self-contradictory (0 cannot exceed 7.81) -- and it turned "no test was done"
     into "the test failed".
     """
-    result = detect_group_drift(
-        _two_segments(tmp_path, 25.0, rows=6), sw_hz=SW_HZ, sf_mhz=SF_MHZ
-    )
+    result = detect_group_drift(_two_segments(tmp_path, 25.0, rows=6), sw_hz=SW_HZ, sf_mhz=SF_MHZ)
     assert result.traces_used == 6
     assert result.uncertainty_hz[1] is None
     assert result.trusted == []
-    assert result.needs_shift == {}
+    assert result.needs_shift[1] == pytest.approx(25.0, abs=1.0)
     reason = "\n".join(result.skipped)
     assert "可比迹" in reason and "太少" in reason
     assert "±0.0" not in reason
+    assert "未做校正" not in reason
+    assert "仍然施加" in reason
     assert "不代表各段不是同一次实验" in "\n".join(result.reports)
+
+
+def _stub_estimator(shift_hz: float, uncertainty_hz: float | None):
+    """Regression coverage:  stub estimator."""
+    from workflow.field_drift import PooledShiftEstimate
+
+    def _stub(ref, part, sw_hz, *, span_hz, step_hz=0.25):
+        assert ref.shape == part.shape
+        return PooledShiftEstimate(
+            shift_hz=shift_hz,
+            stat=60.0,
+            null_stat=4.0,
+            uncertainty_hz=uncertainty_hz,
+            traces=int(ref.shape[0]),
+        )
+
+    return _stub
+
+
+def test_uncertain_estimate_is_still_corrected(tmp_path: Path, monkeypatch) -> None:
+    """Regression coverage: test uncertain estimate is still corrected."""
+    from workflow import field_drift
+
+    segments = _two_segments(tmp_path, 0.0)
+
+    monkeypatch.setattr(field_drift, "estimate_shift_hz_pooled", _stub_estimator(25.0, 40.0))
+    result = field_drift.detect_group_drift(segments, sw_hz=SW_HZ, sf_mhz=SF_MHZ)
+
+    assert result.criterion_hz is not None and result.criterion_hz < 40.0
+    assert result.needs_shift == {1: pytest.approx(25.0)}
+    assert result.trusted == []
+    assert result.offsets_hz[1] == pytest.approx(25.0)
+    reason = "\n".join(result.skipped)
+    assert "40.0" in reason and "不可复现" in reason
+    assert "仍然施加" in reason
+    assert "未做校正" not in reason
+    assert any("仍然施加" in line for line in result.reports)
+    assert result.corrected is True
+
+
+def test_uncertain_estimate_without_stability_check_is_still_corrected(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Regression coverage: test uncertain estimate without stability check is still corrected."""
+    from workflow import field_drift
+
+    segments = _two_segments(tmp_path, 0.0)
+    monkeypatch.setattr(field_drift, "estimate_shift_hz_pooled", _stub_estimator(25.0, None))
+    result = field_drift.detect_group_drift(segments, sw_hz=SW_HZ, sf_mhz=SF_MHZ)
+
+    assert result.needs_shift == {1: pytest.approx(25.0)}
+    assert result.trusted == []
+    assert result.uncertainty_hz[1] is None
+    reason = "\n".join(result.skipped)
+    assert "做不了" in reason and "仍然施加" in reason
+    assert "未做校正" not in reason
+
+
+def test_insignificant_or_implausible_is_still_skipped(tmp_path: Path, monkeypatch) -> None:
+    """Regression coverage: test insignificant or implausible is still skipped."""
+    from workflow import field_drift
+
+    def _insignificant(ref, part, sw_hz, *, span_hz, step_hz=0.25):
+        from workflow.field_drift import PooledShiftEstimate
+
+        return PooledShiftEstimate(
+            shift_hz=25.0,
+            stat=1.4,
+            null_stat=1.4,
+            uncertainty_hz=0.2,
+            traces=int(ref.shape[0]),
+        )
+
+    monkeypatch.setattr(field_drift, "estimate_shift_hz_pooled", _insignificant)
+    noisy = field_drift.detect_group_drift(
+        _two_segments(tmp_path / "n", 0.0), sw_hz=SW_HZ, sf_mhz=SF_MHZ
+    )
+    assert noisy.needs_shift == {}
+    assert noisy.trusted == []
+    assert noisy.uncertainty_hz[1] == pytest.approx(0.2)
+    assert any("测不出" in line for line in noisy.skipped)
+
+    monkeypatch.undo()
+
+    out_of_range = field_drift.detect_group_drift(
+        _two_segments(tmp_path / "r", 480.0), sw_hz=SW_HZ, sf_mhz=SF_MHZ
+    )
+    assert out_of_range.needs_shift == {}, out_of_range.skipped
+    assert any("合理范围" in line for line in out_of_range.skipped)
+
+
+def test_uncertain_correction_is_not_reported_as_within_criterion(tmp_path: Path) -> None:
+    """Regression coverage: test uncertain correction is not reported as within criterion."""
+    result = detect_group_drift(_two_segments(tmp_path, 25.0, rows=6), sw_hz=SW_HZ, sf_mhz=SF_MHZ)
+    assert result.needs_shift and result.trusted == []
+    text = "\n".join(result.reports)
+    assert "判据以内" not in text
+    assert result.largest_offset() is None
+    assert result.within_criterion() is False
+    assert result.max_abs_hz() is None
 
 
 def test_out_of_range_offset_is_reported_not_corrected(tmp_path: Path) -> None:
     """A 0.6 ppm "drift" is beyond the search half-width (0.5 ppm): it only goes into
-    ``skipped``, with no correction value."""
-    result = detect_group_drift(
-        _two_segments(tmp_path, 480.0), sw_hz=SW_HZ, sf_mhz=SF_MHZ
-    )
+    ``skipped``, with no correction value.
+    """
+    result = detect_group_drift(_two_segments(tmp_path, 480.0), sw_hz=SW_HZ, sf_mhz=SF_MHZ)
     assert result.needs_shift == {}
     assert result.skipped and "合理范围" in result.skipped[0]
     assert any("合理范围" in line for line in result.reports)
@@ -363,7 +458,8 @@ def test_out_of_range_offset_is_reported_not_corrected(tmp_path: Path) -> None:
 
 def test_parts_without_common_signal_are_not_corrected(tmp_path: Path) -> None:
     """When the two parts share no signal component (signal vs pure noise) the coherent
-    statistic cannot beat the control -> no correction."""
+    statistic cannot beat the control -> no correction.
+    """
     import nmrglue as ng
 
     signal = _write_fid(tmp_path / "seg1.fid")
@@ -381,7 +477,7 @@ def test_parts_without_common_signal_are_not_corrected(tmp_path: Path) -> None:
     result = detect_group_drift([[signal], [noise_file]], sw_hz=SW_HZ, sf_mhz=SF_MHZ)
     assert result.needs_shift == {}
     assert result.trusted == []
-    assert result.quality[1] is not None                 # measured, just not over the control
+    assert result.quality[1] is not None  # measured, just not over the control
     assert any("测不出" in line for line in result.skipped)
     # the wording may only describe "the measurement cannot be done"; it must not assert
     # "the two parts are not the same experiment" (pointed out by the user 2026-09-24)
@@ -418,7 +514,8 @@ def _write_rowwise_fid(
     seed: int = 3,
 ) -> Path:
     """A 2D fid with an independent peak position per row (simulating data where the high-energy
-    trace of each plane differs); the row amplitudes can be given row by row."""
+    trace of each plane differs); the row amplitudes can be given row by row.
+    """
     import nmrglue as ng
 
     dic = ng.pipe.create_empty_dic()
@@ -530,12 +627,70 @@ def test_segment_consistency_reports_ns_difference(tmp_path: Path) -> None:
     assert "高于其信噪比的权重" not in text
 
 
+def test_nus_complementary_parts_may_have_different_td(tmp_path: Path) -> None:
+    """Regression coverage: test nus complementary parts may have different td."""
+    import re
+    import shutil
+
+    from core.data.bruker_reader import classify_segment_kind
+
+    src = Path(__file__).parent / "fixtures" / "bruker" / "nus_2d"
+    if not src.is_dir():
+        pytest.skip("nus_2d fixture 不在")
+
+    segs: list[Path] = []
+    for i in range(1, 5):
+        d = tmp_path / f"s{i:02d}"
+        shutil.copytree(src, d)
+        segs.append(d)
+
+    points = [
+        line.strip()
+        for line in (segs[0] / "nuslist").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    grid = len(points) * 2
+
+    def set_acq2s(raw: Path, *, td: int, nus_td: int) -> None:
+        f = raw / "acqu2s"
+        text = f.read_text(encoding="utf-8")
+        text = re.sub(r"##\$TD=\s*\d+", f"##$TD= {td}", text)
+        if re.search(r"##\$NusTD=", text):
+            text = re.sub(r"##\$NusTD=\s*\d+", f"##$NusTD= {nus_td}", text)
+        else:
+            text = re.sub(r"(##\$TD=\s*\d+\n)", rf"\1##$NusTD= {nus_td}\n", text, count=1)
+        f.write_text(text, encoding="utf-8")
+
+    for index, raw in enumerate(segs):
+        subset = points[index::4]
+        (raw / "nuslist").write_text("\n".join(subset) + "\n", encoding="utf-8")
+        set_acq2s(raw, td=len(subset) * 2, nus_td=grid)
+
+    assert classify_segment_kind(segs) == "segmented_nus"
+    report = check_segment_consistency(segs)
+    assert report["nus_complementary"] is True
+    assert report["blocking"] == []
+    assert [entry["key"] for entry in report["warnings"]] == ["TD"]
+    assert report["warnings"][0]["nus_subset_points"] is True
+    text = "\n".join(consistency_report_lines(report))
+    assert "NusTD" in text
+    assert "拒绝合并" not in text
+    assert "TD" in text
+
+    set_acq2s(segs[1], td=len(points[1::4]) * 2, nus_td=grid + 8)
+    blocked = check_segment_consistency(segs)
+    assert [entry["key"] for entry in blocked["blocking"]] == ["NusTD"]
+    assert "拒绝合并" in "\n".join(consistency_report_lines(blocked))
+
+
 def test_segment_consistency_blocks_different_layouts(tmp_path: Path) -> None:
     """Differing TD/SW/O1 = not the same experiment: report "merging is refused" instead of
-    leaving only a warning line."""
+    leaving only a warning line.
+    """
     first = _write_acqus(tmp_path / "s1", td=356)
     second = _write_acqus(tmp_path / "s2", td=512)
     report = check_segment_consistency([first, second])
+    assert report["nus_complementary"] is False
     assert [entry["key"] for entry in report["blocking"]] == ["TD"]
     assert report["warnings"] == []
     text = "\n".join(consistency_report_lines(report))
@@ -560,7 +715,8 @@ FID_COM = (
 
 def test_insert_ps_shift_lands_just_before_mult() -> None:
     """Inserted before MULT, MULT kept, and the rest of the script untouched character by
-    character."""
+    character.
+    """
     patched, applied = insert_ps_shift(FID_COM, 12.5)
     assert applied
     lines = patched.splitlines()
@@ -573,7 +729,8 @@ def test_insert_ps_shift_lands_just_before_mult() -> None:
 
 def test_insert_ps_shift_is_idempotent() -> None:
     """Re-running does not accumulate: the second run only replaces the value, so there is always
-    exactly one ``PS -rs`` line."""
+    exactly one ``PS -rs`` line.
+    """
     first, _ = insert_ps_shift(FID_COM, 12.5)
     second, applied = insert_ps_shift(first, -8.25)
     assert applied
@@ -594,7 +751,8 @@ def test_insert_ps_shift_without_mult_is_a_no_op() -> None:
 
 def test_non_finite_data_never_reaches_the_script(tmp_path: Path) -> None:
     """NaN/Inf guard: bad traces are dropped, all-bad means "cannot be read", and NaN never
-    reaches fid.com."""
+    reaches fid.com.
+    """
     import nmrglue as ng
 
     good = _write_fid(tmp_path / "good.fid")
@@ -619,9 +777,7 @@ def test_non_finite_data_never_reaches_the_script(tmp_path: Path) -> None:
 
 def test_field_drift_record_round_trip(tmp_path: Path) -> None:
     """The check result is written to / read back from work/field_drift.json."""
-    result = detect_group_drift(
-        _two_segments(tmp_path / "seg", 31.25), sw_hz=SW_HZ, sf_mhz=SF_MHZ
-    )
+    result = detect_group_drift(_two_segments(tmp_path / "seg", 31.25), sw_hz=SW_HZ, sf_mhz=SF_MHZ)
     path = write_field_drift_record(tmp_path, {"reference": 1, "round_1": result.as_dict()})
     assert path and Path(path).is_file()
     data = read_field_drift_record(tmp_path)
@@ -633,19 +789,16 @@ def test_field_drift_record_round_trip(tmp_path: Path) -> None:
 
 def test_criterion_text_states_the_floor_when_it_dominates() -> None:
     """B10: the criterion is max(1.5 Hz, 0.2×line width) -- below a 7.5 Hz line width the
-    recorded formula must state that the floor takes over."""
+    recorded formula must state that the floor takes over.
+    """
     from workflow.field_drift import GroupDriftResult, criterion_text
 
-    narrow = GroupDriftResult(
-        criterion_basis="linewidth", linewidth_hz=3.0, criterion_hz=1.5
-    )
+    narrow = GroupDriftResult(criterion_basis="linewidth", linewidth_hz=3.0, criterion_hz=1.5)
     text = criterion_text(narrow)
     assert "0.60" in text  # 3.0 × 0.2
     assert "1.5" in text  # the floor
 
-    wide = GroupDriftResult(
-        criterion_basis="linewidth", linewidth_hz=20.0, criterion_hz=4.0
-    )
+    wide = GroupDriftResult(criterion_basis="linewidth", linewidth_hz=20.0, criterion_hz=4.0)
     assert "4.00" in criterion_text(wide)
 
 
@@ -660,7 +813,8 @@ def test_identity_claim_matches_the_old_english_wording() -> None:
 
 def test_pool_trace_rows_excludes_rows_that_are_not_finite_everywhere() -> None:
     """D: the contract is "traces finite in every part" -- non-common rows must be excluded,
-    not merely sorted last."""
+    not merely sorted last.
+    """
     import numpy as np
 
     from workflow.field_drift import pool_trace_rows

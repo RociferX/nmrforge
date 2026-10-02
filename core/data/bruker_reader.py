@@ -31,7 +31,13 @@ from core.data.internal_data_model import (
     Experiment,
     SamplingMode,
 )
-from core.data.ser_layout import solve_row_count, solve_row_points
+from core.data.nus_reader import schedule_grid_shape
+from core.data.ser_layout import (
+    count_trailing_zero_rows,
+    effective_row_count,
+    solve_row_count,
+    solve_row_points,
+)
 from core.experiment.acquisition_mode_detector import hypercomplex_mult
 from core.experiment.bruker_parser import parse_dataset_params
 from core.experiment.experiment_classifier import classify
@@ -47,10 +53,10 @@ logger = logging.getLogger("nmrforge.core.data.bruker_reader")
 
 def is_data_directory(path: Path | str) -> bool:
     """A directory counts as a data directory when it holds any key Bruker data file
-    (non-data folders return False)."""
+    (non-data folders return False).
+    """
     p = Path(path)
     return any((p / name).is_file() for name in DATA_KEY_FILES)
-
 
 
 class BrukerDataError(Exception):
@@ -108,11 +114,11 @@ def _dim(experiment: Experiment, logical_axis: str) -> Dimension:
 
 def _read_complex(path: Path, dtype: np.dtype) -> np.ndarray:
     """Read real/imaginary interleaved data into a complex array (Bruker DQD storage; the element
-    type comes from DTYPE)."""
+    type comes from DTYPE).
+    """
     raw = np.fromfile(path, dtype=dtype)
     pairs = raw.reshape(-1, 2)
     return pairs[:, 0] + 1j * pairs[:, 1]
-
 
 
 def _check_size(path: Path, expected_bytes: int, is_nus: bool) -> None:
@@ -156,12 +162,13 @@ def read_data(experiment: Experiment) -> BrukerData:
     ndim = experiment.ndim
     data_file = experiment.source_path / ("ser" if ndim >= 2 else "fid")
     if not data_file.is_file():
-        raise BrukerDataError(tr(
-            "Missing data file {p0}: "
-            "{p1}",
-            p0=data_file.name,
-            p1=experiment.source_path,
-        ))
+        raise BrukerDataError(
+            tr(
+                "Missing data file {p0}: {p1}",
+                p0=data_file.name,
+                p1=experiment.source_path,
+            )
+        )
     acqus = experiment.acquisition_parameters.get("acqus", {})
     try:
         byterda = int(acqus.get("BYTORDA", 0) or 0)
@@ -215,24 +222,54 @@ def read_data(experiment: Experiment) -> BrukerData:
         )
     raw = _read_complex(data_file, dt)
 
+    #
+    #
+    trimmed_rows = rows
+    if not is_nus:
+        trailing = count_trailing_zero_rows(raw, row_points)
+        if trailing:
+            candidate = effective_row_count(size, row_values, value_bytes, trailing)
+            declared = _dim(experiment, "F1").td if ndim >= 2 else 0
+            if candidate < rows and (declared <= 0 or candidate >= declared):
+                trimmed_rows = candidate
+                logger.info(
+                    "ser has %d trailing all-zero row(s); using %d of %d row(s) "
+                    "(declared indirect TD %d, %s)",
+                    rows - candidate,
+                    candidate,
+                    rows,
+                    declared,
+                    experiment.dataset_id,
+                )
+            elif candidate < rows:
+                logger.debug(
+                    "ser has %d trailing all-zero row(s), but trimming would leave %d "
+                    "row(s) below the declared indirect TD %d; keeping %d row(s) (%s)",
+                    rows - candidate,
+                    candidate,
+                    declared,
+                    rows,
+                    experiment.dataset_id,
+                )
+
     if ndim == 2:
         f1 = _dim(experiment, "F1")
         f2 = direct
         m1 = _mult_for(_fnmode(experiment, "F1"))
-        matrix = raw.reshape(rows, row_points)
-        if not is_nus and rows != f1.td:
+        matrix = raw[: trimmed_rows * row_points].reshape(trimmed_rows, row_points)
+        if not is_nus and trimmed_rows != f1.td:
             logger.debug(
                 "ser row count %d differs from the declared indirect TD %d (%s)",
-                rows,
+                trimmed_rows,
                 f1.td,
                 experiment.dataset_id,
             )
         layout = {
             "F1": DimensionLayout(
-                td=f1.td, mult=m1, fnmode=_fnmode(experiment, "F1"), n_fids=rows
+                td=f1.td, mult=m1, fnmode=_fnmode(experiment, "F1"), n_fids=trimmed_rows
             ),
             "F2": DimensionLayout(
-                td=f2.td, mult=1, fnmode=_fnmode(experiment, "F2"), n_fids=rows
+                td=f2.td, mult=1, fnmode=_fnmode(experiment, "F2"), n_fids=trimmed_rows
             ),
         }
         return BrukerData(
@@ -246,6 +283,7 @@ def read_data(experiment: Experiment) -> BrukerData:
     m2 = _mult_for(_fnmode(experiment, "F2"))
     n_f1 = f1.td * m1
     n_f2 = f2.td * m2
+    rows = trimmed_rows
     if rows == n_f1 * n_f2:
         matrix = np.transpose(raw.reshape(n_f2, n_f1, row_points), (1, 0, 2))
     else:
@@ -258,15 +296,13 @@ def read_data(experiment: Experiment) -> BrukerData:
             n_f2,
             experiment.dataset_id,
         )
-        matrix = raw.reshape(rows, row_points)
+        matrix = raw[: rows * row_points].reshape(rows, row_points)
     layout = {
         "F1": DimensionLayout(td=f1.td, mult=m1, fnmode=_fnmode(experiment, "F1"), n_fids=n_f1),
         "F2": DimensionLayout(td=f2.td, mult=m2, fnmode=_fnmode(experiment, "F2"), n_fids=n_f2),
         "F3": DimensionLayout(td=f3.td, mult=1, fnmode=_fnmode(experiment, "F3"), n_fids=rows),
     }
-    return BrukerData(
-        matrix=matrix, layout=layout, data_file=data_file.name, byte_order=byte_order
-    )
+    return BrukerData(matrix=matrix, layout=layout, data_file=data_file.name, byte_order=byte_order)
 
 
 #: Relative consistency tolerance between ``SW_h`` and ``SW`` (ppm) x ``SFO1`` (2026-09-24).
@@ -286,7 +322,8 @@ SW_CONSISTENCY_TOL = 0.01
 
 def _as_float(value: Any) -> float:
     """Convert to float safely (a non-numeric value becomes NaN, which the caller treats as
-    missing)."""
+    missing).
+    """
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -434,16 +471,19 @@ def _build_dimensions(params: dict, ndim: int) -> list[Dimension]:
 
 def read_segments(paths: list[Path | str]) -> Experiment:
     """Read several datasets of one experiment into a multi-segment Experiment (their
-    parameters must match)."""
+    parameters must match).
+    """
     if len(paths) < 2:
         raise ValueError(tr("Multi-segment experiments require at least 2 dataset directories"))
     dirs = [Path(p).resolve() for p in paths]
     base = read_dataset(dirs[0])
     base.segments = dirs
+    segment_experiments = [base]
 
     def _effective_td(exp: Experiment) -> list[int]:
         """For NUS the indirect dimension uses NusTD (the sampling grid), otherwise the declared
-        TD."""
+        TD.
+        """
         td = [d.td for d in exp.dimensions]
         if exp.sampling.mode is SamplingMode.NUS:
             for index, filename in ((1, "acqu2s"), (2, "acqu3s")):
@@ -460,7 +500,8 @@ def read_segments(paths: list[Path | str]) -> Experiment:
 
     def _key(exp: Experiment) -> tuple:
         """Dimensionality/nuclei/TD must match exactly (the sweep width is compared separately with
-        a relative tolerance, 0.2.199-patch29cs)."""
+        a relative tolerance, 0.2.199-patch29cs).
+        """
         return (
             exp.ndim,
             [d.nucleus for d in exp.dimensions],
@@ -469,9 +510,11 @@ def read_segments(paths: list[Path | str]) -> Experiment:
 
     def _same_sw(a: Experiment, b: Experiment) -> bool:
         """Relative tolerance for the sweep width (0.2.199-patch29cs): different segments may write
-        SW_h with different precision (e.g. 11904.762 vs 11904.7619047619) while the physical sweep
+        SW_h with different precision (e.g. 11904.762 vs 11904.7619047619) while the physical
+        sweep
         width is the same; genuinely different experiments differ by far more than the 1e-4
-        relative tolerance."""
+        relative tolerance.
+        """
         if len(a.dimensions) != len(b.dimensions):
             return False
         for da, db in zip(a.dimensions, b.dimensions):
@@ -491,13 +534,48 @@ def read_segments(paths: list[Path | str]) -> Experiment:
                     p1=extra,
                 )
             )
+        segment_experiments.append(other)
     if base.sampling.mode is SamplingMode.NUS:
-        base.sampling.evidence.append(tr(
-            "multi-segment dataset ({p0} directories): the datasets and their sampling points were "
-            "merged and produced by the "
-            "backend",
-            p0=len(dirs),
-        ))
+        point_lists = [list(exp.sampling.nus_list or []) for exp in segment_experiments]
+        if all(point_lists):
+            combined_points = sorted({point for points in point_lists for point in points})
+            shape = schedule_grid_shape(base)
+            grid = math.prod(shape) if shape else 0
+            base.sampling.nus_list = combined_points
+            base.sampling.sampling_fraction = (
+                min(len(combined_points) / grid, 1.0) if grid > 0 else 0.0
+            )
+            base.sampling.evidence.append(
+                tr(
+                    "combined segmented NUS coverage: {p0} unique sampling point(s) across "
+                    "{p1} segment(s) / {p2} full-grid point(s) = {p3:.1%}",
+                    p0=len(combined_points),
+                    p1=len(segment_experiments),
+                    p2=grid,
+                    p3=base.sampling.sampling_fraction,
+                )
+            )
+        else:
+            base.sampling.nus_list = []
+            base.sampling.sampling_fraction = 0.0
+            base.sampling.schedule_type = "params"
+            base.sampling.schedule_file = ""
+            base.sampling.schedule_source = ""
+            base.sampling.evidence.append(
+                tr(
+                    "combined segmented NUS coverage is unknown because at least one segment "
+                    "has no valid sampling schedule"
+                )
+            )
+        base.sampling.evidence.append(
+            tr(
+                "multi-segment dataset ({p0} directories): the datasets and their sampling "
+                "points were "
+                "merged and produced by the "
+                "backend",
+                p0=len(dirs),
+            )
+        )
     return base
 
 
@@ -506,15 +584,14 @@ def discover_segment_dirs(container: Path | str) -> list[Path]:
     the segments of one segmented acquisition.
 
     Different from a batch import: a batch import creates a separate entry for every independent
-    dataset, while these are the segments into which one experiment was split by acquisition time
+    dataset, while these are the segments into which one experiment was split by acquisition
+    time
     and are merged into a single data entry (chosen explicitly by the caller, never guessed).
     """
     root = Path(container)
     if not root.is_dir():
         raise ValueError(tr("directory does not exist: {p0}", p0=root))
-    return sorted(
-        p for p in root.iterdir() if p.is_dir() and (p / "acqus").is_file()
-    )
+    return sorted(p for p in root.iterdir() if p.is_dir() and (p / "acqus").is_file())
 
 
 def classify_segment_kind(paths: list[Path | str]) -> str:
@@ -523,7 +600,8 @@ def classify_segment_kind(paths: list[Path | str]) -> str:
     Returns:
     - "repeat_uniform": conventional (uniform) sampling with identical sampling parameters ->
       repeated experiments to be summed for noise reduction;
-    - "repeat_nus": NUS with the same sampling-point set in every segment -> repeated experiments
+    - "repeat_nus": NUS with the same sampling-point set in every segment -> repeated
+    experiments
       to be summed;
     - "segmented_nus": NUS with different sampling-point sets -> segments (the complementary
       points complete the grid); a missing nuslist or mixed/uncertain sampling modes are
@@ -549,7 +627,8 @@ def classify_segment_kind(paths: list[Path | str]) -> str:
 def read_dataset_container(path: Path | str) -> tuple[Experiment, list[Path]]:
     """Read a dataset container: a single Bruker directory is read directly (segments=[]); a
     container directory (subdirectories that directly hold acqus) is read as segments
-    (read_segments checks that they match)."""
+    (read_segments checks that they match).
+    """
     p = Path(path)
     if (p / "acqus").is_file():
         return read_dataset(p), []
@@ -617,11 +696,12 @@ def read_dataset(path: Path) -> Experiment:
     """Read one Bruker dataset directory and build an Experiment (metadata only, no semantics)."""
     dataset_dir = path
     if not (dataset_dir / "acqus").is_file():
-        raise ValueError(tr(
-            "Not a Bruker dataset directory (acqus is "
-            "missing):{p0}",
-            p0=dataset_dir,
-        ))
+        raise ValueError(
+            tr(
+                "Not a Bruker dataset directory (acqus is missing):{p0}",
+                p0=dataset_dir,
+            )
+        )
     params = parse_dataset_params(dataset_dir)
     acqus = params.get("acqus", {})
     ndim = _detect_ndim(params, acqus)
@@ -634,7 +714,5 @@ def read_dataset(path: Path) -> Experiment:
         acquisition_parameters=params,
     )
     experiment.sampling = detect(experiment)
-    experiment.experiment_type = classify(
-        experiment, user_title=_pdata_title(dataset_dir)
-    )
+    experiment.experiment_type = classify(experiment, user_title=_pdata_title(dataset_dir))
     return experiment
