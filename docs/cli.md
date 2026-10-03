@@ -7,7 +7,9 @@ implementation as the desktop application. It does not require Qt:
 python -m nmrforge_api --help
 ```
 
-Install from source or use a released package as described in
+The current CLI contract is API v1.1. Install from a source checkout containing that contract;
+the software version remains 1.0.2 and previously released AppImages do not update automatically.
+See
 [Installation](installation.md). Processing requires separately installed NMRPipe; NUS
 reconstruction also requires SMILE.
 
@@ -40,6 +42,15 @@ explicitly and independently detects peaks on each candidate spectrum under the 
 threshold.
 
 ## `sweep` options
+
+Reference caches are reused only when the complete normalized processing input matches.
+Changed inputs or a missing legacy fingerprint require `reference --force` to rebuild.
+`--rebuild-peak-tables` rebuilds tables without rerunning reference processing.
+Reference construction accepts repeatable logical-axis CAR overrides such as
+`--carrier-ppm F1=118.0` (ppm). Without an override, the AUTO conversion value is preserved,
+or the parsed Bruker carrier is used by the fallback converter.
+Different `--study` and `--reference` roots are currently rejected explicitly; sweep results
+are never silently written into a separate read-only reference root.
 
 ```text
 --study STUDY                     study root directory

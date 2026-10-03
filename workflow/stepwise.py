@@ -258,6 +258,9 @@ def generate_fid(
     """Step 2: Convert Bruker raw data to NMRPipe fid (independent phase)."""
     experiment = _read_experiment(manager, exp_id, data_id)
     data_entry = _require_data(manager, exp_id, data_id)
+    from core.data.sweep_width import apply_sweep_width_overrides
+
+    experiment = apply_sweep_width_overrides(experiment, params)
     data_dir = Path(data_entry.raw_dir) if data_entry.raw_dir else Path(data_entry.source)
     if not data_dir.is_absolute():
         data_dir = manager.root / data_dir
@@ -436,6 +439,9 @@ def _generate_spectrum_impl(
     experiment = _read_experiment(manager, exp_id, data_id)
     params = dict(params or {})
     route = str(params.pop("phase_route", _default_phase_route(experiment)))
+    from core.data.sweep_width import apply_sweep_width_overrides
+
+    experiment = apply_sweep_width_overrides(experiment, params)
     # 0.2.199-patch29hc:"data type/Peak symbol"Prioritize automatic classification/Default. in data
     # annotation.
     _apply_note_overrides(manager, exp_id, data_id, experiment)

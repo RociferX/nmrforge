@@ -321,19 +321,22 @@ def test_patch_fid_com_rewrites_a_stale_indirect_sweep_width(
     assert any("ySW" in w for w in warnings)
 
 
-def test_sweep_width_audit_covers_only_the_decided_axes(tmp_path: Path, bruker_dir: Path) -> None:
-    """The record/log lists only dimensions whose value was re-judged (or whose SW_h is
-    missing); a self-consistent direct dimension does not appear.
+def test_sweep_width_audit_covers_all_axes_with_consistency_ratio(
+    tmp_path: Path, bruker_dir: Path,
+) -> None:
+    """The audit includes every axis, including consistent direct-dimension values.
     """
     exp = read_dataset(_stale_indirect_sweep_width(tmp_path, bruker_dir))
     entries = sweep_width_audit(exp)
-    assert [entry["axis"] for entry in entries] == ["F1"]
-    assert entries[0]["source"] == "ppm_x_sfo"
-    assert entries[0]["sw_hz_raw"] == 2000.0
-    assert entries[0]["sw_ppm"] == 30.0
-    assert entries[0]["sw_hz_used"] == pytest.approx(1824.5346196833, rel=1e-9)
+    assert {entry["axis"] for entry in entries} == {"F1", "F2"}
+    indirect = next(entry for entry in entries if entry["axis"] == "F1")
+    assert indirect["source"] == "ppm_x_sfo"
+    assert indirect["sw_hz_raw"] == 2000.0
+    assert indirect["sw_ppm"] == 30.0
+    assert indirect["sw_hz_used"] == pytest.approx(1824.5346196833, rel=1e-9)
+    assert indirect["consistency_ratio"] == pytest.approx(2000 / 1824.5346196833)
     lines = sweep_width_log_lines(exp)
-    assert lines == [entries[0]["note"]]
+    assert lines == [indirect["note"]]
     assert "F2" not in lines[0]
 
 

@@ -1,4 +1,4 @@
-# 01 · Positioning and terminology (v1.0, specification finalised 2026-09-13)
+# 01 · Positioning and terminology (v1.1, 2026-10-03)
 
 ## What is it
 
@@ -19,7 +19,7 @@ It reuses NMRForge's own processing and interpretation caliber:
 
 ```text
 Raw data (A/B...)
-    ↓  reference workflow (auto-optimised): reference script + one parabolic reference peak table
+    ↓  independent reference workflow per condition: reference script + that condition's parabolic peak table
 Reference workflow
     ↓  user parameter combination table: one workflow_id per row (W0001, W0002, ...)
 User-defined workflow ensemble

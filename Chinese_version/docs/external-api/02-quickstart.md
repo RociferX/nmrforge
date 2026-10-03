@@ -1,4 +1,4 @@
-# 02 · 快速上手(v1.0)
+# 02 · 快速上手(v1.1)
 
 ## 1. 两个模式(2026-09-14 起)
 
@@ -6,7 +6,7 @@
 处理),组合模式**必须显式指定参考**。
 
 ```python
-from nmrforge_api import run_reference_study, run_combination_study
+from nmrforge_api import run_reference_study, run_combination_study, run_parameter_study
 
 # 1) 参考模式:导入数据 + 自动优化参考谱/脚本 + 一张参考峰表
 reference = run_reference_study(
@@ -33,7 +33,7 @@ for run in result.runs:
 ```
 
 - 参考模式只建参考(1 个脚本 + 1 张峰表),不跑任何组合;选峰阈值在这里确定,
-  之后**全程锁定**(组合表里写阈值键直接报错,要改阈值请重建参考);
+  之后**全程锁定**(组合表里写阈值键直接报错,要改阈值须显式 `force=True` 重建参考);
 - 组合模式不生成参考:参数基底取参考的有效参数,组合表只覆盖它显式指定的键;
   参考不存在或峰表缺失 → `ReferenceError`(提示先跑参考模式);
 - **组合独立选峰**(2026-09-14):每个组合在自己的候选谱上用参考的锁定阈值独立
@@ -56,6 +56,7 @@ for run in result.runs:
 result = run_parameter_study(
     "~/studies/titration",
     datasets={"A": "~/data/titr/apo", "B": "~/data/titr/holo"},
+    carrier_ppm={"F1": 120.0, "F2": 4.7},  # 参考转换载频(ppm);二维 F2=x, F1=y
     combos=[{"zero_fill": 2, "window.F1.off": 0.45}],
 )
 ```

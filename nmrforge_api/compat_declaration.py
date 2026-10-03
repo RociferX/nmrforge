@@ -23,21 +23,22 @@ from typing import Any
 
 #: declared behaviour level (see the module doc; meaning matches nmrforge_api.compat)
 DECLARATION: dict[str, Any] = {'schema': 'nmrforge_api.compat.declaration.v1',
- 'digest': '74335b10397d030dc188812e1790559468ba97e9bd6b21bbcb4c0dc53a13ced6',
- 'token_digest': 'cba89335b1c3769d602af0c50e3fa67e3b411457cc913a43d04928b5579361e3',
- 'compat_level': 'behavior_changed',
+ 'digest': '5d69175b518311949fb24a4f6b0358975a413be104a2f6ec898dbe721d4cb5b8',
+ 'token_digest': '38738efdce266c5939042193d7c492d1d52694fdb68adfa16b15d19f01a87d89',
+ 'compat_level': 'contract_changed',
  'affected': ['reference',
               'processing',
               'sweep_detection',
               'localization',
               'records',
               'api_surface',
+              'cli',
               'qc'],
- 'updated': '2026-10-02',
- 'note': 'Fix peak axes, signs, detection and safe reference filtering',
+ 'updated': '2026-10-03',
+ 'note': 'API v1.1 freezes independent reference and 38-column audit contracts.',
  'golden': {'name': 'conformance_v1',
             'spectrum_sha256': '382b330926da93d856feef40ca33c2df1eec21b61e50db471bdf7aa4bb2fb311',
-            'peak_table_sha256': 'ba2b7271ed56a8bd30c751066d55af258117f35adae18ed6b6973042b93b68bf',
+            'peak_table_sha256': 'e9ef45f2cae32bc580fc1bdeea1928ceb8406154848f8aca3c4558285e532242',
             'n_peaks': 3}}
 
 __all__ = ["DECLARATION"]

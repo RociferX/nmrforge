@@ -26,14 +26,14 @@ nmrForge 读取一个 Bruker 数据集,判定它是什么实验、用了哪种�
 仓库:<https://github.com/RociferX/nmrforge>
 Zenodo 概念 DOI（全部归档版本）：[10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415)。版本专用 DOI 只对应其归档快照。
 
-> 本页说明 **1.0.2 源码**与桌面/Python/CLI 接口（`nmrforge_api`，契约版本 1.0）。
+> 本页说明 **1.0.2 源码**与桌面/Python/CLI 接口（`nmrforge_api`，当前源码契约版本 1.1，2026-10-03）。
 > 已发布的二进制以 GitHub Releases 为准。回归覆盖见测试套件，行为变化按 compat 流程声明
 > (`same/additive/behavior_changed/contract_changed` 四级)。
 
 > ### 桌面程序与 Python/CLI 接口
 >
 > 桌面程序与 `nmrforge_api` 是同一源码树中的受支持接口。Python API 单独版本化
-> (`API_VERSION = "1.0"`)，并提供兼容清单识别行为与契约变化。GitHub Releases 中的
+> (`API_VERSION = "1.1"`)，并提供兼容清单识别行为与契约变化。旧 AppImage 1.0.2 不包含 v1.1 契约。GitHub Releases 中的
 > AppImage 对应特定版本和源码提交；更新源码不会自动更新已发布的二进制。
 >
 > 跨版本比较数值前，请查看兼容清单和发布说明，并结合自己的数据与实验验证结果。
@@ -190,7 +190,7 @@ python -m nmrforge_api reference --study ./study
 python -m nmrforge_api peaks --study ./study
 
 # 4. 跑一组参数
-python -m nmrforge_api sweep --study ./study --grid grid.yaml
+python -m nmrforge_api sweep --study ./study --reference ./study --grid grid.yaml
 ```
 
 ## GUI 用法(A 线 —— 成熟)
@@ -214,39 +214,36 @@ nmrforge-viewer                 # 可编辑安装之后
 python -m viewer
 ```
 
-## 命令行用法(B 线 —— 仍在变)
+## 命令行用法(B 线 —— 当前 API 契约 v1.1)
 
 ```bash
 python -m nmrforge_api --help
 python -m nmrforge_api init       --study DIR --dataset BRUKER_DIR
 python -m nmrforge_api reference  --study DIR
 python -m nmrforge_api peaks      --study DIR
-python -m nmrforge_api sweep      --study DIR --grid grid.yaml
+python -m nmrforge_api sweep      --study DIR --reference DIR --grid grid.yaml
 python -m nmrforge_api report     --study DIR
 python -m nmrforge_api status     --study DIR
 ```
 
-## Python API(B 线 —— 仍在变)
+## Python API(B 线 —— 当前契约 v1.1)
 
 ```python
-from nmrforge_api import (
-    position_uncertainty,
-    run_parameter_study,
-    uncertainty_summary,
-)
+from nmrforge_api import run_reference_study, run_combination_study
 
-result = run_parameter_study(
+run_reference_study(
     "~/studies/hsqc_params",       # 研究根(可断点续跑)
     "~/data/bmr12345/1",           # 解压后的 Bruker 数据集目录
+)
+result = run_combination_study(
+    "~/studies/hsqc_params",
     axes={"zero_fill": [1, 2, 4], "window.F1.off": [0.35, 0.45, 0.55]},
 )
 print(result.summary["status_counts"])      # 这次运行做了什么(执行摘要)
 
-# 统计量是**独立**的一步:把一个 workflow 各次运行里的同一个峰配起来,
-# 得到峰位不确定度(CSP 判据下限)。
-# ``StudyResult.summary`` 只报执行结果,不含统计量。
-by_run = {run.workflow_id: run.measurements for run in result.runs}
-print(uncertainty_summary(position_uncertainty(by_run))["delta_std_ppm"])
+# API 不匹配不同条件或不同谱的峰，也不计算统计量。
+# 下游分析应先按用户定义的标准完成峰匹配，再独立进行统计；
+# 不要把独立选峰的 runs 直接解释为 CSP 检测下限。
 ```
 
 脚本化 API 另有独立文档:[docs/external-api/README.md](docs/external-api/README.md);
@@ -302,7 +299,7 @@ python examples/quickstart.py ./example_data/hsqc_2d
 - 本机 wheel/AppImage 构建留下的 `build/` 目录不进仓库(已被 .gitignore 忽略),
   不要在 `build/` 里跑测试;
 - 早期版本里 MATLAB 风格的分析功能(HSQC CSP 分析)已在 2026-09 移除;
-- Python API 尚未冻结;破坏性变更记录在[发布说明](https://github.com/RociferX/nmrforge/releases)里。
+- Python API 当前契约为 v1.1;破坏性变更记录在[发布说明](https://github.com/RociferX/nmrforge/releases)里。
 
 ## 文档
 

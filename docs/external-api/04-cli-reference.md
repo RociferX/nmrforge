@@ -1,4 +1,4 @@
-# 04 · Command line reference (v1.0)
+# 04 · Command line reference (v1.1)
 
 Entry:`python -m nmrforge_api <Order> --study <Research roots>`.
 Public parameter:`--study`(required), `--name`(new research name), `--condition <A|B|…>`.
@@ -21,6 +21,9 @@ The same condition label cannot be bound to two pieces of data (error reported, 
 python -m nmrforge_api reference --study ~/studies/s1
 python -m nmrforge_api reference --study ~/studies/s1 --condition A --force
 python -m nmrforge_api reference --study ~/studies/s1 --params auto.yaml
+python -m nmrforge_api reference --study ~/studies/s1 --condition-params condition-overrides.json
+python -m nmrforge_api reference --study ~/studies/s1 --carrier-ppm F1=120.0 --carrier-ppm F2=4.7 --force
+python -m nmrforge_api reference --study ~/studies/s3 --carrier-ppm F3=4.7 --force
 ```
 
 `--params` is the input override of the automatic process (YAML/JSON); `--phase-route` explicitly specifies the
@@ -29,6 +32,15 @@ phase route; `--force` rebuilds; `--direct-range HIGH_PPM LOW_PPM` sets the **di
 reference. The source is recorded in `reference.json.direct_range.source` (`explicit` / `params` / `default`).
 Output: the frozen spectrum and the reference script path with SHA-256, the phase source, the sampling method, and
 whether this condition supports parameter combinations.
+
+`--condition-params` takes a JSON object keyed by condition; per-condition values override common
+parameters per key. For carriers, `--carrier-ppm` is repeatable, and a repeated F axis is an error.
+Explicit CLI carrier values override the common params per axis; condition-specific carrier values
+then override them per axis.
+
+Reference reuse requires a complete normalized input fingerprint match; a mismatch or an old
+reference without a valid fingerprint raises an error and requires explicit --force (no automatic
+rebuild). In multi-condition runs all references are checked before the engine starts.
 
 `--rebuild-peak-tables` recomputes only the parabolic reference peak table from the existing frozen
 spectrum and `reference.list` (the spectrum and the peak identities are untouched and their

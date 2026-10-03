@@ -49,13 +49,13 @@ from ui_support.i18n import tr
 
 STUDY_DIRNAME = "study"
 STUDY_STATE_FILENAME = "study.json"
-# Public API contract version (single definition point, 2026-09-22): nmrforge_api is
-# released as its **first version**, so this goes from "0.2" to "1.0". It is the
-# **contract** version, not the release version (that one is core.__version__). It is
-# written into study.json, records/manifest.json and records/workflows.json, so it must
-# have exactly one definition -- __init__.py and records.py used to carry their own
-# literals, and a bump could silently miss one of them.
-API_VERSION = "1.0"
+# Public API contract version (single definition point, 2026-10-03): v1.1 fixes the
+# independent-reference model, the 38-column peak table, and the complete cache-input
+# contract. v1.0/0.2 callers should follow the migration notes for columns, audits, and
+# reference caches. This is the **contract** version, not the package version (see
+# `core.__version__`); it is written into study.json, records/manifest.json, and
+# records/workflows.json, so this is its only definition.
+API_VERSION = "1.1"
 #: order in which condition labels are assigned (A/B/C...)
 CONDITION_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 

@@ -60,6 +60,8 @@ class PeakDetectionParams:
     # of the edges of axis 0 (top and bottom) -- axis peaks are the horizontal band at the
     # very top/bottom (indirect-dimension signal that never evolved lands on the F1 edge).
     edge_margin: int = 0
+    # Targeted localisation can detect integer candidates, then refine a selected subset.
+    refine: bool = True
 
 
 def _refined_index(value: np.ndarray, idx: np.ndarray, axis: int) -> float:
@@ -148,7 +150,10 @@ def _candidates(
         val = float(real[tuple(idx)])
         snr_value = abs(val) / sigma if sigma > 0 else 0.0
         if snr_value >= params.min_snr:
-            position = tuple(_refined_index(value, idx, a) for a in range(real.ndim))
+            position = tuple(
+                _refined_index(value, idx, a) if params.refine else float(idx[a])
+                for a in range(real.ndim)
+            )
             peaks.append(
                 Peak(
                     position=position,

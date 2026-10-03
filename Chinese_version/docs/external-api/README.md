@@ -1,6 +1,6 @@
 # nmrforge_api 对外文档(API 契约 1.0)
 
-> `nmrforge_api` 是公开、版本化且不依赖 Qt 的脚本接口(`API_VERSION = "1.0"`)。
+> `nmrforge_api` 是公开、版本化且不依赖 Qt 的脚本接口(`API_VERSION = "1.1"`,2026-10-03 当前源码契约)。
 > 跨版本比较数值前，请查看 `compat_manifest()` 中的行为指纹、兼容级别与受影响步骤。
 > 已发布 AppImage 对应特定源码版本；更新源码不会自动更新它。
 
@@ -38,7 +38,7 @@
 | [10-troubleshooting.md](10-troubleshooting.md) | 常见错误、warning 处理、断点续跑 |
 | [examples/](examples/) | 可运行示例(一步式/分步/只测量) |
 
-契约版本:`API_VERSION = "1.0"`；公开入口和输出字段见本组文档。
+契约版本:`API_VERSION = "1.1"`；公开入口和输出字段见本组文档。旧 AppImage 1.0.2 不包含 v1.1 API 契约。
 
 ## 安装与运行
 

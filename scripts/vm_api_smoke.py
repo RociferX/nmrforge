@@ -1,16 +1,27 @@
-"""VM Real machine smoke: run nmrforge_api with real NMRPipe (reference + parameter combination).
-Purpose: Verify the end-to-end link of the external interface on real NMRPipe + real Bruker data
-(Reference spectrum/refer to script freeze -> two reference peak tables -> parameter combination
--> candidate spectrum -> two kinds of positioning -> two unified peak tables -> records), and
-print the key results into one line ``RESULT_JSON``. Usage (VM, the data path is given by
-environment variables or parameters):: nmrforge/bin/python scripts/vm_api_smoke.py --data
-~/nmr_corpus_work/bmr6980/n15hsqc.fid \\ --peaks
-~/nmr_corpus_work/bmr6980/reference_peaks.csv The default parameter combination is
-``window.F1.off = [0.35, 0.45] x zero_fill = [1, 2]``(4 workflows). Two conditions (A/B)
-example::... scripts/vm_api_smoke.py --fresh \\ --data-a <apo directory > --data-b <holo
-directory > \\ --combos combos.csv NUS The same is true for 2D data, just replace the axis with
-SMILE parameter::... scripts/vm_api_smoke.py --fresh --data <2D NUS directory > \\ --axes
-'{"nsigma": [3, 5, 7], "thresh": [0.95]}'.
+"""VM smoke test for nmrforge_api with real NMRPipe and Bruker data.
+
+It verifies the end-to-end external API flow: reference spectrum and script, one parabolic
+reference peak table per condition, parameter combinations, candidate spectra, independent
+peak picking and parabolic localization, one candidate table per workflow and condition, and
+records. Key results are printed on one ``RESULT_JSON`` line.
+
+Run on a VM with data paths supplied through environment variables or arguments::
+
+    nmrforge/bin/python scripts/vm_api_smoke.py \
+        --data ~/nmr_corpus_work/bmr6980/n15hsqc.fid \
+        --peaks ~/nmr_corpus_work/bmr6980/reference_peaks.csv
+
+The default grid is ``window.F1.off = [0.35, 0.45] × zero_fill = [1, 2]`` (four workflows).
+For two conditions (A/B)::
+
+    ... scripts/vm_api_smoke.py --fresh \
+        --data-a <apo directory> --data-b <holo directory> \
+        --combos combos.csv
+
+For 2D NUS data, use SMILE parameters instead::
+
+    ... scripts/vm_api_smoke.py --fresh --data <2D NUS directory> \
+        --axes '{"nsigma": [3, 5, 7], "thresh": [0.95]}'
 """
 
 from __future__ import annotations
@@ -72,8 +83,8 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=None,
         help=(
-            "peak picking excludes the physical width of the edge axis peak "
-            "(ppm; default = 3 x the axis nuclide line width)"
+            "Manually override the edge-exclusion width in ppm. By default, screening uses "
+            "acquisition priors and edge-candidate evidence rather than a fixed 3x linewidth band."
         ),
     )
     parser.add_argument("--max-runs", type=int, default=8)

@@ -1,8 +1,9 @@
-# 07 · 方法与 QC 口径(v1.0)
+# 07 · 方法与 QC 口径(v1.1)
 
-> 本页描述软件**执行**了什么、留下了哪些 QC 记录。任何跨组合/跨条件的统计
-> (统计推断与科学结论)都不在本软件范围内,由使用者自己的分析基于
-> 统一峰表计算。
+> API 只做两步：自动优化并冻结参考谱/参考峰表；按用户修改的参数生成新谱/新峰表，
+> 连同脚本、参数和 QC 交给下游。它不负责建立谱或峰表之间的对应关系，
+> 不做跨谱匹配、统计推断或显著性判断。既有问题及本轮修复记录见
+> [限制与路线图](09-limitations-and-roadmap.md)。
 
 ## 7.1 参考工作流
 
@@ -13,11 +14,13 @@
 3. 参考峰位:软件在参考谱上自动选峰(阈值 `sigma_multiplier` 在**生成参考时**
    可由外部指定,缺省 35σ;API `sigma_multiplier=` / CLI `peaks --sigma`),
    轴峰按采集先验与原始边缘证据保守筛查（显式边距为人工覆盖），或使用外部峰表；
-   峰按行序获得稳定身份 `R0001…`;
+   每个条件独立建立自动参考峰表并获得条件内 `R0001…` 编号。外部峰表只应用于主条件；
+   条件内编号不证明跨条件或跨谱峰对应。
    **阈值随参考一起冻结**:后续所有 workflow 只能沿用参考的阈值,给不同阈值
    会报错(要换阈值须重建参考);
-4. 在同一条参考谱上做**三点抛物线**亚像素定位(唯一方法,2026-09-26 起),
-   写一张参考峰表 `reference_peak_table_parabolic.csv`;
+4. 参考重定位使用联合窗口，只接受局部真峰且要求 `min_snr >= 3`；对测得峰做
+   **三点抛物线**亚像素定位(唯一方法,2026-09-26 起)，写一张参考峰表
+   `reference_peak_table_parabolic.csv`;
 5. 参考只作参数扰动的基准,**不声称全局最优**。
 
 ## 7.2 参数扰动(workflow)
@@ -28,7 +31,8 @@
   实际值写进 `phase.<轴>.actual_p0/actual_p1`;
 - 同一个条件内 fid 只转换一次(参考运行),候选谱写
   `study/workflows/<id>/<条件>/`,不替换活动谱;
-- 相位/窗函数/填零/基线/NUS 参数全部按表执行,所有影响结果的参数三层落档。
+- 受支持的相位/窗函数/填零/基线/NUS 参数按表执行，参数三层落档。
+  未知键目前不都硬性拒绝，不能只凭传参成功就判断参数已生效；应核对实际脚本与记录。
 
 ## 7.2b 采样路由(满采样 → uniform)
 
@@ -43,22 +47,27 @@
 
 | 方法 | 做法 | 适用范围 |
 | --- | --- | --- |
-| `parabolic` | 在候选峰附近的窗口内取 \|强度\| 极值,再对每个参与轴做 ±1 点三点抛物线亚像素 refine | 任意维 |
+| `parabolic` | 参考峰在联合窗口内通过局部真峰与 `min_snr >= 3` 检查后定位；组合在本谱独立检出时做 ±1 点三点抛物线亚像素定位 | 输出 38 列，记录 F1/F2/F3 逻辑轴 ppm、核名与等效 FWHM；H/N 坐标和线宽仅在对应核唯一时作为兼容别名 |
 
 **算法选择已取消**(2026-09-26,用户需求⑦):二维高斯最小二乘拟合
 (`core.peaks.gaussian_fit`)与它的 API/CLI/GUI 表面整体删除,峰定位只剩这一种
 方法。`localization` 只接受 `"parabolic"`;请求 `"gaussian"` / `"both"` 抛
-`SweepError` / `LocalizationError` / `MeasurementError`,不静默降级。
+公开入口的 `SweepError` / `MeasurementError`；内部 `LocalizationError` 不是包根导出的
+公开异常。不会静默降级。
 
 - **参考模式**:对参考峰表里的每个峰做抛物线定位,写一张
   `reference_peak_table_parabolic.csv`;
 - **组合模式**(2026-09-14):每个组合在**自己的候选谱**上先用参考锁定阈值
   独立选峰,再做抛物线定位,峰表里 `reference_peak_id` 留空——不同组合之间的
   峰匹配由使用者完成;
+- **targeted localization**:目标峰做抛物线精修；非目标峰保留检测整数格点位置，
+  `localization_method=none`，定位 QC 列为空/NaN；这不表示检出失败。未检测到局部峰的
+  参考身份行也以实际方法 `none` 表示;请求方法在 `localization_requested` 中单列。
 - **定位 QC 仍逐峰落表**:`fit_success`/`FWHM_H`/`FWHM_N`/`boundary_hit` 由抛物线
   给出实数(等效线宽 `FWHM = 2.3548σ`,`σ² = H/(2|a|)`;顶点偏移贴 ±0.5 点 =
-  `boundary_hit`);`fallback`/`fallback_reason` 保留在 schema 里
-  (抛物线是确定性闭式解,正常不失败,字段留档是为了记录结构稳定)。
+  `boundary_hit`);定位失败使用独立 `failure_reason`;`fallback`/`fallback_reason` 保留在 schema 里
+  这些只是局部三点模型的数值诊断，不证明峰真实、线型正确或峰不重叠。
+  等效线宽不等于实测半高全宽；QC 对正、负峰按峰极性对称计算。
 
 ## 7.4 选峰阈值与边距(物理宽度口径)
 
@@ -75,15 +84,15 @@
 - 组合模式**没有** `max_peaks`,也没有「参考峰位搜索窗口」(不跟踪参考峰表);
   参考模式/低层 `measure_peak_positions` 仍保留 `window_ppm`(缺省 1.5×线宽)
   与 `window_pts` 逃生口;
-- `window_ppm`/`window_pts` 只是**上限**:缺省 `exclusive_windows=True` 时,
-  每个参考峰的实际搜索区间再按相邻参考峰位置的中点逐轴切分,只在自己那一格
-  里取极值——否则窗口宽于相邻峰间距时,两条参考记录会被重定位到同一个格点,
-  参考峰表出现只有 `reference_peak_id` 不同的同坐标重复行(2026-09-19 修;实机上一套
-  真实 2D HSQC 的 parabolic 表 253 行只有 184 个唯一坐标)。`exclusive_windows
-  =False` 可复现旧口径;
+- `window_ppm`/`window_pts` 定义物理搜索窗;联合多维候选 ownership 不能由逐轴边界表示。
+  真实搜索边界按逻辑 F 轴记录于 `reference.peak_localization.search_windows`
+  (`search_bounds_by_axis`,F 轴与 low/high 整数存储点)。所有权竞争另记
+  `candidate_ownership_conflict`;峰表兼容字段 `cell_low_*` / `cell_high_*` / `cell_edge`
+  一律为 NaN,不代表物理窗或 Voronoi 边界。
 - 高斯 ROI 与拟合预算(`gaussian_roi_*` / `gaussian_max_nfev`)已随高斯拟合删除
   (2026-09-26):三点抛物线只需要局部 3 点,没有 ROI 与迭代预算这回事;
-- 结构性点数(局部极大 3 点邻域、抛物线 ±1 点)不换算——它们与分辨率无关。
+- 结构性点数(局部极大 3 点邻域、抛物线 ±1 点)保持不变；其覆盖的物理宽度随点距变化，
+  因而不能据此声称定位误差与零填充或分辨率无关。
 
 ### 峰高、背景与符号口径
 
@@ -114,15 +123,15 @@
 
 | 字段 | 含义 |
 | --- | --- |
-| `detected` | 该谱上是否检到该峰(组合模式:表里只有检出的峰 → 恒 true;参考峰表
-跟踪模式下未测到的参考峰会保留行且 `detected=false`) |
+| `detected` | 组合表只含按阈值检出的峰，恒 true；参考表保留未检测到的身份行，并依据联合窗口中的局部真峰及 `min_snr >= 3` 证据标记是否检测到 |
 | `intensity` / `SNR` | 极值处相对全局中位基线的带符号峰高与 `|峰高|/σ`(σ = 该谱 robust MAD 噪声) |
-| `fit_success` / `FWHM_H` / `FWHM_N` / `boundary_hit` | 三点抛物线的定位 QC:抛物线给**等效线宽**(`FWHM = 2.3548σ`,`σ² = H/(2|a|)`,`boundary_hit` = 顶点偏移贴 ±0.5 点);P3-7(2026-09-19)起写实数 |
-| `duplicate_localization` | 该行与同表另一行同坐标(ppm 精确到 1e-6,P2-5):重复组每行都标 true、不删行;`peak_localization.parabolic.n_duplicate` 记多出来的行数,`run.json.warnings` 另留 `duplicate_localization` 码 |
-| `fallback` / `fallback_reason` | 是否回退与原因 |
-| `cell_low_*` / `cell_high_*` / `cell_edge` / `intensity_ratio_vs_picked` / `shift_vs_picked_*` | 参考表的逐峰**格/身份 QC**(P1-3):最终搜索区间(闭区间,数据轴格点)、极值是否被邻居的格截断、**|测得强度| ÷ |身份表 `Height`|**、measured − picked(ppm);**组合表一律写 NaN**(sweep 是「选峰即定位」,没有这一步) |
+| `fit_success` / `FWHM_H` / `FWHM_N` / `boundary_hit` | 三点抛物线的定位 QC:抛物线给**等效线宽**(`FWHM = 2.3548σ`,`σ² = H/(2|a|)`,`boundary_hit` = 顶点偏移贴 ±0.5 点);同时完整记录各逻辑 F 轴的等效 FWHM；QC 对正、负峰按极性对称计算 |
+| `duplicate_localization` | 该行与同表另一行完整逻辑 F 轴及核名坐标相同(ppm 精确到 1e-6,P2-5):重复组每行都标 true、不删行;旧 H/N 行兼容按 H/N 坐标判重 |
+| `fallback` / `fallback_reason` | 是否实际发生算法回退与原因;定位失败原因在独立的 `failure_reason` |
+| `cell_low_*` / `cell_high_*` / `cell_edge` | 联合多维 ownership 无法投影为逐轴区间,因此始终 NaN;物理边界在参考 localization audit 另存 |
+| `intensity_ratio_vs_picked` / `shift_vs_picked_*` | 参考表可测的逐峰身份诊断(**|测得强度| ÷ |身份表 `Height`|**、measured − picked(ppm));组合表写 NaN |
 
-`window_edge` 与 `cell_edge` **正交**:前者只在**物理窗**(±1.5×线宽折算的点数,再被谱边界截断)边界命中时为真,后者只在**独占邻域**(相邻参考峰位置的中点)把该峰的搜索区间截断、且极值正好停在那条边界上时为真;历史口径 `measure_peak_positions(exclusive_windows=False)` 没有邻居截断,`cell_edge` 恒 false。两者同时为真 = 真峰顶既可能出窗、也可能落在邻居那一侧。
+`window_edge` 表示定位点是否触及实际搜索窗边界。`cell_edge` 是保留的空值字段,不与物理窗口或联合 ownership 建立关系。
 
 
 内部 `PeakMeasurement`(参考峰跟踪/低层测量路径)另带 `window_edge`(极值贴窗口
@@ -131,24 +140,16 @@
 `records/measurement.json`;组合模式改用本谱检出的峰 → 逐峰 QC 为
 `fit_success`/`FWHM_*`/`boundary_hit`/`fallback`。
 
-## 7.6 测试/检测辅助(不属于处理契约)
+## 7.6 下游关系与分析边界
 
-`nmrforge_api.uncertainty`(`position_uncertainty` / `uncertainty_summary` /
-`PeakUncertainty`)计算同一批峰在多个组合间的 σ、极差与 Δδ 下限。它**不参与**
-处理链,也不会出现在 `records/` 里;用途是:
+各候选谱独立编号，不能用 `peak_id` 直接连接参考表、不同 workflow 或不同条件。
+匹配、指认、缺失峰处理、参数敏感性分析和 CSP 统计全部由下游实现；API 不输出这些关系。
 
-- **回归检测**:σ/Δδ 全 0 说明被扫参数被静默忽略(真机历史上出现过该缺陷);
-- **跨组合一致性**:同一批 candidate 在不同参数组合间的峰位差;
-- **使用者参考实现**:分析侧可直接复用或照此实现。
-
-```python
-from nmrforge_api import position_uncertainty, uncertainty_summary
-
-items = position_uncertainty(runs, csp_n_weight=0.2)
-summary = uncertainty_summary(items, n_runs=len(runs))
-```
-
-正式统计与显著性判断请在你的分析代码里按自己的假设完成。
+代码暂时仍导出历史 `uncertainty` 辅助函数，但处理链不调用，也不写入 `records/`。
+它按整数 `peak_id` 分组，不会建立峰对应，不能直接传入独立选峰的 `result.runs`。
+只有下游先完成并核实同峰匹配后，才有讨论跨处理位置离散度的前提；单一结果不能估计
+样本标准差，处理参数网格的离散度也不是自动成立的 CSP 显著性阈值或误差下限。
+峰位相同不证明参数无效：参数可能只改变幅度、线宽或背景。应核对实际脚本、参数与谱数据。
 
 ## 7.7 版本与可复算
 

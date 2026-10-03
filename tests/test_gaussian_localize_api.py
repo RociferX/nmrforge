@@ -86,7 +86,7 @@ def test_detect_and_localize_has_no_method_choice(tmp_path: Path) -> None:
     assert meta["localization_method"] == "parabolic"
     assert meta["n_fallback"] == 0
     assert all(row["localization_method"] == "parabolic" for row in rows)
-    assert all("localization_requested" not in row for row in rows)
+    assert all(row["localization_requested"] == "parabolic" for row in rows)
     assert all("fit_rmse" not in row for row in rows)
     with pytest.raises(TypeError):
         detect_and_localize(spectrum, method="parabolic")
@@ -103,8 +103,9 @@ def test_api_no_longer_exposes_gaussian_surface() -> None:
     assert REFERENCE_TABLE_FILENAMES == {"parabolic": "reference_peak_table_parabolic.csv"}
     assert "gaussian" not in PEAK_TABLE_COLUMNS
 
-    for column in ("fit_rmse", "localization_requested"):
-        assert column not in PEAK_TABLE_COLUMNS
+    # The requested method is an audit field, not a Gaussian algorithm entry point.
+    assert "localization_requested" in PEAK_TABLE_COLUMNS
+    assert "fit_rmse" not in PEAK_TABLE_COLUMNS
     for column in ("fit_success", "FWHM_H", "FWHM_N", "boundary_hit"):
         assert column in PEAK_TABLE_COLUMNS
 

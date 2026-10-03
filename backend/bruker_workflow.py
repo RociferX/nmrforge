@@ -8,6 +8,7 @@ authoritative parameter source).
 from __future__ import annotations
 
 import logging
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -1275,18 +1276,15 @@ def _acqus_values(experiment: Experiment, data_dir: Path | str | None = None) ->
 
 
 def sweep_width_audit(experiment: Experiment) -> list[dict[str, Any]]:
-    """Sweep-width convention record (2026-09-24): only dimensions with
-    ``sw_source != "sw_h"`` are recorded.
+    """Audit every axis, including consistent values and explicit Hz overrides.
 
-    When they agree (SW_h == SW(ppm) x SFO1) there is nothing to audit; when a value is
-    re-judged or SW_h is missing, the raw value, the adopted value and the source are written
-    together into the ``sweep_width`` of ``*.fid.conversion.json`` for later review (BMRB
-    deposited data has ``acqu2s`` entries with the mismatched pair "SW=30 ppm / SW_h=2000 Hz").
+    Conversion records retain raw and adopted values, their source, and the
+    SW_h/(SW(ppm) x SFO1) consistency ratio for later review.
     """
     entries: list[dict[str, Any]] = []
     for dim in experiment.dimensions:
-        if not dim.sw_source or dim.sw_source == "sw_h":
-            continue
+        ppm_hz = float(dim.sw_ppm) * float(dim.sf)
+        ratio = float(dim.sw_hz_raw) / ppm_hz if ppm_hz > 0 and math.isfinite(ppm_hz) else None
         entries.append(
             {
                 "axis": dim.logical_axis,
@@ -1297,6 +1295,11 @@ def sweep_width_audit(experiment: Experiment) -> list[dict[str, Any]]:
                 "sw_hz_used": round(float(dim.sw), 6),
                 "source": dim.sw_source,
                 "note": dim.sw_note,
+                "ppm_x_sfo_hz": ppm_hz if math.isfinite(ppm_hz) else None,
+                "consistency_ratio": ratio if ratio is None or math.isfinite(ratio) else None,
+                "relative_difference": (
+                    abs(ratio - 1.0) if ratio is not None and math.isfinite(ratio) else None
+                ),
             }
         )
     return entries

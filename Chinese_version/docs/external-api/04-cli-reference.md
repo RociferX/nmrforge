@@ -1,4 +1,4 @@
-# 04 · 命令行参考(v1.0)
+# 04 · 命令行参考(v1.1)
 
 入口:`python -m nmrforge_api <命令> --study <研究根>`。
 公共参数:`--study`(必填)、`--name`(新建研究名)、`--condition <A|B|…>`
@@ -21,12 +21,27 @@ python -m nmrforge_api init --study ~/studies/s1            # 只看已登记条
 python -m nmrforge_api reference --study ~/studies/s1
 python -m nmrforge_api reference --study ~/studies/s1 --condition A --force
 python -m nmrforge_api reference --study ~/studies/s1 --params auto.yaml
+python -m nmrforge_api reference --study ~/studies/s1 --condition-params conditions.json
+python -m nmrforge_api reference --study ~/studies/s1 --carrier-ppm F1=120.0 --carrier-ppm F2=4.7 --force
+python -m nmrforge_api reference --study ~/studies/s3 --carrier-ppm F3=4.7 --force
 ```
 
-`--params` 是自动流程的输入覆盖(YAML/JSON);`--phase-route` 显式指定相位
+`--params` 是自动流程的输入覆盖(YAML/JSON);`--carrier-ppm` 可重复指定逻辑 F 轴载频，
+例如二维 `F1=120.0`、`F2=4.7`(单位 ppm);同一轴重复指定会报错。显式载频按轴覆盖
+`--params` 中的公共值,`--condition-params` 再按轴覆盖公共载频。0 和负值有效；bool、
+NaN/Inf、空映射、未知轴或超过数据维数的轴拒绝。未指定轴保留参考转换路径上的 CAR，
+不改 raw `acqus`。Bruker `-AUTO` 成功时保留 `fid.com` 实际 CAR；仅 uniform AUTO 不可用或失败
+而走内置 `bruk2pipe` fallback 时才按解析 `Dimension.o1p` 规则确定载频(详见 05)。载频是参考
+输入指纹的一部分；更改后需 `--force` 重建，不能自动重建。组合/sweep 沿用参考载频，不能
+通过组合表或 `base_overrides` 扫描它。`--phase-route` 显式指定相位
 路线;`--force` 重建;`--direct-range HIGH_PPM LOW_PPM` 指定**直接维范围**
-(ext_lo 高端 / ext_hi 低端),与已建参考不一致时自动重建参考谱。输出冻结谱/
+(ext_lo 高端 / ext_hi 低端)。不带 `--force` 时只复用完整规范化请求指纹一致的参考;
+任一参数、FT、谱宽、范围或其他输入不同,或旧参考没有有效指纹,均报错并要求 `--force`,
+不会自动重建。多条件先整体预检,不匹配时不会开始任何条件的后端处理。输出冻结谱/
 参考脚本路径与 SHA-256、相位来源、采样方式、该条件是否支持参数组合。
+`--condition-params` 接受 JSON 对象,键为条件标签,值为该条件覆盖参数,例如
+`{"A":{"zero_fill":2},"B":{"sampling":{"ft_neg_f1":true}}}`;未知条件会报错。
+参考模式每个条件独立生成峰表;外部 `--peak-table` 只应用到主条件,不会传播。
 
 `--rebuild-peak-tables` 只重算参考峰表(用已有的冻结参考谱 + `reference.list`,不动谱与
 峰身份,调用前后断言 SHA-256 不变),并**刷新记录里的 `software_version` / `software_commit`
@@ -41,8 +56,11 @@ python -m nmrforge_api peaks --study ~/studies/s1 --sigma 25 --max-peaks 60
 python -m nmrforge_api peaks --study ~/studies/s1 --peak-table external.list
 ```
 
-主条件自动选峰(或登记外部峰表)建立 `reference.list`;其他条件共享同一峰身份;
-随后写一张参考峰表 `reference_peak_table_parabolic.csv`(峰定位只有三点抛物线一种
+每个条件都在自己的参考谱上独立选峰并生成 `reference.list` 和
+`reference_peak_table_parabolic.csv`;外部 `--peak-table` 只登记主条件,不传播到其他条件。
+`R0001…` 是所属参考峰表的局部身份,不代表跨条件或参考/组合谱间存在对应关系。
+组合表的 `reference_peak_id` 留空,本谱 `peak_id` 只在本谱有效。
+峰定位只有三点抛物线一种
 方法,2026-09-26 起二维高斯拟合算法已删除,`--localization` /
 `--localize-peaks-gaussian` / `--localize-peaks-parabolic` /
 `--gaussian-roi-f1-ppm` / `--gaussian-roi-f2-ppm` 选项一并取消)。输出峰表路径/
@@ -71,6 +89,10 @@ python -m nmrforge_api sweep --study ~/studies/s1 \
 
 参考模式 = `reference`(参考谱/脚本)+ `peaks`(参考峰表)两个命令;参考不存在时 `sweep` 会报错并提示先跑这两个命令。
 
+`--study` 必须与 `--reference` 所属研究根相同。指定不同根会在写入前报错;当前不支持将
+参考根与组合输出根分开。相同研究根下运行仍会正常写入 workflow 与 records,不应将参考视为
+只读或用它隔离结果。
+
 | 选项 | 含义 |
 | --- | --- |
 | `--reference` | **必填**:参考写法(`<研究根>` / `<研究根>#<条件>` / `reference.json`) |
@@ -79,11 +101,18 @@ python -m nmrforge_api sweep --study ~/studies/s1 \
 | `--direct-range` | 直接维范围 `HIGH_PPM LOW_PPM`(覆盖本批 workflow 基值;与参考冻结范围不一致时报错,见下行) |
 | `--allow-ext-override` | 允许本批 `--direct-range` 与参考冻结范围不一致(留 run 级警告码 `direct_range_override`);缺省不一致即报错,不静默换窗口 |
 | `--max-runs` | 组合数上限(缺省 256) |
-| `--localize-peaks` | **限定峰的定位**:只精修 CSV(至少含 `peak_id` 列)里的峰;检出、行数、`peak_id` 编号不变,未列入的峰保留(位置取检出阶段的整数格极大值);缺省 = 全谱。CSV 可带 `condition` 列(**多条件研究**:每个条件只取自己的行,缺行报错;一个文件即可服务 A/B) |
+| `--localize-peaks` | 仅目标峰从检出整数格点做三点抛物线精修；非目标保留整数格点，方法记 `none`、定位 QC 为 NaN。CSV 至少含 `peak_id`，可带 `condition`；条件缺行默认报错 |
 | `--edge-margin-ppm` | 人工覆盖选峰边缘排除宽度(ppm);缺省依据采集先验与原始边缘候选证据保守筛查,不设固定边缘遮罩 |
-| `--no-resume` | 不跳过已完成 workflow |
+| `--no-resume` | 不跳过已完成 workflow(续跑指纹 schema 为 `nmrforge_api.resume.v4`) |
 
-`--combos` 与 `--grid` 必须且只能给一个。每个组合 = 一个 `workflow_id`
+`--combos` 与 `--grid` 必须且只能给一个。组合表支持把显式布尔值作为扫描候选:
+`sampling.ft_neg`、`sampling.ft_neg_f1`、`sampling.ft_neg_f2` 及兼容别名
+`sampling.flip_f1` / `sampling.flip_f2`;全局 `ft_neg` 优先于逐轴值。参考相位固定,
+`sampling.ft_alt` 仍锁定,不能作为组合轴。参考建立时也可在 `--params` 中用
+`sweep_width_hz` 按逻辑轴显式覆盖谱宽(Hz),每个值须为正有限数;组合使用已转换 FID,
+不得改变该谱宽。
+
+每个组合 = 一个 `workflow_id`
 (`W0001`…);对全部条件跑处理,再在**该组合自己的谱**上用参考锁定阈值独立选峰,
 做三点抛物线精修出一张 `peak_table_parabolic.csv`(峰定位只有这一种方法;
 `--localization`、`--localize-peaks-gaussian` / `--localize-peaks-parabolic` 与
@@ -94,7 +123,8 @@ python -m nmrforge_api sweep --study ~/studies/s1 \
 峰位与峰集却会随窗口变。确认要覆盖时显式加 `--allow-ext-override`,每条 run 的
 `warnings` 会留 `direct_range_override`(参考谱仍不重建)。
 
-输出:workflow 数、条件列表、状态计数、records 路径。
+输出:workflow 数、条件列表、状态计数、records 路径。所有结构化命令结果以 JSON 写到
+stdout;进度、日志和错误写到 stderr,便于管道读取 JSON。
 
 ## report — 用已有记录重算汇总(不重跑处理)
 
@@ -118,8 +148,8 @@ ID、已记录 workflow 数、运行状态计数、records 目录。
 ## 退出码
 
 - `0` 成功;
-- `2` `SensitivityError`(参数/数据/参考/测量/组合表问题),错误写入 stderr
-  (`错误: ...`),可被脚本判定。
+- `2` `SensitivityError`(参数/数据/参考/测量/组合表问题);错误消息由 CLI 输出到
+  stderr(`Error: ...`),可通过退出码判定。命令行用法/参数解析错误也输出到 stderr。
 
 ## `compat`:行为兼容清单(不需要研究根)
 

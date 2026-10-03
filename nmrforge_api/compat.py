@@ -92,7 +92,8 @@ RECORD_SCHEMAS: dict[str, str] = {
     "run": "nmrforge_api.run.v1",
     "reference": "nmrforge_api.reference.v1",
     "manifest": "nmrforge_api.manifest.v1",
-    "resume_fingerprint": "nmrforge_api.resume.v2",
+    "resume_fingerprint": "nmrforge_api.resume.v4",
+    "reference_input_fingerprint": "nmrforge_api.reference_input.v1",
 }
 
 _SKIP_DIRS = frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})

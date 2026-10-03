@@ -12,8 +12,7 @@ Semantics (user API spec of 2026-09-13; independent picking from 2026-09-14):
     the **reference-locked** detection threshold, writing its own table with
     ``reference_peak_id`` and ``assignment`` empty (matching back to the reference is
     **external** work);
-- **refinement chosen outside**: ``localization`` = ``parabolic`` (default) / ``gaussian`` /
-    ``both``; only the chosen table is written;
+- **localization is parabolic**: each candidate spectrum is localized independently;
 - **several conditions, one parameter set**: one workflow uses one
     ``parameters_requested`` for all of them, each with its own reference;
 - **three-valued status**: ``success`` / ``success_with_warning`` / ``failed``; a
@@ -178,11 +177,6 @@ _LOCKED_AXIS_KEYS: frozenset[str] = frozenset(
         "direct_phase",
         "phase_route",
         "sampling.auto_phase",
-        "sampling.flip_f1",
-        "sampling.flip_f2",
-        "sampling.ft_neg_f1",
-        "sampling.ft_neg_f2",
-        "sampling.ft_neg",
         "sampling.ft_alt",
     }
 )
@@ -325,7 +319,7 @@ def locked_detection_sigma(
 
 
 def _localization_methods(value: Any) -> list[str]:
-    """A localisation spec -> the method list: parabolic / gaussian / both of them."""
+    """Resolve the requested localization method; only parabolic is supported."""
     if value is None:
         return []
     items = value if isinstance(value, (list, tuple)) else [value]
@@ -518,14 +512,19 @@ class SweepRun:
     peak_tables: dict[str, dict[str, Any]] = field(default_factory=dict)
     peak_localization: dict[str, Any] = field(default_factory=dict)
     window: dict[str, Any] = field(default_factory=dict)
-    # reference script vs this workflow script (an auditable "only the named lines")
+
     script_diff: dict[str, Any] = field(default_factory=dict)
     wall_time_s: float = 0.0
+    stage_times_s: dict[str, float] = field(default_factory=dict)
+    timing_started: float = field(default=0.0, repr=False)
+    detection_started: float = field(default=0.0, repr=False)
     phase_locked: bool = True
     logs_tail: list[str] = field(default_factory=list)
     versions: dict[str, str] = field(default_factory=dict)
     resume_fingerprint: str = ""
-    measurements_by_method: dict[str, list[PeakMeasurement]] = field(default_factory=dict)
+    measurements_by_method: dict[str, list[PeakMeasurement]] = field(
+        default_factory=dict
+    )
 
     @property
     def run_id(self) -> str:
@@ -550,7 +549,7 @@ class SweepRun:
     def to_dict(self) -> dict[str, Any]:
         return {
             "workflow_id": self.workflow_id,
-            "run_id": self.workflow_id,  # legacy field, same value
+            "run_id": self.workflow_id,
             "index": int(self.index),
             "condition": self.condition,
             "dataset": self.dataset,
@@ -573,6 +572,7 @@ class SweepRun:
             "window": self.window,
             "script_diff": self.script_diff,
             "wall_time_s": float(self.wall_time_s),
+            "stage_times_s": dict(self.stage_times_s),
             "phase_locked": bool(self.phase_locked),
             "logs_tail": list(self.logs_tail),
             "versions": self.versions,
@@ -586,13 +586,19 @@ class SweepRun:
             index=int(data.get("index", 0) or 0),
             condition=str(data.get("condition", "")),
             dataset=dict(data.get("dataset") or {}),
-            parameters_requested=dict(data.get("parameters_requested") or data.get("combo") or {}),
-            parameters_used=dict(data.get("parameters_used") or data.get("params") or {}),
+            parameters_requested=dict(
+                data.get("parameters_requested") or data.get("combo") or {}
+            ),
+            parameters_used=dict(
+                data.get("parameters_used") or data.get("params") or {}
+            ),
             parameters_resolved=dict(data.get("parameters_resolved") or {}),
             phase=dict(data.get("phase") or {}),
             status=str(data.get("status", "pending")),
             warnings=[
-                dict(item) for item in (data.get("warnings") or []) if isinstance(item, dict)
+                dict(item)
+                for item in (data.get("warnings") or [])
+                if isinstance(item, dict)
             ],
             message=str(data.get("message", "")),
             run_dir=str(data.get("run_dir", "")),
@@ -615,9 +621,12 @@ class SweepRun:
             },
             script_diff=dict(data.get("script_diff") or {}),
             wall_time_s=float(data.get("wall_time_s", 0.0) or 0.0),
+            stage_times_s=dict(data.get("stage_times_s") or {}),
             phase_locked=bool(data.get("phase_locked", True)),
             logs_tail=[str(x) for x in (data.get("logs_tail") or [])],
-            versions={str(k): str(v) for k, v in (data.get("versions") or {}).items()},
+            versions={
+                str(k): str(v) for k, v in (data.get("versions") or {}).items()
+            },
             resume_fingerprint=str(data.get("resume_fingerprint", "")),
         )
 
@@ -650,7 +659,9 @@ def _axis_root(key: str) -> str:
     return str(key).split(".", 1)[0]
 
 
-def validate_axes(axes: Mapping[str, Sequence[Any]], *, sampling: str = "uniform") -> list[str]:
+def validate_axes(
+    axes: Mapping[str, Sequence[Any]], *, sampling: str = "uniform"
+) -> list[str]:
     """Check grid keys: locked keys raise, deterministic or unknown ones only warn.
 
     - locked keys (``phases``/``direct_phase``/``phase_route``/``sampling.auto_phase``)
@@ -664,6 +675,25 @@ def validate_axes(axes: Mapping[str, Sequence[Any]], *, sampling: str = "uniform
     notes: list[str] = []
     for raw_key in axes:
         key = str(raw_key)
+        if key == "carrier_ppm" or key.startswith("carrier_ppm."):
+            raise SweepError("CAR is a conversion setting; rebuild the reference to change it")
+        if key == "sweep_width_hz" or key.startswith("sweep_width_hz."):
+            raise SweepError(
+                "Sweep width is a conversion setting; rebuild the reference to change it"
+            )
+        from nmrforge_api.processing_audit import FT_NEG_KEYS, validate_ft_options
+
+        if key in {f"sampling.{name}" for name in FT_NEG_KEYS}:
+            if any(not isinstance(value, bool) for value in axes[raw_key]):
+                raise SweepError(f"{key} candidates must be explicit booleans")
+            continue
+        if key == "sampling":
+            for value in axes[raw_key]:
+                validate_ft_options({"sampling": value}, error=SweepError)
+                if any(f"sampling.{name}" in _LOCKED_AXIS_KEYS for name in value):
+                    raise SweepError(
+                        "Locked sampling settings must not be hidden inside sampling mappings"
+                    )
         if key in _LOCKED_AXIS_KEYS:
             if key in ("phases", "direct_phase"):
                 raise SweepError(
@@ -1263,6 +1293,12 @@ def _write_log(
 
 
 def _write_run(run: SweepRun) -> None:
+    if run.timing_started:
+        now = time.perf_counter()
+        run.wall_time_s = now - run.timing_started
+        run.stage_times_s["total"] = run.wall_time_s
+        if run.detection_started and "detection_localization" not in run.stage_times_s:
+            run.stage_times_s["detection_localization"] = now - run.detection_started
     target = Path(run.run_dir) / "run.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     payload = run.to_dict()
@@ -1270,8 +1306,7 @@ def _write_run(run: SweepRun) -> None:
     payload["software_version"] = software_version()
     payload["software_commit"] = software_commit()
     payload["versions"] = dict(run.versions or tool_versions())
-    # behaviour stamp (2026-09-19): the artefact says which behaviour produced it,
-    # so downstream only has to look at one value
+
     payload.update(record_stamp())
     atomic_write_text(
         target,
@@ -1447,7 +1482,7 @@ def _resume_fingerprint(
     # ids), so the same path with different content re-runs.
     active_by_method = _merged_localization_targets(detection, methods, localization_targets)
     payload = {
-        "schema": "nmrforge_api.resume.v2",
+        "schema": "nmrforge_api.resume.v4",
         "dataset": target.to_dict(),
         "combo": dict(combo),
         "parameters_used": params,
@@ -1508,7 +1543,9 @@ def _check_combo_targets(
     )
 
 
-def _condition_base_params(plan: SweepPlan, reference: ReferenceSpectrum) -> dict[str, Any]:
+def _condition_base_params(
+    plan: SweepPlan, reference: ReferenceSpectrum
+) -> dict[str, Any]:
     """Resolve a condition base: its reference parameters, then the batch override.
 
     Behaviour the reference run decided through diagnostics or routing (a direct-dimension DC
@@ -1517,6 +1554,13 @@ def _condition_base_params(plan: SweepPlan, reference: ReferenceSpectrum) -> dic
     value in the combination table still wins.
     """
     base = merge_overrides(reference.sweep_params, plan.base_overrides)
+    if base.get("carrier_ppm") != reference.sweep_params.get("carrier_ppm"):
+        raise SweepError("CAR is frozen with the converted reference FID")
+    if base.get("sweep_width_hz") != reference.sweep_params.get("sweep_width_hz"):
+        raise SweepError("Sweep width is frozen with the converted reference FID")
+    from nmrforge_api.processing_audit import validate_ft_options
+
+    validate_ft_options(base, error=SweepError)
     for key, value in reference_runtime_decisions(reference.params).items():
         base.setdefault(key, value)
     if reference.direct_phase_override() is None:
@@ -1563,17 +1607,24 @@ def _condition_references(
     for ref in datasets:
         if reference is not None and reference.dataset_key == ref.key:
             refs[ref.key] = reference
-            continue
-        loaded = load_reference(session, ref)
-        if loaded is None:
-            raise SweepError(
-                tr(
-                    "condition {p0} has no reference spectrum yet: call "
-                    "build_reference()/ensure_reference_peaks()",
-                    p0=ref.condition or ref.key,
+        else:
+            loaded = load_reference(session, ref)
+            if loaded is None:
+                raise SweepError(
+                    tr(
+                        "condition {p0} has no reference spectrum yet: call "
+                        "build_reference()/ensure_reference_peaks()",
+                        p0=ref.condition or ref.key,
+                    )
                 )
-            )
-        refs[ref.key] = loaded
+            refs[ref.key] = loaded
+        from nmrforge_api.errors import ReferenceError
+        from nmrforge_api.reference import validate_reference_peak_contract
+
+        try:
+            validate_reference_peak_contract(refs[ref.key])
+        except ReferenceError as exc:
+            raise SweepError(str(exc)) from exc
     return refs
 
 
@@ -1594,7 +1645,8 @@ def _workflow_record(runs: Sequence[SweepRun], plan: SweepPlan) -> dict[str, Any
         "index": int(first.index) if first else 0,
         "status": status,
         "message": "; ".join(
-            f"{run.condition or run.dataset.get('key', '')}: {run.status}" for run in ordered
+            f"{run.condition or run.dataset.get('key', '')}: {run.status}"
+            for run in ordered
         ),
         "parameters_requested": dict(first.parameters_requested) if first else {},
         "conditions": [run.condition for run in ordered],
@@ -1619,6 +1671,7 @@ def _workflow_record(runs: Sequence[SweepRun], plan: SweepPlan) -> dict[str, Any
                 "run_json": str(Path(run.run_dir) / "run.json"),
                 "versions": run.versions,
                 "wall_time_s": run.wall_time_s,
+                "stage_times_s": run.stage_times_s,
             }
             for run in ordered
         ],
@@ -1694,16 +1747,17 @@ def run_sweep(
     - **combinations pick independently** (2026-09-14): peaks come from the combination's
         **own candidate** at the locked threshold; ``reference_peak_id``/``assignment`` stay
         empty and matching back is **downstream** work;
-    - ``localization`` = ``parabolic`` (default) / ``gaussian`` / ``both``; a combination
-        may override it with its own ``localization`` key; only that table is written;
+    - ``localization`` uses parabolic interpolation; a combination may override its
+        localization settings;
     - ``localize_peaks`` (targeted localization, 2026-09-19): a CSV path (with a
         ``peak_id`` column) or a sequence of peak ids; only those peaks take the chosen
         method's refinement, and detection, row count and ``peak_id`` numbering stay
-        unchanged (unlisted peaks keep the detection-stage parabola estimate). A
+        unchanged (unlisted peaks keep integer detection-grid positions, actual method none). A
         combination may override this parameter with its ``localization.targets`` key;
         omitted = the whole spectrum;
-    - ``edge_margin_ppm``: the **physical width** excluded at the axis edge when picking
-        (default 3x the linewidth in ppm), converted per combination into ``run.window``;
+    - ``edge_margin_ppm``: an explicit physical edge-exclusion width, converted per
+        candidate spectrum and recorded. By default, acquisition metadata and raw edge-peak
+        evidence are checked instead of applying a blanket spectral-edge mask;
     - ``sign`` is legacy: combination mode always uses the dominant sign.
     - each workflow's **full processing script** is copied to ``<run_dir>/process.com``
         (with SHA-256); it shares the condition working directory, so the reference's
@@ -1721,20 +1775,16 @@ def run_sweep(
     datasets : Sequence[DatasetRef], optional
         run only these conditions (all by default).
     localization : Any, default "parabolic"
-        ``parabolic``/``gaussian``/``both``; a combination may override it.
+        Parabolic interpolation; a combination may override its localization settings.
     localize_peaks : Any, optional
         target-peak list: a CSV path (with a ``peak_id`` column, optionally a
         ``reference_peak_id`` column), a :class:`LocalizationTargets` or a sequence of
         peak ids; a combination may override it with its ``localization.targets`` key.
-        **Per method**: a mapping ``{"gaussian": ..., "parabolic": ...}`` (``"all"`` /
-        ``"*"`` gives a shared default, method keys win); the combination-table form is
-        ``localization.targets.<method>``. Default = the whole spectrum.
+        Target peak identifiers; defaults to the whole spectrum.
     edge_margin_ppm : float, optional
         edge exclusion radius (ppm), converted per combination into points.
     sign : str, default "abs"
         legacy parameter; combination mode always uses the dominant sign.
-    roi_f1_ppm, roi_f2_ppm : float, optional
-        Gaussian ROI radius (ppm).
     resume : bool, default True
         skip successful runs with an identical fingerprint (resume).
     stop_on_error : bool, default False
@@ -1948,24 +1998,36 @@ def _run_condition(
         emit(f"[{workflow_id}/{target.condition}] {message}")
 
     param_part, phase_part, detection_part = split_combo(combo)
-    methods = list(detection_part.get("methods") or localization_methods or ["parabolic"])
-    # targeted localization: a per-row target list wins over the call argument (a
-    # per-method key overrides that method only); condition granularity resolves this
-    # run's own list **before processing**.
-    active_by_method = _merged_localization_targets(detection_part, methods, localization_targets)
+    methods = list(
+        detection_part.get("methods") or localization_methods or ["parabolic"]
+    )
+
+
+    active_by_method = _merged_localization_targets(
+        detection_part, methods, localization_targets
+    )
     condition_name = _condition_name(target)
     per_run_targets: dict[str, LocalizationTargets | None] = {}
     for method in methods:
         resolved = active_by_method.get(method)
         per_run_targets[method] = (
-            resolved.for_condition(condition_name) if resolved is not None else None
+            resolved.for_condition(condition_name)
+            if resolved is not None
+            else None
         )
+
+
     for method in ("parabolic", "gaussian"):
         table = run_dir / f"peak_table_{method}.csv"
         table.unlink(missing_ok=True)
         table.with_name(table.name + ".localization.json").unlink(missing_ok=True)
-    # the base is resolved per condition: reference, batch override, then combination
+
     params = merge_overrides(base_params, param_part)
+    from core.data.sweep_width import apply_sweep_width_overrides
+    from nmrforge_api.processing_audit import ft_processing_audit, validate_ft_options
+
+    validate_ft_options(params, error=SweepError)
+    experiment = apply_sweep_width_overrides(experiment, params)
     base_phase = reference.direct_phase_override() or {}
     effective_phase = apply_phase_axes(
         {axis: list(pair) for axis, pair in base_phase.items()}, phase_part
@@ -2007,6 +2069,7 @@ def _run_condition(
     )
     is_nus = str(getattr(experiment.sampling, "mode", "")) == "nus"
     started = time.perf_counter()
+    run.timing_started = started
     _log(tr("start {p0}: {p1}", p0=workflow_id, p1=dict(combo)))
     try:
         if is_nus:
@@ -2020,7 +2083,8 @@ def _run_condition(
                     nus_params["direct_phase"] = [float(pair[0]), float(pair[1])]
             if effective_phase:
                 nus_params["phases"] = {
-                    axis: [values[0], values[1]] for axis, values in effective_phase.items()
+                    axis: [values[0], values[1]]
+                    for axis, values in effective_phase.items()
                 }
             response = session.backend.reconstruct_nus(
                 experiment,
@@ -2040,19 +2104,18 @@ def _run_condition(
                 out_file=f"{workflow_id}_{target.token}.ft2",
                 progress=_log,
             )
-    except Exception as exc:  # noqa: BLE001 - one condition must not stop the batch
-        # Phase 21/22: run.message is the actionable line; the traceback goes to
-        # ``<run_dir>/run.log``
+    except Exception as exc:
+
         logger.exception(tr("workflow %s/%s failed"), workflow_id, target.condition)
         response = {
             "success": False,
             "message": f"{type(exc).__name__}: {exc}",
-            # snapshot, not alias: if logs.extend(response["logs"]) got the same list it
-            # would append to itself and grow without bound (a MemoryError found by the
-            # Phase 12 isolation test).
+
+
             "logs": list(logs),
         }
     run.wall_time_s = round(time.perf_counter() - started, 3)
+    run.stage_times_s["processing"] = time.perf_counter() - started
     logs.extend(str(line) for line in (response.get("logs") or []))
     run.logs_tail = logs[-40:]
     if not response.get("success"):
@@ -2080,7 +2143,9 @@ def _run_condition(
     script_src = next(
         (
             path
-            for path in _candidate_script_paths(session, target, reference, workflow_id, response)
+            for path in _candidate_script_paths(
+                session, target, reference, workflow_id, response
+            )
             if path.is_file() and path.stat().st_size > 0
         ),
         None,
@@ -2097,9 +2162,12 @@ def _run_condition(
             logs.append(
                 tr(
                     "script diff (reference -> this workflow): {p0} lines; ",
-                    p0=run.script_diff["n_changed"],
+                    p0=run.script_diff['n_changed'],
                 )
-                + " | ".join(str(line) for line in (run.script_diff.get("changed_lines") or [])[:6])
+                + " | ".join(
+                    str(line)
+                    for line in (run.script_diff.get("changed_lines") or [])[:6]
+                )
             )
     else:
         script_warning = {
@@ -2143,16 +2211,17 @@ def _run_condition(
     shutil.copy2(spectrum_src, target_spectrum)
     run.spectrum_path = str(target_spectrum)
     run.spectrum_sha256 = sha256_file(target_spectrum)
-    # axis effects are per condition (2026-09-16): compare bit-for-bit with its reference
+
     reference_sha = str(reference.spectrum_sha256 or "")
     no_spectrum_change = bool(reference_sha) and run.spectrum_sha256 == reference_sha
 
-    # combination mode (2026-09-14): each picks **independently** on **its own spectrum**
-    # at the **reference-locked** detection threshold, writing its own table; matching back
-    # is **external** work (reference_peak_id and assignment stay empty).
+
+
+
     from nmrforge_api.peaks import detect_and_localize
 
     sigma_locked, sigma_origin = locked_detection_sigma(reference)
+    run.detection_started = time.perf_counter()
     try:
         spectrum_axes = read_spectrum_axes(target_spectrum)
         tables: dict[str, list[dict[str, Any]]] = {}
@@ -2170,11 +2239,11 @@ def _run_condition(
                     if per_run_targets.get(method) is not None
                     else None
                 ),
-                # condition granularity: a condition that explicitly declares
-                # on_missing="none" has an empty target list, and "refine nothing" is
-                # then declared behaviour rather than an empty-list error
+
+
                 allow_empty_targets=bool(
-                    per_run_targets.get(method) is not None and not per_run_targets[method].peak_ids
+                    per_run_targets.get(method) is not None
+                    and not per_run_targets[method].peak_ids
                 ),
             )
             for row in rows:
@@ -2190,9 +2259,28 @@ def _run_condition(
                     reference_peak_id="",
                     positions={
                         nucleus: float(row[key])
-                        for nucleus, key in (("1H", "H_ppm"), ("15N", "N_ppm"))
-                        if isinstance(row.get(key), float) and not math.isnan(row[key])
+                        for nucleus, key in (
+                            ("1H", "H_ppm"), ("15N", "N_ppm"),
+                            ("F1", "F1_ppm"), ("F2", "F2_ppm"), ("F3", "F3_ppm"),
+                        )
+                        if isinstance(row.get(key), float)
+                        and not math.isnan(row[key])
                     },
+                    axis_nuclei={f"F{i}": row[f"F{i}_nucleus"] for i in range(1, 4)
+                                 if row.get(f"F{i}_nucleus")},
+                    localization={"actual_method": row.get("localization_method"),
+                                  "requested_method": row.get("localization_requested"),
+                                  "failure_reason": row.get("failure_reason"),
+                                  "fallback": row.get("fallback"),
+                                  "fallback_reason": row.get("fallback_reason"),
+                                  "boundary_hit": row.get("boundary_hit"),
+                                  "fit_success": row.get("fit_success"),
+                                  "fwhm_by_axis": {
+                                      f"F{i}": row.get(f"FWHM_F{i}") for i in range(1, 4)
+                                  },
+                                  "fwhm_by_nucleus": {
+                                      "1H": row.get("FWHM_H"), "15N": row.get("FWHM_N")
+                                  }},
                     intensity=float(row["intensity"]),
                     noise_sigma=float(meta["noise_sigma"]),
                     snr=float(row["SNR"]),
@@ -2200,7 +2288,7 @@ def _run_condition(
                 )
                 for row in rows
             ]
-    except Exception as exc:  # noqa: BLE001 - a picking failure fails this condition
+    except Exception as exc:
         run.status = STATUS_FAILED
         run.message = tr("independent picking failed: {p0}: {p1}", p0=type(exc).__name__, p1=exc)
         logs.append(run.message)
@@ -2222,6 +2310,7 @@ def _run_condition(
         return run
 
     run.measurements_by_method = measurements
+    run.stage_times_s["detection_localization"] = time.perf_counter() - run.detection_started
     for method in methods:
         conditional = active_by_method.get(method)
         if conditional is None:
@@ -2240,7 +2329,8 @@ def _run_condition(
             continue
         logs.append(
             tr(
-                "localization scope [{p0}]: {p1} target peaks / {p2} detected ({p3})",
+                "localization scope [{p0}]: {p1} target peaks / {p2} detected "
+                "({p3})",
                 p0=method,
                 p1=resolved.n_targets,
                 p2=len(tables[method]),
@@ -2284,7 +2374,7 @@ def _run_condition(
                             "threshold and the "
                             "data)",
                             p0=method,
-                            p1=meta.get("sigma_multiplier"),
+                            p1=meta.get('sigma_multiplier'),
                         )
                     ),
                     "count": 0,
@@ -2300,7 +2390,7 @@ def _run_condition(
                         "{p0}: {p1} peaks have the parabolic vertex on the ±0.5-point limit "
                         "(linewidth may be underestimated)",
                         p0=method,
-                        p1=meta["n_boundary_hit"],
+                        p1=meta['n_boundary_hit'],
                     ),
                     "count": int(meta["n_boundary_hit"]),
                     "peaks": [],
@@ -2327,7 +2417,9 @@ def _run_condition(
                 }
             )
     for method in methods:
-        path = write_peak_table(run_dir / f"peak_table_{method}.csv", tables[method])
+        path = write_peak_table(
+            run_dir / f"peak_table_{method}.csv", tables[method]
+        )
         run.peak_tables[method] = peak_table_digest(path)
     run.peak_localization = {
         method: {
@@ -2336,8 +2428,11 @@ def _run_condition(
             "n_missing": 0,
             "n_fallback": int(metas[method]["n_fallback"]),
             "fallback_reasons": dict(metas[method]["fallback_reasons"]),
+            "qc_failure_reasons": dict(metas[method].get("qc_failure_reasons") or {}),
             "n_boundary_hit": int(metas[method]["n_boundary_hit"]),
-            "localization_scope": str(metas[method].get("localization_scope", "all")),
+            "localization_scope": str(
+                metas[method].get("localization_scope", "all")
+            ),
             "n_targeted": int(metas[method].get("n_targeted", 0)),
             "n_skipped": int(metas[method].get("n_skipped", 0)),
             "n_duplicate": int(
@@ -2355,10 +2450,16 @@ def _run_condition(
                 "ppm": float(first_meta["edge_margin_ppm"]),
                 "effective_ppm": float(first_meta["edge_margin_ppm"]),
                 "source": str(first_meta["edge_margin_source"]),
-                "nucleus": (spectrum_axes.nuclei[0] if spectrum_axes.nuclei else ""),
-                "obs_mhz": (float(spectrum_axes.obs[0]) if spectrum_axes.obs else 0.0),
+                "nucleus": (
+                    spectrum_axes.nuclei[0] if spectrum_axes.nuclei else ""
+                ),
+                "obs_mhz": (
+                    float(spectrum_axes.obs[0]) if spectrum_axes.obs else 0.0
+                ),
                 "ppm_per_point": (
-                    round(axis_units.ppm_per_point(axis0_ppm), 6) if axis0_ppm is not None else 0.0
+                    round(axis_units.ppm_per_point(axis0_ppm), 6)
+                    if axis0_ppm is not None
+                    else 0.0
                 ),
             }
         }
@@ -2367,7 +2468,7 @@ def _run_condition(
     )
     run.parameters_resolved = {
         "phase": run.phase,
-        # the threshold is settled with the reference, so each workflow records it as locked
+
         "detection": {
             "sigma_multiplier": float(first_meta["sigma_multiplier"]),
             "sigma_multiplier_origin": sigma_origin,
@@ -2381,11 +2482,10 @@ def _run_condition(
             "methods": list(methods),
             "independent": True,
             "reference_matching": "external",
-            **(
-                {"axial_screening": first_meta["axial_screening"]}
-                if "axial_screening" in first_meta
-                else {}
-            ),
+            **({"axial_screening": first_meta["axial_screening"]}
+               if "axial_screening" in first_meta else {}),
+
+
             "localization_targets": localization_targets_record(
                 {method: active_by_method.get(method) for method in methods},
                 {method: metas[method] for method in methods},
@@ -2405,20 +2505,27 @@ def _run_condition(
         "sampling": {
             "effective": str(reference.sampling),
             "schedule": str(reference.sampling_schedule or ""),
-            # 2026-09-25 (user): the FT sign/direction settled when the reference was
-            # built (a manual -neg flip, say) is inherited here unchanged; these are
-            # locked keys and must never become sweep axes
+            # Reference defaults unless this candidate explicitly requests FT -neg flags.
             "flags": sign_sampling_flags(params),
-            "flags_source": "reference(locked)",
-            "route": ("reconstruct_nus" if str(reference.sampling) == "nus" else "process"),
+            "flags_source": (
+                "combo" if any(str(k).startswith("sampling.") or k == "sampling"
+                               for k in param_part) else "reference"
+            ),
+            "ft_processing": ft_processing_audit(experiment, params, run.script_path),
+            "route": (
+                "reconstruct_nus"
+                if str(reference.sampling) == "nus"
+                else "process"
+            ),
             "evidence": list(reference.sampling_evidence or [])[:5],
         },
-        # the **actual** automatic values (spec G1/G2): SMILE nSigma/thresh
+
         "smile": (
-            _smile_entries(params, combo, response.get("effective_params") or {}) if is_nus else {}
+            _smile_entries(params, combo, response.get("effective_params") or {})
+            if is_nus
+            else {}
         ),
-        # this combination's own noise sigma (robust MAD): the SNR denominator, recorded
-        # so it can be recomputed
+
         "spectrum_noise_sigma": {
             "value": float(first_meta["noise_sigma"]),
             "source": "core.qc.noise(robust MAD)",
@@ -2429,16 +2536,19 @@ def _run_condition(
     run.warnings = warnings
     if warnings:
         run.status = STATUS_WARNING
-        run.message = tr(
-            "done with warnings: {p0}", p0=", ".join(str(w.get("code")) for w in warnings)
+        run.message = (
+            tr("done with warnings: {p0}", p0=', '.join(str(w.get('code')) for w in warnings))
         )
     else:
         run.status = STATUS_SUCCESS
-        run.message = tr(
-            "done: independent picking at sigma={p0:g}({p1}, locked), peaks ",
-            p0=first_meta["sigma_multiplier"],
-            p1=sigma_origin,
-        ) + ", ".join(f"{m}={metas[m]['n_peaks']}" for m in methods)
+        run.message = (
+            tr(
+                "done: independent picking at sigma={p0:g}({p1}, locked), peaks ",
+                p0=first_meta['sigma_multiplier'],
+                p1=sigma_origin,
+            )
+            + ", ".join(f"{m}={metas[m]['n_peaks']}" for m in methods)
+        )
     run.log_path = str(
         _write_log(
             run_dir / "log.txt",

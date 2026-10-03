@@ -361,7 +361,8 @@ def test_neg_sign_keys_are_wired_everywhere() -> None:
     """
     from backend.script_generator import param_schema
     from core.experiment.acquisition_mode_detector import SIGN_SAMPLING_KEYS
-    from nmrforge_api.sweep import _LOCKED_AXIS_KEYS
+    from nmrforge_api.errors import SweepError
+    from nmrforge_api.sweep import _LOCKED_AXIS_KEYS, validate_axes
 
     schema = param_schema()
     props = schema["properties"]["sampling"]["properties"]
@@ -369,10 +370,19 @@ def test_neg_sign_keys_are_wired_everywhere() -> None:
     for key in SIGN_SAMPLING_KEYS:
         assert key in props, f"param_schema 漏了 {key}"
         assert key in defaults, f"param_schema 默认值漏了 {key}"
-    # Per-axis primary names + aliases + global switch: all must be accepted, none sweepable
-    for key in ("ft_neg", "ft_neg_f1", "ft_neg_f2", "flip_f1", "flip_f2", "ft_alt"):
+    # Explicit FT-neg names and aliases accept boolean candidates; alt and auto_phase remain locked.
+    neg_keys = ("ft_neg", "ft_neg_f1", "ft_neg_f2", "flip_f1", "flip_f2")
+    for key in (*neg_keys, "ft_alt"):
         assert key in SIGN_SAMPLING_KEYS, f"单一来源漏了 {key}(参考/派生运行不会沿用)"
-        assert f"sampling.{key}" in _LOCKED_AXIS_KEYS, f"{key} 没被锁定,能当扫描轴"
+    for key in neg_keys:
+        axis = f"sampling.{key}"
+        assert axis not in _LOCKED_AXIS_KEYS, f"{key} 应允许显式 bool 候选"
+        assert validate_axes({axis: [False, True]}) == []
+    for key in ("ft_alt", "auto_phase"):
+        axis = f"sampling.{key}"
+        assert axis in _LOCKED_AXIS_KEYS, f"{key} 不应允许作为参数组合轴"
+        with pytest.raises(SweepError):
+            validate_axes({axis: [False, True]})
 
 
 def test_neg_rule_is_wired_in_all_four_paths(bruker_dir: Path) -> None:

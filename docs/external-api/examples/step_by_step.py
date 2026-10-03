@@ -35,7 +35,9 @@ def main(argv: list[str] | None = None) -> int:
     if session.dataset_by_condition(args.condition) is None:
         add_dataset(session, args.dataset, condition=args.condition)
 
-    reference = build_reference(session, progress=print)
+    reference = build_reference(
+        session, carrier_ppm={"F1": 120.0, "F2": 4.7}, progress=print
+    )
     reference = ensure_reference_peaks(session, reference)
     print("Reference script:", reference.script_path)
     print("Reference peak table:", reference.peak_table_parabolic_path)

@@ -1,8 +1,9 @@
 # nmrforge_api/
 
-The scriptable surface: parameter studies built around a frozen reference spectrum, plus
-per-condition workflows. It is designed to be imported by downstream analysis code without
-pulling in Qt or touching GUI state.
+The API v1.1 scripting surface builds independent reference spectra and peak tables, then
+generates candidate spectra and tables from user-specified parameter combinations for downstream
+analysis. It does not match peaks across spectra or compute relationships between tables.
+It can be imported without pulling in Qt or touching GUI state.
 
 ## Modules
 
@@ -15,7 +16,7 @@ pulling in Qt or touching GUI state.
 | `sweep.py` | combination mode: parameter combinations to `workflow_id`s, with resumable runs |
 | `peaks.py` | peak picking and sub-grid localisation entry points |
 | `records.py` | run records, the manifest and the long-form peak table |
-| `peak_tables.py` | the unified peak-table schema shared by both localisation methods |
+| `peak_tables.py` | the unified 38-column peak-table schema with three-point parabolic localisation |
 | `direct_range.py` | parsing the direct-dimension range |
 | `cli.py`, `__main__.py` | `python -m nmrforge_api ...` |
 | `errors.py` | the exceptions the public API raises |

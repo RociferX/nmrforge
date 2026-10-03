@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import traceback
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,7 @@ from nmrforge_api.reference import (
     ensure_reference_peaks,
     load_reference,
     load_references,
+    parse_reference_spec,
     set_reference_peaks,
 )
 from nmrforge_api.session import add_dataset, open_study
@@ -84,12 +86,15 @@ def _report_unexpected(exc: BaseException, *, debug: bool) -> int:
     """User-visible exit for an unexpected exception: one actionable line plus the full
     traceback on the debug channel.
     """
-    print(tr("Error: {p0}", p0=describe_exception(exc)))
+    print(tr("Error: {p0}", p0=describe_exception(exc)), file=sys.stderr)
     if debug:
-        print(tr("Full traceback (debug):"))
-        traceback.print_exc()
+        print(tr("Full traceback (debug):"), file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
     else:
-        print(tr("Hint: pass --debug or set {p0}=1 to print the full traceback.", p0=DEBUG_ENV))
+        print(
+            tr("Hint: pass --debug or set {p0}=1 to print the full traceback.", p0=DEBUG_ENV),
+            file=sys.stderr,
+        )
     return 2
 
 
@@ -107,6 +112,29 @@ def _load_mapping(path: Path | str) -> dict[str, Any]:
     return data
 
 
+def _load_condition_params(path: Path | str) -> dict[str, dict[str, Any]]:
+    source = Path(path)
+    try:
+        data = json.loads(source.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise SensitivityError(tr("Cannot read file: {p0} ({p1})", p0=source, p1=exc)) from exc
+    except json.JSONDecodeError as exc:
+        raise SensitivityError(
+            tr("File is not valid JSON: {p0} ({p1})", p0=source, p1=exc)
+        ) from exc
+    if not isinstance(data, dict) or any(
+        not isinstance(label, str) or not isinstance(params, dict)
+        for label, params in data.items()
+    ):
+        raise SensitivityError(
+            tr(
+                "Condition parameters must map condition labels to parameter objects: {p0}",
+                p0=source,
+            )
+        )
+    return data
+
+
 def _print(payload: Any) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
@@ -119,6 +147,26 @@ def _selected_datasets(session: Any, condition: str) -> list[Any]:
     if ref is None:
         raise SensitivityError(tr("no condition {p0!r} in this study", p0=condition))
     return [ref]
+
+
+def _parse_carrier_ppm(values: list[str] | None) -> dict[str, float]:
+    """Parse repeatable ``AXIS=PPM`` CLI values; reject duplicates before mapping."""
+    parsed: dict[str, float] = {}
+    for value in values or []:
+        if not isinstance(value, str) or value.count("=") != 1:
+            raise SensitivityError(
+                tr("carrier override must use AXIS=PPM: {p0}", p0=value)
+            )
+        axis, token = (part.strip() for part in value.split("=", 1))
+        if axis in parsed:
+            raise SensitivityError(tr("carrier axis was specified more than once: {p0}", p0=axis))
+        if axis not in {"F1", "F2", "F3"} or not token:
+            raise SensitivityError(tr("invalid carrier override: {p0}", p0=value))
+        try:
+            parsed[axis] = float(token)
+        except ValueError as exc:
+            raise SensitivityError(tr("invalid carrier ppm value: {p0}", p0=value)) from exc
+    return parsed
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -150,7 +198,25 @@ def cmd_init(args: argparse.Namespace) -> int:
 def cmd_reference(args: argparse.Namespace) -> int:
     session = open_study(args.study, name=args.name)
     params = _load_mapping(args.params) if args.params else None
+    condition_params = (
+        _load_condition_params(args.condition_params)
+        if getattr(args, "condition_params", None)
+        else {}
+    )
+    unknown_conditions = set(condition_params) - {ref.condition for ref in session.datasets}
+    if unknown_conditions:
+        raise SensitivityError(
+            tr(
+                "condition parameters name unknown condition(s): {p0}",
+                p0=", ".join(sorted(unknown_conditions)),
+            )
+        )
+    carrier_values = getattr(args, "carrier_ppm", None)
     if getattr(args, "rebuild_peak_tables", False):
+        if carrier_values:
+            raise SensitivityError(
+                tr("--carrier-ppm cannot be combined with --rebuild-peak-tables")
+            )
         if args.force or getattr(args, "direct_range", None):
             raise SensitivityError(
                 tr("--rebuild-peak-tables cannot be combined with --force / --direct-range")
@@ -180,32 +246,60 @@ def cmd_reference(args: argparse.Namespace) -> int:
     if direct is not None:
         params = dict(params or {})
         params.update(direct.params())
+    carrier_cli = _parse_carrier_ppm(carrier_values)
     out: list[dict[str, Any]] = []
-    for target in _selected_datasets(session, args.condition):
-        existing = load_reference(session, target)
-        rebuild = bool(args.force) or (
-            direct is not None
-            and existing is not None
-            and not direct.matches_params(existing.params)
-        )
-        if rebuild and direct is not None:
-            print(
-                tr(
-                    "Direct-dimension range does not match the frozen reference; rebuilding it: "
-                    "ext_lo={p0:g} ext_hi={p1:g} "
-                    "ppm",
-                    p0=direct.lo,
-                    p1=direct.hi,
-                )
+    from core.data.carrier import merge_carrier_params, normalize_carrier_ppm
+    from nmrforge_api.processing_audit import merge_condition_params
+    from nmrforge_api.reference import _reference_request, validate_reference_input
+
+    targets = _selected_datasets(session, args.condition)
+    base_params = merge_condition_params({}, params or {})
+    for overrides in condition_params.values():
+        try:
+            merge_carrier_params(merge_condition_params({}, overrides))
+        except ValueError as exc:
+            raise SensitivityError(str(exc)) from exc
+    if carrier_cli or "carrier_ppm" in base_params:
+        try:
+            base_params = merge_carrier_params(
+                base_params, carrier_cli if carrier_cli else None
             )
+        except ValueError as exc:
+            raise SensitivityError(str(exc)) from exc
+    prepared = {}
+    for target in targets:
+        target_params = merge_condition_params(
+            base_params, condition_params.get(target.condition, {})
+        )
+        if carrier_cli or "carrier_ppm" in target_params:
+            from workflow.stepwise import read_experiment
+
+            try:
+                experiment = read_experiment(
+                    session.manager, target.exp_id, target.data_id
+                )
+                available_axes = {dimension.logical_axis for dimension in experiment.dimensions}
+                target_params = merge_carrier_params(target_params)
+                target_params["carrier_ppm"] = normalize_carrier_ppm(
+                    target_params.get("carrier_ppm"), axes=available_axes
+                )
+            except ValueError as exc:
+                raise SensitivityError(str(exc)) from exc
+        _reference_request(target_params, direct, args.phase_route)
+        existing = None if args.force else load_reference(session, target)
+        if existing is not None:
+            validate_reference_input(existing, target_params, direct_range=direct,
+                                     phase_route=args.phase_route)
+        prepared[target.key] = target_params
+    for target in targets:
         reference = build_reference(
             session,
             target,
-            params=params,
+            params=prepared[target.key] or None,
             direct_range=direct,
             phase_route=args.phase_route,
-            progress=print,
-            force=rebuild,
+            progress=lambda message: print(message, file=sys.stderr),
+            force=bool(args.force),
         )
         out.append(
             {
@@ -305,6 +399,18 @@ def cmd_sweep(args: argparse.Namespace) -> int:
         )
     targets_spec = _targets_spec_from_args(args)
     spec = str(args.reference)
+    from_root = Path(args.study).expanduser().resolve()
+    reference_handle = parse_reference_spec(spec)
+    reference_root = Path(reference_handle.root).expanduser().resolve()
+    if from_root != reference_root:
+        raise SensitivityError(
+            tr(
+                "--study root must match --reference root; cross-study sweeps are not supported "
+                "({p0} != {p1})",
+                p0=from_root,
+                p1=reference_root,
+            )
+        )
     if args.condition and "#" not in spec and not spec.endswith("reference.json"):
         spec = f"{spec}#{args.condition}"
     if args.combos:
@@ -318,7 +424,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
             localize_peaks=targets_spec,
             edge_margin_ppm=args.edge_margin_ppm,
             resume=not args.no_resume,
-            progress=print,
+            progress=lambda message: print(message, file=sys.stderr),
         )
     else:
         config = _load_mapping(args.grid)
@@ -335,7 +441,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
             localize_peaks=targets_spec,
             edge_margin_ppm=args.edge_margin_ppm,
             resume=not args.no_resume,
-            progress=print,
+            progress=lambda message: print(message, file=sys.stderr),
         )
     _print(
         {
@@ -480,6 +586,17 @@ def build_parser() -> argparse.ArgumentParser:
             "input parameters for automatic processing (YAML/JSON)",
         ),
     )
+    reference.add_argument(
+        "--condition-params",
+        help=tr("JSON mapping condition labels to per-condition processing parameter objects"),
+    )
+    reference.add_argument(
+        "--carrier-ppm",
+        action="append",
+        default=None,
+        metavar="AXIS=PPM",
+        help=tr("explicit carrier position in ppm (repeatable for F1/F2/F3)"),
+    )
     reference.add_argument("--phase-route", default=None)
     reference.add_argument(
         "--direct-range",
@@ -487,7 +604,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         metavar=("HIGH_PPM", "LOW_PPM"),
-        help=tr("direct-dimension range (ext_lo high, ext_hi low, ppm); rebuilds the reference"),
+        help=tr("direct-dimension range (ext_lo high, ext_hi low, ppm); changes require --force"),
     )
     reference.add_argument(
         "--force",
@@ -499,7 +616,7 @@ def build_parser() -> argparse.ArgumentParser:
     reference.add_argument(
         "--rebuild-peak-tables",
         action="store_true",
-        help=tr("rebuild only the two reference peak tables (existing spectrum + reference.list)"),
+        help=tr("rebuild only the reference peak table (existing spectrum + reference.list)"),
     )
     reference.set_defaults(func=cmd_reference)
 
@@ -656,17 +773,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return int(args.func(args))
     except SensitivityError as exc:
-        # Known API errors: the message is written for the user and carries the fix
-        print(tr("Error: {p0}", p0=exc))
+        # Known API errors: the message is written for the user and carries the fix.
+        print(tr("Error: {p0}", p0=exc), file=sys.stderr)
         if _debug_enabled(args):
-            print(tr("Full traceback (debug):"))
-            traceback.print_exc()
+            print(tr("Full traceback (debug):"), file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
         return 2
     except KeyboardInterrupt:
-        print(tr("Cancelled (interrupted); unfinished workflows are not recorded as successful."))
+        print(
+            tr("Cancelled (interrupted); unfinished workflows are not recorded as successful."),
+            file=sys.stderr,
+        )
         return 130
     except (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
-        # Unexpected exceptions also get one actionable line; the traceback goes to debug
+        # Unexpected exceptions also get one actionable line; the traceback goes to debug.
         return _report_unexpected(exc, debug=_debug_enabled(args))
 
 

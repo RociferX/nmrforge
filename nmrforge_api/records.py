@@ -75,9 +75,7 @@ def _reference_record(
         "sampling": reference.sampling,
         "sampling_schedule": reference.sampling_schedule,
         "sampling_evidence": reference.sampling_evidence,
-        # 2026-09-25 (user): the FT sign/direction choice frozen when the reference was built
-        # (manual -neg flips and the like). Combination mode reuses the same one and must not
-        # treat it as a sweep axis.
+        # Reference defaults; explicitly requested FT -neg candidates record their own flags.
         "sampling_flags": reference.sampling_flags,
         "run_id": reference.run_id,
         "phase_route": reference.phase_route,
@@ -86,6 +84,7 @@ def _reference_record(
         "spectrum_path": reference.frozen_spectrum,
         "spectrum_sha256": reference.spectrum_sha256,
         "params": reference.params,
+        "input_fingerprint": reference.input_fingerprint,
         "direct_phase": reference.direct_phase,
         "phase": reference.phase_record(),
         "created_at": reference.created_at,
@@ -94,7 +93,16 @@ def _reference_record(
         "peak_count": reference.peak_count,
         "peak_source": reference.peak_source,
         "peak_params": reference.peak_params,
+        "stage_times_s": reference.stage_times_s,
+        "processing_audit": reference.processing_audit,
     }
+    from backend.conversion_provenance import read_conversion_provenance
+
+    record["conversion_provenance"] = (
+        reference.conversion_provenance
+        or (read_conversion_provenance(Path(reference.work_dir))
+            if reference.work_dir else {"sidecars": []})
+    )
     if include_peak_tables:
         record["peak_tables"] = reference.peak_tables
         record["peak_localization"] = reference.peak_localization

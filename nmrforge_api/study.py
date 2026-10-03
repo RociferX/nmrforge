@@ -2,9 +2,9 @@
 
 Flow (2026-09-13 specification)::
 
-    Raw data (A/B...) -> reference workflow (1 script + 2 peak tables)
+    Raw data (A/B...) -> independent reference workflows (1 script + 1 table per condition)
         -> user parameter table -> W0001... each workflow runs every condition
-        -> parabolic / gaussian peak tables + full provenance + QC
+        -> independent parabolic peak tables + full provenance + QC
 
 Boundary: this API **only** processes and records. CSP, robustness, statistics and
 conclusions belong to downstream analysis on the unified peak table.
@@ -100,7 +100,7 @@ class StudyResult:
 
     @property
     def peak_tables(self) -> dict[str, str]:
-        """Paths to both reference peak tables (parabolic / gaussian)."""
+        """Path to the primary condition's parabolic reference peak table."""
         ref = self.reference
         if ref is None:
             return {}
@@ -178,7 +178,7 @@ def _register_conditions(session: StudySession, conditions: Sequence[tuple[str, 
 
 @dataclass
 class ReferenceResult:
-    """Reference-mode result: one reference per condition (spectrum, script, two tables)."""
+    """Reference-mode result: one spectrum, script and parabolic table per condition."""
 
     session: StudySession
     references: dict[str, ReferenceSpectrum] = field(default_factory=dict)
@@ -202,7 +202,7 @@ class ReferenceResult:
 
     @property
     def peak_tables(self) -> dict[str, str]:
-        """Paths to the primary condition's two reference peak tables."""
+        """Path to the primary condition's parabolic reference peak table."""
         reference = self.reference()
         if reference is None:
             return {}
@@ -218,6 +218,8 @@ def run_reference_study(
     datasets: Mapping[str, str] | Sequence[Any] | None = None,
     name: str = "",
     params: dict[str, Any] | None = None,
+    carrier_ppm: Mapping[str, float] | None = None,
+    params_by_condition: Mapping[str, Mapping[str, Any]] | None = None,
     phase_route: str | None = None,
     peaks: Path | str | None = None,
     direct_range: Any = None,
@@ -230,7 +232,7 @@ def run_reference_study(
     write: bool = True,
     progress: Callable[[str], None] | None = None,
 ) -> ReferenceResult:
-    """**Reference mode**: import the condition data and freeze a reference plus both tables.
+    """**Reference mode**: import conditions and freeze their independent spectra and tables.
 
     This builds references only and runs no combination. Combination mode
     (:func:`run_combination_study`) must **reference** what this produces. The picking
@@ -239,9 +241,7 @@ def run_reference_study(
     The direct-dimension range (**ppm**, ``ext_lo`` = high end / ``ext_hi`` = low end) can be
     given as ``direct_range=(high, low)`` (reversed is accepted and swapped back),
     ``direct_range={"lo":..., "hi":...}`` or explicit ``ext_lo=/ext_hi=``.
-    A range that disagrees with the frozen reference **rebuilds it and re-measures both
-    tables**;
-    ``force=True`` rebuilds unconditionally.
+    Changed processing inputs reject silent reuse and require explicit ``force=True``.
 
     Parameters
     ----------
@@ -255,6 +255,11 @@ def run_reference_study(
         name recorded when creating a study.
     params : dict[str, Any], optional
         processing overrides (same key convention as the combination table).
+    carrier_ppm : Mapping[str, float], optional
+        Common explicit CAR in ppm by logical F axis; overrides params by axis.
+        Per-condition overrides take precedence. Changed inputs require force=True.
+    params_by_condition : Mapping[str, Mapping[str, Any]], optional
+        Per-condition recursive parameter overrides; unknown conditions are rejected.
     phase_route : str, optional
         phase route; ``"none"`` for tests and reproduction.
     peaks : Path | str, optional
@@ -267,10 +272,6 @@ def run_reference_study(
         reference picking threshold (sigma) - **fixed and locked here**; cannot change later.
     max_peaks : int, default 0
         maximum number of reference peaks (0 = keep all).
-    localization_method : str, default "parabolic"
-        reference-table refinement (``gaussian`` is 2D only).
-    gaussian_roi_f1_ppm, gaussian_roi_f2_ppm : float, optional
-        Gaussian ROI radius (ppm); config default.
     force : bool, default False
         rebuild an existing reference (only a rebuild may change the threshold).
     backend : Any, optional
@@ -289,6 +290,8 @@ def run_reference_study(
     ------
     DatasetError
         an invalid directory, an unrecognisable experiment, or a duplicate condition.
+    ReferenceError
+        Different cached inputs or a missing legacy fingerprint require force=True.
 
     Side effects
     ------------
@@ -315,32 +318,56 @@ def run_reference_study(
     run_params = dict(params or {})
     if direct is not None:
         run_params.update(direct.params())
+    condition_params = dict(params_by_condition or {})
+    unknown = set(condition_params) - {ref.condition for ref in session.datasets}
+    if unknown:
+        raise DatasetError(f"Unknown conditions in params_by_condition: {sorted(unknown)}")
+    from core.data.carrier import merge_carrier_params, normalize_carrier_ppm
+    from nmrforge_api.processing_audit import merge_condition_params, validate_ft_options
+    from workflow.stepwise import read_experiment
+
+    try:
+        run_params = merge_carrier_params(merge_condition_params({}, run_params), carrier_ppm)
+    except ValueError as exc:
+        raise DatasetError(str(exc)) from exc
+
+    for overrides in condition_params.values():
+        if not isinstance(overrides, Mapping):
+            raise DatasetError("Each params_by_condition value must be a parameter mapping")
+        try:
+            merge_carrier_params(merge_condition_params({}, overrides))
+        except ValueError as exc:
+            raise DatasetError(str(exc)) from exc
+        validate_ft_options(merge_condition_params(run_params, overrides), error=DatasetError)
     references: dict[str, ReferenceSpectrum] = {}
-    rebuilt: list[str] = []
+    from nmrforge_api.reference import _reference_request, validate_reference_input
+
+    # Validate every condition before starting any backend work.
+    prepared = {}
     for ref in session.datasets:
-        reference = None if force else load_reference(session, ref)
-        if reference is not None and direct is not None:
-            # the direct range defines the reference: a mismatch with the frozen one rebuilds it
-            if not direct.matches_params(reference.params):
-                reference = None
-                rebuilt.append(ref.condition or ref.key)
-        if reference is None:
-            if progress is not None and rebuilt:
-                progress(
-                    tr(
-                        "direct range differs from the frozen reference; rebuilding: ext_lo={p0:g} "
-                        "ext_hi={p1:g} "
-                        "ppm",
-                        p0=direct.lo,
-                        p1=direct.hi,
-                    )
-                    if direct is not None
-                    else tr("rebuilding the reference")
+        per_condition = merge_condition_params(run_params, condition_params.get(ref.condition, {}))
+        if "carrier_ppm" in per_condition:
+            experiment = read_experiment(session.manager, ref.exp_id, ref.data_id)
+            try:
+                per_condition["carrier_ppm"] = normalize_carrier_ppm(
+                    per_condition["carrier_ppm"],
+                    axes={dim.logical_axis for dim in experiment.dimensions},
                 )
+            except ValueError as exc:
+                raise DatasetError(str(exc)) from exc
+        _reference_request(per_condition, direct, phase_route)
+        reference = None if force else load_reference(session, ref)
+        if reference is not None:
+            validate_reference_input(reference, per_condition, direct_range=direct,
+                                     phase_route=phase_route)
+        prepared[ref.key] = (per_condition, reference)
+    for ref in session.datasets:
+        per_condition, reference = prepared[ref.key]
+        if reference is None:
             reference = build_reference(
                 session,
                 ref,
-                params=run_params or None,
+                params=per_condition or None,
                 direct_range=direct,
                 phase_route=phase_route,
                 progress=progress,
@@ -353,7 +380,7 @@ def run_reference_study(
             references[ref.key],
             sigma_multiplier=sigma_multiplier,
             max_peaks=max_peaks,
-            force=bool(rebuilt),
+            force=force,
         )
     if peaks is not None:
         # optional: the study's own table (public archive or assigned) becomes the primary identity
@@ -364,15 +391,7 @@ def run_reference_study(
             session, target, references[primary.key], source="external"
         )
         references[primary.key] = build_reference_peak_tables(session, primary_reference)
-        # non-primary conditions re-copy the primary identity table, keeping identity consistent
-        for ref in session.datasets[1:]:
-            references[ref.key] = ensure_reference_peaks(
-                session,
-                references[ref.key],
-                force=True,
-                sigma_multiplier=sigma_multiplier,
-                max_peaks=max_peaks,
-            )
+        # Explicit external peaks apply only to the selected primary condition.
     records: dict[str, str] = {}
     if write:
         records = write_reference_records(session, references)
@@ -415,8 +434,7 @@ def run_combination_study(
         be changed here (threshold keys in a table raise); each picks on **its own candidate**
         spectrum with that locked threshold, writing its own table with reference_peak_id and
         assignment empty - matching back is **downstream work**;
-    - localization = parabolic (default) / gaussian / both: only the chosen table is written
-        (a combination may override it with its own localization key);
+    - localization = parabolic, the only method; removed Gaussian/mixed requests raise;
     - localize_peaks = a target-peak CSV / a sequence of peak ids: only those peaks take
         part in the chosen method's refinement (a combination may override it with the
         localization.targets key); default = the whole spectrum. **Condition granularity**:
@@ -444,7 +462,7 @@ def run_combination_study(
     max_runs : int, default 256
         maximum number of combinations; exceeding it raises.
     localization : Any, default "parabolic"
-        ``parabolic``/``gaussian``/``both``; a combination may override it.
+        ``parabolic`` only; removed Gaussian/mixed requests raise.
     localize_peaks : Any, optional
         target-peak list (a CSV path / ``LocalizationTargets`` / a sequence of peak ids);
         a combination may override it with the ``localization.targets`` key. Default = the
@@ -467,8 +485,6 @@ def run_combination_study(
         direct-range range (leaving the run-level warning code
         ``direct_range_override``); a disagreement without it is an error rather than
         a silent window change.
-    roi_f1_ppm, roi_f2_ppm : float, optional
-        Gaussian ROI radius (ppm).
     resume : bool, default True
         successful runs with an identical fingerprint are skipped (resume).
     backend : Any, optional
@@ -650,6 +666,8 @@ def run_parameter_study(
     combos: Sequence[Mapping[str, Any]] | None = None,
     name: str = "",
     params: dict[str, Any] | None = None,
+    carrier_ppm: Mapping[str, float] | None = None,
+    params_by_condition: Mapping[str, Mapping[str, Any]] | None = None,
     phase_route: str | None = None,
     peaks: Path | str | None = None,
     direct_range: Any = None,
@@ -677,18 +695,18 @@ def run_parameter_study(
     one-call entry and for compatibility: it runs reference mode, then combination mode.
     The direct range (``direct_range=`` / ``ext_lo`` / ``ext_hi``) acts at the reference level;
     localization / localize_peaks / edge_margin_ppm go to combination mode (parabolic
-    default / gaussian / both; the margin defaults to 3x the linewidth; localize_peaks
+    only; the default margin is conservative axial screening, not a fixed band; localize_peaks
     refines only the named peaks).
 
     Parameters
     ----------
-    root, dataset, datasets, name, params, phase_route, peaks, sigma_multiplier,
-    max_peaks, localization_method, gaussian_roi_f1_ppm, gaussian_roi_f2_ppm, force
+    root, dataset, datasets, name, params, carrier_ppm, params_by_condition, phase_route, peaks,
+    sigma_multiplier, max_peaks, force
         the same as :func:`run_reference_study` (reference-mode part).
     axes, combos, max_runs
         the same as :func:`run_combination_study` (combination-mode part).
-    direct_range, ext_lo, ext_hi, window_pts, window_ppm, sign, roi_f1_ppm,
-    roi_f2_ppm, localization, localize_peaks, edge_margin_ppm, resume, backend, write,
+    direct_range, ext_lo, ext_hi, window_pts, window_ppm, sign,
+    localization, localize_peaks, edge_margin_ppm, resume, backend, write,
     progress
         shared; ``direct_range`` defines the reference then overrides the base.
 
@@ -721,6 +739,8 @@ def run_parameter_study(
         datasets=datasets,
         name=name,
         params=params,
+        carrier_ppm=carrier_ppm,
+        params_by_condition=params_by_condition,
         phase_route=phase_route,
         peaks=peaks,
         direct_range=direct_range,

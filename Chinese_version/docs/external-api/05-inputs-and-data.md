@@ -1,13 +1,14 @@
-# 05 · 输入:数据、条件与参数组合表(v1.0)
+# 05 · 输入:数据、条件与参数组合表(v1.1)
 
 ## 5.1 原始数据
 
 - **Bruker 原始数据集目录**(下载/解压后含 `acqus`/`ser`);压缩包与已处理格式
   不支持,报错信息会说明;
 - 导入只做链接 raw + 写 metadata + 登记 import 运行;不做转换/处理;
-- 采样方式:uniform 任意维、**2D NUS**(SMILE 重构)、3D NUS 目前只支持建参考;
-- **满采样优先**:标注 NUS 但实际满采样(`nuslist` 覆盖全格,或 2D `ser` 全格
-  无零行)→ 按 uniform 处理,理由见 `reference.sampling_evidence`;
+- 处理支持 uniform 数据与**2D NUS**(SMILE 重构);3D NUS 目前只支持建参考;
+- 标注 NUS 的数据只有在合法日程完整覆盖且为标准顺序时才按 uniform 处理;全覆盖
+  乱序仍按日程归位。NUS 声明下缺日程且采样坐标无法还原时导入拒绝;`ser` 无零行
+  本身不足以证明 uniform。判定与证据见 `reference.sampling_evidence`;
 
 ## 5.2 条件(A/B…)
 
@@ -19,9 +20,10 @@ add_dataset(session, "…/holo", condition="B")
 ```
 
 - 条件标签必须唯一(重复报错,不覆盖);缺省自动分配 A/B/C…;
-- 每个条件各有一份**参考**(相位/噪声来自该条件自身数据);
-- 峰身份、用户参数组合**全条件共享**:同一个 workflow 对 A/B 用同一份
-  `parameters_requested`,输出各自峰值表。
+- 每个条件各自建立**参考**(相位/噪声/自动参考峰表来自该条件自身数据);
+- 同一个 workflow 对 A/B 使用同一份 `parameters_requested`,各自输出峰表；请求
+  参数共享不表示峰身份共享或已经建立跨谱对应。各条件的自动参考峰表独立选峰；
+  条件内 `reference_peak_id` 不构成跨条件或跨谱对应。
 
 ## 5.3 参数组合表(用户定义)
 
@@ -91,10 +93,10 @@ max_runs: 128
 run_parameter_study(..., peaks="library.list")   # 或 peak_id,H_ppm,N_ppm CSV
 ```
 
-- 缺省不用给:软件自动选峰并建立峰身份 `R0001…`;
-- 给了外部峰表:作为主条件的峰身份表冻结(`peak_source="external"`),其他条件
-  的**参考峰表**沿用同一身份(组合模式的峰表不跟踪它——组合峰表独立选峰、
-  `reference_peak_id` 留空);
+- 缺省不用给:软件在每个条件自己的参考谱上独立自动选峰并建立条件内身份 `R0001…`;
+- 给了外部峰表:只作为主条件的峰身份表冻结(`peak_source="external"`);其他条件
+  仍从各自参考谱独立自动选峰。条件内身份不证明跨条件或跨谱峰对应。组合峰表独立
+  选峰，`reference_peak_id` 留空，不自动对应回参考峰;
 - 接受格式:Poky/Sparky `.list`、NMRForge 旧 CSV、研究项目
   `peak_id,H_ppm,N_ppm,height,linewidth,volume`。
 
@@ -128,8 +130,8 @@ window.F1.off,window.F2.off,zero_fill.F1,baseline.F2.enabled,points_per_line.F1
 0.45,0.45,4,true,2
 ```
 
-- 峰定位配置(config `peaks.localization`,2026-09-26 起)只剩一项
-  `method: parabolic`(唯一方法:三点抛物线顶点,与 `peak_detection` 同一实现);
+- 峰定位配置(config `peaks.localization`,2026-09-26 起)使用
+  `method: parabolic`(三点抛物线顶点,与 `peak_detection` 同一实现);
   2026-09-26(用户需求⑦)删掉了二维高斯拟合,原有的 `gaussian_roi_*` /
   `gaussian_max_nfev` 预算键一并删除——没有「拟合迭代预算」这回事,
   抛物线是确定性闭式解;
@@ -192,8 +194,55 @@ python -m nmrforge_api sweep --study ~/studies/s1 --reference ~/studies/s1 \
     --combos design.csv --direct-range 9 7
 ```
 
-- **参考模式**:范围是参考谱的定义之一;与已建参考不一致时会**重建参考谱并重测
-  参考峰表**(日志说明),`force=True` 无条件重建;
+### 默认载频与显式指定
+
+`carrier_ppm` 使用逻辑 F 轴而不是核名或数组位置：二维 `F2=x, F1=y`，三维
+`F3=x, F2=y, F1=z`。每轴不指定时，默认取决于参考转换走的路径：
+
+- Bruker `-AUTO` 可用且成功时，保留实际写入 `fid.com` 的各轴 CAR。CAR 可由水峰、
+  γ 比等 `-AUTO` 规则得出；API 不为其强写 `O1`/`BF1`，也不承诺某个固定值。
+  这里的 CAR 是 ppm 轴定标值，不改变采集 `SFO1`，不属于相位设置，也不用于推断核种或
+  其他科学身份；AUTO 的规则结果只是转换实际值。
+- 只有 uniform AUTO 不可用或执行失败而使用内置 `bruk2pipe` fallback 时，CAR 才取解析的
+  `Dimension.o1p`：原始采集 `O1P` 非零值优先；缺失或为零时按 `O1/BF1`，`BF1` 缺失时
+  按 `O1/SFO1`；这些值均不可用时为 `0`。此 fallback 与 `-AUTO` 不是同一载频口径。
+
+新建 API 参考未指定的轴保留对应转换路径原有值；不会继承 GUI 工作目录里的人工值。
+只有复用相同输入的已冻结参考时才继续使用该参考记录的 CAR。原始 `acqus` 不会被修改。
+显式设置只覆盖所给轴，例如二维 API：
+
+```python
+reference = build_reference(session, carrier_ppm={"F1": 120.0, "F2": 4.7})
+
+result = run_reference_study(
+    root,
+    params={"carrier_ppm": {"F1": 119.8, "F2": 4.6}},
+    params_by_condition={"B": {"carrier_ppm": {"F1": 120.1}}},
+)
+```
+
+显式 keyword `carrier_ppm=` 逐轴覆盖公共 `params`，`params_by_condition` 再逐轴覆盖公共值。
+3D 可只改直接维 `F3`，其余维仍走对应默认路径：
+
+```python
+reference = build_reference(session_3d, carrier_ppm={"F3": 4.7})
+```
+
+CLI 同样可重复给轴值；相同轴重复指定会报错：
+
+```bash
+python -m nmrforge_api reference --study ~/studies/s1 \
+  --carrier-ppm F1=120.0 --carrier-ppm F2=4.7 --force
+python -m nmrforge_api reference --study ~/studies/s3 \
+  --carrier-ppm F3=4.7 --force
+```
+
+值须为有限数值(ppm)；0 和负值合法，bool、NaN/Inf、空映射、未知轴和超过数据维数的轴
+拒绝。载频参与完整参考输入指纹，任何变化都要求显式 `force=True` / `--force`；组合的
+`axes`、`combos`、`base_overrides` 不可覆盖或扫描载频，因为组合运行复用已转换 FID。
+
+- **参考模式**:直接维范围是完整参考请求的一部分;与缓存指纹不一致或旧参考缺少指纹时
+  抛 `ReferenceError`,必须显式 `force=True` / CLI `--force` 才重建。不会自动重建;
 - **组合模式**:`direct_range=` 写入本批 `base_overrides`(参考谱不重建),每个
   条件仍先使用自己的参考有效参数,逐组合还可用 `ext_lo`/`ext_hi` 最后覆盖
   (`plan.notes` 会说明口径);覆盖值与参考冻结范围**不一致时默认报错**——必须显式
@@ -229,8 +278,7 @@ python -m nmrforge_api peaks --study ~/studies/s1 --sigma 20
   只能沿用参考的阈值;此时再给**不同**阈值会直接报 `ReferenceError`(CLI
   退出码 2),不会悄悄重选峰;
 - 与参考一致(或与参考默认 35σ 一致)的阈值可以显式给 → 复用,不重复选峰;
-- 想换阈值属于**重建参考**:显式 `force=True`,或删掉该条件的
-  `study/reference/<key>/` 后重跑参考;
+- 想换阈值属于**重建参考**:显式 `force=True`(CLI `--force`)重跑参考;
 - 实际用量落档:`reference.json.peak_params.sigma_multiplier`(生成参考时
   选定的值)、`previous_sigma_multiplier`(force 重建时的上一版)、
   `detection.sigma_multiplier` 与 `detection.threshold_source`
@@ -244,8 +292,9 @@ python -m nmrforge_api peaks --study ~/studies/s1 --sigma 20
 
 ## 5.11 限定峰的定位(targeted localization,2026-09-19)
 
-峰定位的作用范围默认是该谱的**全部检出峰**;批量 ensemble 里往往只需要精修
-少数关心的峰,因此提供一等公民入口,只精修指定峰:
+目标列表限定哪些已检出峰进行三点抛物线亚像素精修。非目标峰保留在表中，位置停在
+检出的整数格点，`localization_method` 为 `none`，定位 QC 列留空/NaN（表示未计算，
+不是失败）；目标峰的位置和 QC 来自三点抛物线精修：
 
 ```python
 run_combination_study(f"{root}#A", combos=...,
@@ -274,10 +323,10 @@ zero_fill,localization,localization.targets
 目标列表 CSV 至少一列 `peak_id`(可另带 `reference_peak_id` 供留档;单列文本、
 每行一个序号也接受;重复 id 去重并保留首次出现顺序)。语义:
 
-- **检出与峰集完全不受影响**:目标列表只决定「哪些峰参与抛物线精修」——
+- **检出与峰集完全不受影响**:目标列表只决定「哪些峰做亚像素精修」——
   选峰、行数、`peak_id` 编号一律不变;
-- 未列入目标的峰**保留在表里**,位置取检出阶段的整数格极大值;定位 QC 列
-  (`fit_success`/`FWHM_H`/`FWHM_N`/`boundary_hit`)写 `NaN`(没做精修,**不是**
+- 未列入目标的峰**保留在表里**,位置取检出阶段的整数格点;`localization_method=none`,定位 QC 列
+  (`fit_success`/`FWHM_H`/`FWHM_N`/`boundary_hit`)写 `NaN`(没计算该 QC,**不是**
   失败),`fallback` 为 false;
 - 逐峰失败照常记录(`fit_success=false` + `fallback_reason`),**不会**换候选
   重新拟合;`n_fallback` 只统计真正做过精修的峰;
@@ -326,8 +375,8 @@ B,41
   自己的谱**校验(未知 id 照常报错,不静默忽略);
 - 没有该列 → 与不带条件粒度时**逐位一致**(整批共用),留档写 `by_condition: "all"`;
 - 某条件在文件里**没有任何行** → **处理前**报错(默认 `on_missing="error"`);
-  要放行必须显式声明 `on_missing="all"`(该条件不限定 = 全谱精修)或
-  `on_missing="none"`(该条件不做任何精修),策略写进留档;
+  要放行必须显式声明 `on_missing="all"`（该条件全谱计算额外 QC）或
+  `on_missing="none"`（不额外计算 QC，但仍保留检出阶段的抛物线坐标），策略写进留档;
 - 出现**不属于该研究**的条件名 → 报错(不静默忽略);
 - 空文件 / 缺 `peak_id` 列 → 沿用既有报错口径。
 

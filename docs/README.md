@@ -11,9 +11,10 @@ Entry point for the documentation that ships with the repository.
 ## Desktop application and Python/CLI API
 
 The desktop application and `nmrforge_api` are supported interfaces in the same source tree. The
-Python API is versioned separately (`API_VERSION = "1.0"`) and exposes a compatibility manifest
+Python API source contract is currently v1.1 (`API_VERSION = "1.1"`, 2026-10-03) and exposes a compatibility manifest
 for behaviour and contract changes. A released AppImage corresponds to a specific source version;
 source updates do not update that binary automatically.
+The v1.1 source API contract does not imply that the existing AppImage 1.0.2 includes these changes.
 
 ### Desktop application
 

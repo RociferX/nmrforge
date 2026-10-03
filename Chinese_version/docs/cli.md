@@ -6,7 +6,8 @@
 python -m nmrforge_api --help
 ```
 
-请在 v1.0.1 的源码检出里、完成可编辑安装之后使用命令行;见
+当前命令行属于 API v1.1；请在含该契约的源码检出里完成可编辑安装后使用，
+不要把软件版本 1.0.2 或已发布 AppImage 等同于最新 API 源码；见
 [installation.md](installation.md)。
 
 ## 子命令
@@ -26,12 +27,18 @@ python -m nmrforge_api --help
 python -m nmrforge_api init      --study ./study --dataset /path/to/bruker/dataset
 python -m nmrforge_api reference --study ./study
 python -m nmrforge_api peaks     --study ./study
-python -m nmrforge_api sweep     --study ./study --grid grid.yaml --reference study/reference.json
+python -m nmrforge_api sweep     --study ./study --grid grid.yaml --reference ./study
 python -m nmrforge_api report    --study ./study
 python -m nmrforge_api status    --study ./study
 ```
 
 ## `sweep` 选项
+
+参考请求只在完整处理输入与缓存一致时复用；参数变化或旧输入指纹缺失需
+`reference --force` 显式重建。`--rebuild-peak-tables` 只重算抛物线峰表，不重跑参考谱。
+参考构建可重复指定 `--carrier-ppm F1=118.0` 等逻辑轴 CAR（ppm）；不指定时
+保留 AUTO 转换结果或使用已解析的 Bruker 载频。详见[CLI 完整参考](external-api/04-cli-reference.md)。
+不同 `--study` / `--reference` 根目录目前不支持，会显式报错，不向只读参考根写入结果。
 
 ```text
 --study STUDY                     研究根目录

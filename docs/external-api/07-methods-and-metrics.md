@@ -1,4 +1,4 @@
-# 07 · Methods and QC criteria (v1.0)
+# 07 · Methods and QC criteria (v1.1)
 
 > This page describes what the software **executed** and what QC records were left. Any
 > cross-combination or cross-condition statistic
@@ -114,13 +114,20 @@ Unmeasured reference peaks in tracking mode retain rows and `detected=false`) |.
 | `intensity` / `SNR` | Signed peak height relative to the global median background and `|height|/σ` (σ = robust MAD noise) |
 | `fit_success` / `FWHM_H` / `FWHM_N` / `boundary_hit` | Three-point parabolic localisation QC; the equivalent linewidth is a local-curvature estimate (`FWHM = 2.3548 sigma`, `sigma^2 = H/(2|a|)`) |
 | `duplicate_localization` | The row shares its coordinates with another row of the same table (ppm to 1e-6): every row of a group is flagged true and no row is dropped; `peak_localization.parabolic.n_duplicate` counts extra rows and `run.json.warnings` gains `duplicate_localization` |
-| `fallback` / `fallback_reason` | Whether to roll back and why |
-| `cell_low_*` / `cell_high_*` / `cell_edge` / `intensity_ratio_vs_picked` / `shift_vs_picked_*` | Reference-table per-peak **cell/identity QC** (P1-3): the final search interval (closed, data-axis grid points), whether the extremum was cut by the neighbour's cell, |measured intensity| / |the identity table's `Height`|, and measured - picked in ppm; **combination tables write NaN** (the sweep picks and localizes in one step, so there is no such step) |
+| `localization_requested` / `localization_method` | Requested method versus actual result: `parabolic` or `none` when not detected/skipped |
+| `failure_reason` / `fallback_reason` | Independent localization failure reason versus actual fallback reason |
+| `cell_low_*` / `cell_high_*` / `cell_edge` | Always NaN; joint multidimensional ownership cannot be represented by per-axis cell bounds |
+| `search_bounds_by_axis` / `candidate_ownership_conflict` | Physical search intervals and ownership conflicts are separate audit fields |
 
-`window_edge` and `cell_edge` describe distinct search boundaries when those fields are present in
+`cell_edge` is always NaN in the current contract; physical search windows and ownership-conflict
+audit are recorded separately. It is not a boolean boundary detector.
+
+`window_edge` and `cell_edge` were previously described as distinct search boundaries in
 a reference-measurement record. They do not by themselves establish that a peak is an artifact.
 
-**How to read `cell_edge` (owner's wording, 2026-09-19 - measured, and it matters)**: it fires very
+**Historical v1.0 wording (superseded; not current behavior):** the following discussion treated
+`cell_edge` as an exclusive-cell marker. Current v1.1 always writes this field as NaN.
+**How to read `cell_edge` (owner's wording, 2026-09-19 - historical)**: it fires very
 often because an exclusive cell can be narrow in a crowded spectrum
 only 1-2 points wide, so an extremum sitting on the cell bound is normal for crowded spectra. It is
 therefore **not a criterion, only a necessary-condition filter**: the caller's own criteria are
@@ -137,18 +144,18 @@ peak-table columns and meanings are listed in [outputs and records](06-outputs-a
 
 ## 7.6 test/Detection aid (not included in the processing contract)
 
-`nmrforge_api.uncertainty`(`position_uncertainty` / `uncertainty_summary` /
-`PeakUncertainty`) Calculate σ, range and Δδ lower limit of the same batch of peaks among multiple combinations. It **does not participate**.
-The processing chain will not appear in `records/`; its purpose is:
+`nmrforge_api.uncertainty` (`position_uncertainty`, `uncertainty_summary`,
+`PeakUncertainty`) is retained only as a test/detection aid. The processing pipeline does not call it
+or write it to `records/`. It does not match peaks and its output is not a CSP detection floor or
+significance threshold. Do not pass independent runs or unmatched peak tables to it. The utility is for:
 
-- **Regression detection**: σ/Δδ All 0 means that the scanned parameter is silently ignored (this defect has appeared in the history of real machines);
-- **Downstream reference implementation**: The analysis side can be directly reused or implemented as such
+- **Regression detection**: unchanged outputs can flag an ignored parameter for investigation,
+  but zero dispersion alone does not prove a processing defect.
+- **Regression/detection checks only**: it is not a downstream analysis method or scientific result.
 
 ```python
-from nmrforge_api import position_uncertainty, uncertainty_summary
-
-items = position_uncertainty(runs, csp_n_weight=0.2)
-summary = uncertainty_summary(items, n_runs=len(runs))
+# Do not calculate a CSP floor from independent, unmatched peak-picking runs.
+# Downstream analysis must match peaks using its own explicit criteria first.
 ```
 
 Formal statistics and significance judgment should be completed according to your own assumptions in your analysis code.

@@ -1,4 +1,4 @@
-# 06 · Output and records (v1.0)
+# 06 · Output and records (v1.1)
 
 ## 6.1 directory layout
 
@@ -33,9 +33,11 @@
         peak_table_parabolic.csv  long table of workflow × condition
 ```
 
-## 6.2 Unified peak table fields (**27 columns**)
+## 6.2 Unified peak table fields (**38 columns**)
 
-The unified table contains currently **27 columns**, in the order below.
+The current v1.1 unified table contains **38 columns**, in the order below. Older 29-, 27-, and
+36-column tables are historical formats, not a current compatibility promise; rebuild old reference
+peak tables from the frozen reference spectrum before reuse.
 
 The reference and combination modes use three-point parabolic localisation and write one peak table.
 Rerunning without resume replaces the corresponding run products. The table schema is declared by
@@ -44,23 +46,32 @@ Rerunning without resume replaces the corresponding run products. The table sche
 ```text
 workflow_id, condition, dataset,
 peak_id, reference_peak_id, assignment,
-H_ppm, N_ppm, intensity, SNR, detected, localization_method,
-fallback, fallback_reason, fit_success, FWHM_H, FWHM_N,
-boundary_hit, duplicate_localization, cell_low_H, cell_high_H,
-cell_low_N, cell_high_N, cell_edge, intensity_ratio_vs_picked,
-shift_vs_picked_H, shift_vs_picked_N
+H_ppm, N_ppm, intensity,
+SNR, detected, localization_method, localization_requested,
+fallback, fallback_reason, failure_reason,
+fit_success, FWHM_H, FWHM_N,
+boundary_hit, duplicate_localization,
+F1_ppm, F1_nucleus, FWHM_F1,
+F2_ppm, F2_nucleus, FWHM_F2,
+F3_ppm, F3_nucleus, FWHM_F3,
+cell_low_H, cell_high_H, cell_low_N, cell_high_N, cell_edge,
+intensity_ratio_vs_picked, shift_vs_picked_H, shift_vs_picked_N
 ```
 
-The eight new columns (P1-3, 2026-09-19) describe the **reference** table only,
-i.e. the result of relocating records from the peak identity table:
-
-- `cell_low_*` / `cell_high_*` (int): the effective search interval (the 1.5x linewidth
-  window intersected with the exclusive cell), a **closed** interval in data-axis
-  integer indices; with `exclusive_windows=False` (the historical wording) they hold the
-  window bounds that wording actually used;
-- `cell_edge` (bool): the extremum sits on the **exclusive-cell** edge (the neighbour's
-  cell cut it short). It is orthogonal to `window_edge`, which tracks the physical window
-  edge; with the historical wording it is always `false`;
+- `localization_requested` records requested method `parabolic`, adjacent to
+  `localization_method`, which records the actual method. A localized peak is `parabolic`;
+  not-detected reference identities and targeted skips are `none`. Skipped/not-detected QC is
+  NaN and `failure_reason` is empty. An attempted failure (e.g. `no_local_peak_above_threshold`)
+  has its own `failure_reason`; it is not silently treated as fallback.
+- `fallback` / `fallback_reason` remain distinct audit fields for actual fallback behavior.
+  Gaussian fitting and `fit_rmse` are removed; no compatibility promise is made for the old
+  frozen API v0.2 table.
+- `cell_low_H`, `cell_high_H`, `cell_low_N`, `cell_high_N`, and `cell_edge` are always
+  NaN. Joint multidimensional Voronoi ownership cannot be represented as independent per-axis
+  bounds. Physical search bounds are recorded in
+  `reference.peak_localization.search_windows.search_bounds_by_axis` (F-axis plus closed low/high
+  integer storage points); candidate ownership conflicts use the separate
+  `candidate_ownership_conflict` audit flag.
 - `intensity_ratio_vs_picked` (float): **|measured intensity| / |the identity
   table's Height|** (both sides in magnitude - a negative-peak `.list` carries a
   negative Height; fixed 2026-09-19); NaN when the Height is missing or zero. About 1
@@ -69,32 +80,33 @@ i.e. the result of relocating records from the peak identity table:
 - `shift_vs_picked_H` / `shift_vs_picked_N` (float, ppm, sign = measured - picked, same
   axis and direction as `H_ppm`/`N_ppm`): the per-axis shift. The 15N ppm axis runs
   opposite to the data index, so do not read the sign backwards;
-- **combination (workflow) tables write `NaN` in all eight cell/identity columns**: the sweep path
-  picks and localizes in one step, so there is no identity-then-relocate step and
-  writing 1.0/0 would be fabricated information;
+- The five per-axis cell fields (`cell_low_H`, `cell_high_H`, `cell_low_N`,
+  `cell_high_N`, `cell_edge`) are always NaN because joint multidimensional Voronoi ownership
+  cannot be represented by independent axis bounds. Physical search bounds are stored separately
+  in `reference.peak_localization.search_windows.search_bounds_by_axis`; candidate ownership
+  conflicts use `candidate_ownership_conflict`. Intensity ratio and shift deltas remain when measured.
 - `duplicate_localization` (bool, P2-5, 2026-09-19): true when the row shares its
   coordinates with another row of the same table (ppm to 1e-6); every row of a
   duplicated group is flagged and no row is dropped or removed from the peak set.
-  Both the reference and the combination tables carry the marker: after the
-  exclusive-cell fix the reference table can only collide when two records round to
-  the same grid point, while the combination table still collides when the peak
-  picker's sub-grid refinement pulls two neighbouring detections into one cell;
-- the frozen record `reference.json.peak_localization.<method>` also carries the
-  summaries `n_cell_edge`, `n_duplicate` (= rows minus unique coordinates) and the
+  Both reference and combination tables carry the marker; it does not imply shared Voronoi cells.
+- the frozen record `reference.json.peak_localization.parabolic` carries `n_cell_edge=null`
+  (unknown, not zero), `n_duplicate` (= rows minus unique coordinates), and the
   `n`/`median`/`max` of `intensity_ratio_vs_picked`; every
   `run.json.peak_localization.<method>` carries `n_duplicate` too, and a table with
   shared coordinates adds a `duplicate_localization` entry (code plus row count) to
   `run.json.warnings`.
 
-- `localization_method` is `parabolic`, the only supported localisation method.
+- `localization_requested` is `parabolic`; `localization_method` is the actual result:
+  `parabolic` when localized, `none` when not detected or targeted localization was skipped.
+  Skipped/not-detected QC is NaN and `failure_reason` is empty. Attempted failures have a separate
+  `failure_reason` (such as `no_local_peak_above_threshold`), not an algorithm fallback.
 - `fit_success` / `FWHM_*` / `boundary_hit` report three-point parabola QC. The equivalent
-  linewidth estimates local curvature; `fallback` / `fallback_reason` remain compatibility fields
-  for a failed or skipped localisation, not an algorithm switch.
+  linewidth estimates local curvature; `fallback` / `fallback_reason` remain distinct from failure.
 - **Targeted localization**: `localization.targets`, the CLI `--localize-peaks`, and the API
   `localize_peaks=` select which detected peaks receive the three-point parabolic refinement.
   Detection, row count and `peak_id` numbering are unchanged; unlisted peaks retain their
   detection-stage coordinates and have unrun localization QC as `NaN`, not as a failure. A
-  per-peak failure is recorded in `fallback`/`fallback_reason`. The resolved targets are recorded
+  per-peak failure is recorded in `failure_reason`. The resolved targets are recorded
   in `run.json.parameters_resolved.detection.localization_targets`; the method summary is under
   `peak_localization.parabolic`;
 - **Condition granularity (2026-09-20)**: when the target list is written per condition (a CSV `condition` column or a condition mapping), the same `localization_targets` record keeps `path`/`sha256` for the **whole source** (whole-file hash) while `peak_ids`/`n_targets`/`n_skipped` describe **this run (this condition)**, adds `condition` (this run's condition) and `on_missing` (the missing-row policy), and gives per-condition detail in `by_condition` `{peak_ids, n_targets, line_ranges, path + sha256, from}`; without a `condition` column (shared by the batch) `by_condition` is `"all"`, and `peak_localization.<method>` counts stay **per run**;
@@ -151,7 +163,10 @@ i.e. the result of relocating records from the peak identity table:
                          "script_sha256": "...", "spectrum_path": "...",
                          "spectrum_sha256": "...", "log_path": "...",
                          "peak_tables": {}, "peak_localization": {},
-                         "window": {}, "run_json": "...", "versions": {}}],
+                         "window": {}, "run_json": "...", "versions": {},
+                         "stage_times_s": {"processing": 0.0,
+                                            "detection_localization": 0.0,
+                                            "total": 0.0}}],
   "warnings": [], "versions": {}, "base_script": {}, "grid_sha256": "..."
 }
 ```
@@ -168,8 +183,9 @@ i.e. the result of relocating records from the peak identity table:
 | `base_script` | Reference script path + SHA-256 (use reference script as evidence of template) |
 | `script_path` / `script_sha256` / `spectrum_path` / `spectrum_sha256` | Products and Hashes |
 | `peak_tables` | Peak table path of selected refinement mode + SHA-256 + number of rows + number of detected |
-| `peak_localization` | Each method n_peaks/n_detected/n_missing/n_fallback/fallback_reasons/n_boundary_hit;`exclusive_windows` (wording: one cell per peak) |
+| `peak_localization` | Parabolic counts, failure reasons, targeting scope, duplicate count, physical search bounds and ownership-conflict audit |
 | `window` | Peak selection margin: physical width, equivalent points, point distance, source |
+| `stage_times_s` | Per-stage elapsed times; each `workflow.json` `condition_records[]` copies the timing from its run, and `total` matches `wall_time_s` |
 | `script_diff` | Reference script vs this workflow script difference (`n_changed` + first 20 lines diff): used for auditing "only change the rows specified in the combination table" |
 | `log_path` | Full log path |
 | `versions` | nmrforge / python / dependencies / NMRPipe / SMILE (after real machine registration) |
@@ -209,3 +225,51 @@ The software **does not produce** any statistics or significance product: the ol
 code is kept as a **test/detection aid** (`nmrforge_api.uncertainty`; the processing chain does not
 call it), and downstream analysis reads `records/peak_table_parabolic.csv` when needed, computing
 the summary itself or reusing the helper. See [Methods and metrics](07-methods-and-metrics.md).
+
+## 6.6 Reference input fingerprint
+
+Each reference record stores an `input_fingerprint` with this shape:
+
+```json
+{"schema":"nmrforge_api.reference_input.v1","params":{...},"sha256":"..."}
+```
+
+The fingerprint binds the complete normalized processing request, `phase_route`, and normalized
+direct-dimension range. Equivalent dotted and nested parameter forms normalize to the same input.
+Reference reuse requires the complete fingerprint to match. Any mismatch, or a missing or invalid
+legacy fingerprint, requires an explicit `force=True` / CLI `--force` rebuild; references are never
+rebuilt automatically. Multi-condition requests preflight every condition before any backend
+processing starts. Legacy 36-column reference peak tables no longer satisfy the current contract and
+can be rebuilt from the frozen reference spectrum with `rebuild_reference_peak_tables()`; a
+reference missing its input fingerprint must itself be force-rebuilt.
+
+## 6.7 Reference processing audit, conversion provenance and timing
+
+`reference.json` records `stage_times_s`, `processing_audit`, and `conversion_provenance`. The
+conversion-provenance snapshot is frozen when the reference is created and takes precedence when
+reading the record, so later changes to `fid.com` or a sidecar do not replace the evidence from that
+run. `processing_audit` distinguishes FT-sign values that were `requested`, `resolved` according to
+the acquisition rules, and the actual `ft_commands` in the processing script.
+
+The `<data>.fid.conversion.json` sidecar records raw digital-filter parameters for each acquisition
+block, the SHA-256 of the actual `fid.com`, and the `bruk2pipe` arguments and resolved values.
+`records/reference.json` and the reference entries in a combination `manifest.json` carry the
+corresponding sidecar snapshot. When evidence is insufficient, digital-filter correction is recorded
+as `status="unknown"` and `method=null`; this does not mean correction was performed, and execution
+or method is not inferred from metadata such as `GRPDLY`.
+
+Explicit `params.sweep_width_hz` values are recorded with the original value, adopted value, source,
+and `consistency_ratio`. Combination runs reuse the already converted FID and cannot change its
+sweep width. Carrier audit is also retained with the frozen reference conversion record: requested,
+resolved, and source values are tied to the conversion script actually used, its SHA-256, and the
+matching provenance. Changing the carrier requires force-rebuilding the reference; the original
+`acqus` is not written back. For an explicit override, inspect
+`reference.conversion_provenance.sidecars[].record.carrier.explicit_carrier`: `axes.F1` and other
+logical axes store `requested`, `resolved`, `source="explicit_ppm"`, and `conversion_key`. The same
+record includes `script_name`, `script_sha256`, and `command_evidence` (the conversion script text).
+`resolved` is ppm parsed from the final command, not a separately measured peak position or a
+floating-point header readback.
+
+`stage_times_s` contains per-stage elapsed times, not one total that includes all API overhead. Each
+`workflow.json` `condition_records[]` also contains that condition's `stage_times_s`, copied from its
+single-condition `run.json`; it is not an aggregate workflow duration.

@@ -1,4 +1,4 @@
-# 05 · Input: data, condition and parameter combination table (v1.0)
+# 05 · Input: data, condition and parameter combination table (v1.1)
 
 ## 5.1 Raw data
 
@@ -107,6 +107,37 @@ run_parameter_study(..., peaks="library.list")   # or a peak_id,H_ppm,N_ppm CSV
 - Parameter is illegal and gives **error or warning**: lock key error, certainty/Unknown key write `plan.notes`;
 - All parameters that affect the result must be traceable: `parameters_requested` ->
   `parameters_used` -> `parameters_resolved` (automatic parameter actual result).
+
+### Reference cache, carrier and spectral width (v1.1)
+
+Reference reuse requires an exact normalized processing request match, including phase route,
+direct range, and all parameters (nested mappings and equivalent dotted keys normalize alike).
+The SHA-256 input fingerprint is stored at reference.json.input_fingerprint using schema
+nmrforge_api.reference_input.v1. Any mismatch, or an old reference without a valid fingerprint,
+raises ReferenceError and requires explicit force=True / CLI --force; there is no automatic rebuild.
+Multi-condition requests preflight every condition before the processing engine starts. Resume uses
+schema nmrforge_api.resume.v4.
+
+Reference construction accepts carrier_ppm as a per-axis mapping or params["carrier_ppm"] /
+dotted carrier_ppm.F1. CLI reference accepts repeatable --carrier-ppm F1=120.0 --carrier-ppm
+F2=4.7; duplicate axes are errors. Explicit keyword values override common params per axis, then
+params_by_condition overrides common values per axis. Logical F axes are F2=x/F1=y in 2D and
+F3=x/F2=y/F1=z in 3D. Values must be finite numbers (zero and negative are valid); booleans,
+NaN/Inf, empty maps, unknown axes, and out-of-dimension axes are rejected. Unspecified axes retain
+the actual CAR from the selected conversion path; raw acqus is not changed. When Bruker -AUTO is
+available and succeeds, the actual CAR in fid.com is retained (it may follow AUTO rules such as
+water peak or gamma ratio; the API does not force O1/BF1 or promise a fixed value). Only when
+uniform AUTO is unavailable or fails and the built-in bruk2pipe fallback is used does CAR come
+from parsed Dimension.o1p: nonzero acquisition O1P first, otherwise O1/BF1, then O1/SFO1 when BF1
+is absent, or 0 if neither is available. These paths do not share a CAR convention. Carrier is
+ppm-axis calibration, not an acquisition SFO1 change or phase setting, and is not a scientific
+identity inference. A changed carrier requires force=True. Sweeps inherit reference carrier and reject
+carrier scans in axes, combos, or base_overrides because they reuse the converted FID.
+
+Reference params may explicitly set positive finite sweep_width_hz per logical axis. Original and
+resolved widths, source, and consistency ratio are recorded; sweeps reuse the converted FID and
+cannot change its spectral width. This applies to any logical F axis, including an axis acquired
+for 15N; use its F-axis key rather than a nucleus-name key.
 
 ## 5.9 Specify parameter by dimension (combination table)
 

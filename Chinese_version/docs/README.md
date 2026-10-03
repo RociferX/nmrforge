@@ -11,7 +11,7 @@
 ## 桌面程序与 Python/CLI API
 
 桌面程序与 `nmrforge_api` 都是同一源码树中的受支持接口。Python API 单独版本化
-(`API_VERSION = "1.0"`)，并提供兼容清单用于识别行为与契约变化。GitHub Releases 中的
+(`API_VERSION = "1.1"`,当前源码契约，2026-10-03)，并提供兼容清单用于识别行为与契约变化。旧 AppImage 1.0.2 不包含此后新增的 API 契约。GitHub Releases 中的
 AppImage 对应特定版本和源码提交；更新源码不会自动更新已发布的二进制。
 
 ### 桌面程序

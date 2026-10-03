@@ -1,28 +1,11 @@
-"""Peak-position measurement: track the same reference peaks across every candidate spectrum.
+"""Independent peak detection and single-spectrum reference-list measurement.
 
-Why not simply re-pick peaks for this study? Picking is threshold detection: changing a
-processing parameter can add or drop peaks and mix "a different peak" into the position
-difference. This module freezes the reference table, finds an extremum in a small window
-around each position and refines it parabolically, so **the same peaks stay tracked**.
-
-Method (usable in a methods section):
-
-1. the reference table gives each peak's nucleus positions (ppm) and assignment;
-2. ppm -> a fractional index on the spectrum's data axis (same source as picking: ORIG
-      first, CAR as fallback, logical axes mapped by FDDIMORDER; see ``workflow.pick_peaks``);
-3. take the ``|intensity|`` extremum (the default) inside a window defined by a **physical
-      width**: the window defaults to that axis's linewidth in ppm (``core.peaks.axis_units``),
-      converted at the current spacing; ``window_ppm`` gives ppm explicitly while
-      ``window_pts`` forces points (that width moves with zero filling; avoid comparing runs);
-4. for each measured axis a three-point parabola over ±1 point gives the vertex offset d;
-      fractional index = integer index + d, with d in [-0.5, 0.5];
-5. fractional index -> ppm by linear interpolation on the axis array.
-
-Quality flags: ``window_edge`` (the extremum sits on the **physical window** edge, so the
-true peak may lie outside), ``boundary`` (against the spectrum edge), ``out_of_range``,
-``found`` and ``cell_edge`` (the extremum was cut by the **exclusive-cell** edge, see
-``measure_peak_positions``). ``window_edge`` and ``cell_edge`` are orthogonal: the first
-describes the physical window only, the second the neighbour's cell only.
+The main API detects each spectrum independently. Reference-list measurement accepts
+multidimensional local peaks within physical windows and assigns overlapping candidates
+by joint distance; absent peaks retain explicit failure states. Logical F-axis coordinates
+survive storage permutations and repeated nuclei. Three-point parabolic interpolation and
+polarity-normalized stencil QC do not establish cross-spectrum correspondence, uncertainty,
+or line-shape validity.
 """
 
 from __future__ import annotations
@@ -48,11 +31,10 @@ _NAMED_KEYS: tuple[tuple[str, str], ...] = (
 
 
 def reference_peak_id(peak_id: Any) -> str:
-    """Peak index -> stable identity ``R0001`` (frozen once the reference table exists).
+    """Convert a local peak index to a stable identifier such as ``R0001``.
 
-    The reference table assigns each peak a reference_peak_id; every later workflow table
-    carries
-    that column (undetected peaks stay, with detected=false), so downstream can match them back.
+    This identifier belongs to one spectrum's reference list; it does not establish identity
+    or correspondence across spectra.
     """
     try:
         number = int(peak_id)
@@ -67,28 +49,27 @@ class PeakMeasurement:
 
     peak_id: int
     assignment: str
-    # stable identity (the reference_peak_id, e.g. R0001)
+
     reference_peak_id: str = ""
     reference: dict[str, float] = field(default_factory=dict)
     positions: dict[str, float] = field(default_factory=dict)
+    axis_nuclei: dict[str, str] = field(default_factory=dict)
     deltas: dict[str, float] = field(default_factory=dict)
     intensity: float = 0.0
-    # this spectrum's noise sigma (robust MAD) and per-peak SNR = |intensity| / sigma
+
     noise_sigma: float = 0.0
     snr: float = 0.0
     found: bool = True
     window_edge: bool = False
     boundary: bool = False
     out_of_range: bool = False
-    # P1-3 localisation QC: the effective search interval (data-axis integer grid,
-    # closed), whether the extremum sits on the **exclusive-cell** edge (the neighbour's
-    # cell cut it short -- orthogonal to window_edge), and the measured intensity
-    # divided by the identity table's Height (NaN when the Height is missing or 0)
+    # Legacy separable cell geometry is unavailable for joint multidimensional ownership.
+    # Intensity ratio is measured height / input Height (missing or zero => NaN).
     cell_low: dict[str, int] = field(default_factory=dict)
     cell_high: dict[str, int] = field(default_factory=dict)
-    cell_edge: bool = False
+    cell_edge: bool | None = None
     intensity_ratio: float = float("nan")
-    # localisation diagnostics (2026-09-13): method, fallback, fit QC; empty = reference only
+    # Actual method, failure/fallback reasons and parabolic stencil QC.
     localization: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -98,6 +79,7 @@ class PeakMeasurement:
             "reference_peak_id": self.reference_peak_id,
             "reference": {k: float(v) for k, v in self.reference.items()},
             "positions": {k: float(v) for k, v in self.positions.items()},
+            "axis_nuclei": dict(self.axis_nuclei),
             "deltas": {k: float(v) for k, v in self.deltas.items()},
             "intensity": float(self.intensity),
             "noise_sigma": float(self.noise_sigma),
@@ -108,21 +90,24 @@ class PeakMeasurement:
             "out_of_range": bool(self.out_of_range),
             "cell_low": {str(k): int(v) for k, v in self.cell_low.items()},
             "cell_high": {str(k): int(v) for k, v in self.cell_high.items()},
-            "cell_edge": bool(self.cell_edge),
+            "cell_edge": self.cell_edge,
             "intensity_ratio": float(self.intensity_ratio),
-            "localization": {str(k): v for k, v in (self.localization or {}).items()},
+            "localization": {
+                str(k): v for k, v in (self.localization or {}).items()
+            },
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PeakMeasurement:
         return cls(
             peak_id=int(data.get("peak_id", 0) or 0),
-            assignment=str(data.get("assignment", "")),
+            assignment=str(data.get("assignment") or ""),
             reference_peak_id=str(
-                data.get("reference_peak_id") or reference_peak_id(data.get("peak_id", 0))
+                data.get("reference_peak_id", reference_peak_id(data.get("peak_id", 0))) or ""
             ),
             reference={k: float(v) for k, v in (data.get("reference") or {}).items()},
             positions={k: float(v) for k, v in (data.get("positions") or {}).items()},
+            axis_nuclei=dict(data.get("axis_nuclei") or {}),
             deltas={k: float(v) for k, v in (data.get("deltas") or {}).items()},
             intensity=float(data.get("intensity", 0.0) or 0.0),
             noise_sigma=float(data.get("noise_sigma", 0.0) or 0.0),
@@ -131,9 +116,13 @@ class PeakMeasurement:
             window_edge=bool(data.get("window_edge", False)),
             boundary=bool(data.get("boundary", False)),
             out_of_range=bool(data.get("out_of_range", False)),
-            cell_low={str(k): int(v) for k, v in (data.get("cell_low") or {}).items()},
-            cell_high={str(k): int(v) for k, v in (data.get("cell_high") or {}).items()},
-            cell_edge=bool(data.get("cell_edge", False)),
+            cell_low={
+                str(k): int(v) for k, v in (data.get("cell_low") or {}).items()
+            },
+            cell_high={
+                str(k): int(v) for k, v in (data.get("cell_high") or {}).items()
+            },
+            cell_edge=None if data.get("cell_edge") is None else bool(data["cell_edge"]),
             intensity_ratio=float(data.get("intensity_ratio") or float("nan")),
             localization=dict(data.get("localization") or {}),
         )
@@ -155,11 +144,15 @@ def _read_ppm_csv(path: Path) -> list[dict[str, Any]] | None:
     if not lines:
         return None
     header = [cell.strip().lower() for cell in lines[0].split(",")]
-    if "h_ppm" not in header or "n_ppm" not in header:
+    if not ({"h_ppm", "n_ppm"} <= set(header) or "f1_ppm" in header):
         return None
     rows: list[dict[str, Any]] = []
     for index, row in enumerate(csv.DictReader(lines), start=1):
-        normalized = {str(key).strip().lower(): value for key, value in row.items() if key}
+        normalized = {
+            str(key).strip().lower(): value
+            for key, value in row.items()
+            if key
+        }
 
         def _num(name: str) -> str:
             value = normalized.get(name, "")
@@ -167,20 +160,28 @@ def _read_ppm_csv(path: Path) -> list[dict[str, Any]] | None:
 
         raw_id = str(normalized.get("peak_id", "") or "").strip()
         label = raw_id.split(":", 1)[1] if ":" in raw_id else raw_id
-        rows.append(
-            {
+        parsed = {
                 "Peak_ID": index,
-                "label": label,
+                "label": str(normalized.get("assignment") or "")
+                if "assignment" in normalized else label,
                 "H_shift": _num("h_ppm"),
                 "N_shift": _num("n_ppm"),
+                "C_shift": _num("c_ppm"),
                 "Intensity": _num("height") or _num("intensity"),
                 "peak_id_raw": raw_id,
             }
-        )
+        for logical in range(1, 4):
+            value = _num(f"f{logical}_ppm")
+            if value and np.isfinite(float(value)):
+                parsed[f"F{logical}_shift"] = value
+        parsed["reference_peak_id"] = normalized.get("reference_peak_id") or ""
+        rows.append(parsed)
     return rows
 
 
-def read_reference_peaks(path: Path | str) -> list[dict[str, Any]]:
+def read_reference_peaks(
+    path: Path | str, *, axes: SpectrumAxes | None = None,
+) -> list[dict[str, Any]]:
     """Read the reference peak table, keeping peaks with at least one nucleus position.
 
     Three formats are accepted:
@@ -190,30 +191,51 @@ def read_reference_peaks(path: Path | str) -> list[dict[str, Any]]:
     - the study-project CSV (``peak_id,H_ppm,N_ppm,height,linewidth,volume``,
         a reference table exported from a public archive).
     """
-    from core.peaks.peak_table import load_peaks
+    from core.peaks.peak_table import import_peaks_poky, load_peaks
 
     target = Path(path)
     if not target.is_file():
         raise MeasurementError(tr("reference peak table does not exist: {p0}", p0=target))
     peaks = _read_ppm_csv(target)
     if peaks is None:
-        peaks = load_peaks(target)
-    # stable identity: the reference table assigns reference_peak_id, later tables reuse it
+        if axes is not None and target.suffix.lower() == ".list":
+            logical_nuclei = [axes.nuclei[storage] for storage in axes.logical_to_storage]
+            peaks = import_peaks_poky(target, nuclei=logical_nuclei)
+            if axes.ndim == 2:
+                conventional_hn = (axes.nuclei.count("1H") == 1
+                                   and axes.nuclei.count("15N") == 1)
+                for row in peaks:
+                    by_storage = (
+                        {axes.storage_of("15N"): row.get("N_shift"),
+                         axes.storage_of("1H"): row.get("H_shift")}
+                        if conventional_hn else {0: row.get("N_shift"), 1: row.get("H_shift")}
+                    )
+                    for logical, storage in enumerate(axes.logical_to_storage, start=1):
+                        row[f"F{logical}_shift"] = by_storage[storage]
+                    if not conventional_hn:
+                        row.pop("N_shift", None)
+                        row.pop("H_shift", None)
+        else:
+            peaks = load_peaks(target)
+    # Stable identity is local to this condition's reference, not inherited by workflows.
     for position, row in enumerate(peaks, start=1):
-        if not row.get("reference_peak_id"):
-            row["reference_peak_id"] = reference_peak_id(row.get("Peak_ID") or position)
-    usable = [row for row in peaks if peak_coordinates(row, None)]
-    if not usable:
-        raise MeasurementError(
-            tr(
-                "reference peak table has no measurable positions: {p0}",
-                p0=path,
+        if not row.get('reference_peak_id'):
+            row['reference_peak_id'] = reference_peak_id(
+                row.get('Peak_ID') or position
             )
-        )
+    usable = [row for row in peaks if peak_coordinates(row, axes)]
+    if not usable:
+        raise MeasurementError(tr(
+            "reference peak table has no measurable positions: "
+            "{p0}",
+            p0=path,
+        ))
     return usable
 
 
-def peak_coordinates(row: dict[str, Any], axes: SpectrumAxes | None) -> dict[str, float]:
+def peak_coordinates(
+    row: dict[str, Any], axes: SpectrumAxes | None
+) -> dict[str, float]:
     """A peak-table row -> {nucleus: ppm}.
 
     - 2D rows use the named keys ``H_shift`` / ``N_shift`` / ``C_shift``;
@@ -221,13 +243,20 @@ def peak_coordinates(row: dict[str, Any], axes: SpectrumAxes | None) -> dict[str
     - with ``axes=None`` only the named keys are parsed, which is enough to drop empty rows.
     """
     coords: dict[str, float] = {}
-    if axes is not None:
+    if axes is None:
+        for logical in range(1, 4):
+            value = row.get(f"F{logical}_shift", row.get(f"F{logical}_ppm"))
+            if value not in (None, "") and np.isfinite(float(value)):
+                coords[f"F{logical}"] = float(value)
+    else:
         from workflow.peak_align import coordinate_key
 
         logical_nuclei = [axes.nuclei[storage] for storage in axes.logical_to_storage]
         for logical, storage in enumerate(axes.logical_to_storage):
-            value = row.get(f"F{logical + 1}_shift")
+            value = row.get(f"F{logical + 1}_shift", row.get(f"F{logical + 1}_ppm"))
             if value is None or str(value) == "":
+                continue
+            if not np.isfinite(float(value)):
                 continue
             nucleus = axes.nuclei[storage] if storage < len(axes.nuclei) else ""
             if nucleus:
@@ -235,13 +264,19 @@ def peak_coordinates(row: dict[str, Any], axes: SpectrumAxes | None) -> dict[str
     for key, nucleus in _NAMED_KEYS:
         value = row.get(key)
         if value is not None and str(value) != "":
+            if not np.isfinite(float(value)):
+                continue
             if axes is not None and axes.nuclei.count(nucleus) > 1:
-                raise MeasurementError(
-                    tr(
-                        "Repeated nuclei require explicit F-axis coordinates: {p0}",
-                        p0=nucleus,
-                    )
-                )
+                if all(
+                    row.get(f"F{logical + 1}_shift", row.get(f"F{logical + 1}_ppm"))
+                    not in (None, "")
+                    for logical, storage in enumerate(axes.logical_to_storage)
+                    if axes.nuclei[storage] == nucleus
+                ):
+                    continue
+                raise MeasurementError(tr(
+                    "Repeated nuclei require explicit F-axis coordinates: {p0}", p0=nucleus,
+                ))
             coords.setdefault(nucleus, float(value))
     return coords
 
@@ -266,14 +301,10 @@ def _axis_step_ppm(axes: SpectrumAxes, axis: int) -> float:
 
 
 def _parabolic_qc(y_minus: float, y_zero: float, y_plus: float, step_ppm: float) -> dict[str, Any]:
-    """Three-point parabola -> vertex offset + equivalent linewidth + edge flag (P3-7).
+    """Convert a three-point parabola to a vertex offset and linewidth QC record.
 
-    With vertex height ``H = c - b^2/(4a)`` and curvature ``a``, the equivalent Gaussian
-    linewidth is ``FWHM = 2.3548 * sigma`` with ``sigma^2 = H/(2|a|)`` - the same wording
-    as the Gaussian table's FWHM, so the two are directly comparable. When the parabola
-    is not a peak (``a >= 0`` or ``H <= 0``) or the conversion is impossible, ``fwhm_ppm``
-    is None (NaN in the table) rather than a guess. A vertex offset sitting on the +-0.5
-    point limit sets ``boundary_hit`` (the true top may lie outside the stencil).
+    Invalid curvature or height yields no linewidth estimate. An offset at the half-point
+    limit sets ``boundary_hit`` because the true maximum may lie outside the stencil.
     """
     a = (y_minus + y_plus) / 2.0 - y_zero
     b = (y_plus - y_minus) / 2.0
@@ -298,21 +329,14 @@ def _parabolic_qc(y_minus: float, y_zero: float, y_plus: float, step_ppm: float)
 
 
 def _parabolic_stencil_qc(
-    data: np.ndarray,
-    center: Sequence[int],
-    axes: SpectrumAxes,
-    *,
-    baseline: float = 0.0,
+    data: np.ndarray, center: Sequence[int], axes: SpectrumAxes, *, baseline: float = 0.0,
 ) -> dict[str, Any]:
-    """Integer grid point -> three-point parabola QC record (the workflow path).
-
-    Shares :func:`_parabolic_qc` with the reference path; the record keys mirror the
-    Gaussian path (``fit_success`` / ``boundary_hit`` / ``fwhm_by_nucleus``) so the
-    unified peak table can take its values by method.
-    """
+    """Create the three-point parabolic QC record for an integer-grid peak."""
     fwhm: dict[str, float] = {}
+    fwhm_axis: dict[str, float] = {}
     ok = True
     edge = False
+    polarity = 1.0 if float(data[tuple(center)]) - baseline >= 0 else -1.0
     for axis in range(int(data.ndim)):
         nucleus = axes.nuclei[axis] if axis < len(axes.nuclei) else ""
         position = int(center[axis])
@@ -325,21 +349,26 @@ def _parabolic_stencil_qc(
         for shift in (-1, 0, 1):
             index_tuple = [int(v) for v in center]
             index_tuple[axis] = position + shift
-            profile.append(float(data[tuple(index_tuple)]) - baseline)
+            profile.append(polarity * (float(data[tuple(index_tuple)]) - baseline))
         qc = _parabolic_qc(*profile, step_ppm=_axis_step_ppm(axes, axis))
         if qc["boundary_hit"]:
             edge = True
         value = qc["fwhm_ppm"]
         if value is None:
             ok = False
-        elif nucleus:
-            fwhm[nucleus] = float(value)
+        else:
+            logical = axes.logical_to_storage.index(axis) + 1
+            fwhm_axis[f"F{logical}"] = float(value)
+            if nucleus and axes.nuclei.count(nucleus) == 1:
+                fwhm[nucleus] = float(value)
     return {
         "requested_method": "parabolic",
         "actual_method": "parabolic",
         "fit_success": bool(ok),
         "boundary_hit": bool(edge),
         "fwhm_by_nucleus": fwhm,
+        "fwhm_by_axis": fwhm_axis,
+        "failure_reason": "" if ok else "invalid_or_boundary_parabolic_stencil",
         "source": tr("core.peaks(three-point parabola)"),
     }
 
@@ -407,44 +436,25 @@ def measure_peak_positions(
     nuclei: Iterable[str] | None = None,
     noise_sigma: float | None = None,
     exclusive_windows: bool = True,
+    min_snr: float = 3.0,
 ) -> list[PeakMeasurement]:
-    """Measure the sub-pixel positions of ``peaks`` on ``spectrum_path``.
+    """Measure reference-list positions on one spectrum.
 
-        sign: ``"abs"`` (default, follow either sign) | ``"positive"`` | ``"negative"``;
-        refine: ``"parabolic"`` (three-point parabola) | ``"none"`` (integer maximum
-        only) | ``"gaussian"`` (a 2D fit, **2D only**; the ROI is a physical width in ppm,
-        ``roi_f1_ppm``/``roi_f2_ppm``, defaulting to config ``peaks.localization``;
-        a failed fit falls back to parabolic and records requested/actual/why, never silently).
-        A non-empty nuclei list measures only those nuclei; the rest keep their reference
-        values.
+    Search windows default to a physical linewidth width, so zero filling does not change
+    their ppm span. ``window_ppm`` sets a physical half-width; ``window_pts`` forces points.
+    By default, candidates must be full-dimensional local maxima above ``min_snr`` and
+    overlapping windows are resolved by joint distance. Missing peaks remain in the result
+    with ``found=False`` and empty positions. ``nuclei`` limits the axes to localize; other
+    coordinates are left unchanged.
 
-        Search window: defaults to a physical width (linewidth x1.5 in ppm) converted per axis,
-        so **zero filling never changes the ppm width the window covers**; ``window_ppm`` sets
-        that
-        width and ``window_pts`` forces points (not recommended). Pass already-read axes via
-        ``axes``
-    to avoid re-reading the spectrum.
-
-        ``exclusive_windows`` is on by default: the half-width is only an **upper bound**, and
-        each
-        reference peak's search region is truncated at the midpoints to its neighbouring
-        reference
-        peaks, so a peak only takes the extremum inside its own cell. Without that, a window
-        wider
-        than the spacing between neighbouring peaks makes two reference records hit the same
-        extremum cell and the table gets duplicate rows differing only in ``reference_peak_id``
-        (fixed 2026-09-19); pass ``False`` for the previous "all peaks share one fixed window"
-        wording.
-
-        ``noise_sigma``: this spectrum's noise. Defaults to the robust MAD in ``core.qc.noise``;
-        each peak's ``SNR = |intensity| / sigma`` is written with sigma (the unified SNR
-        column),
-        so downstream can recheck whether a peak is strong enough to be called detected.
+    ``refine`` accepts ``"parabolic"`` (three-point vertex interpolation) or ``"none"``
+    (integer-grid maximum). Gaussian fitting has been removed and is rejected. Noise defaults
+    to a robust MAD estimate; the result records intensity, SNR, detection, and localization QC.
 
         Parameters
         ----------
         spectrum_path : Path | str
-            the spectrum to measure (2D ``.ft2``; Gaussian refinement is 2D only).
+            the spectrum to measure.
         peaks : Sequence[dict[str, Any]]
             the candidate peaks (unified fields: ``N_shift``/``H_shift``/``label``...).
         window_pts : int, optional
@@ -457,30 +467,23 @@ def measure_peak_positions(
         sign : str, default "abs"
             which peak signs to follow.
         refine : str, default "parabolic"
-            ``parabolic`` or ``gaussian``; Gaussian on non-2D data raises instead of degrading
-            quietly.
+            ``parabolic`` or ``none``; Gaussian fitting is not supported.
         nuclei : Iterable[str], optional
             axis nuclei; inferred from the header by default.
-        roi_f1_ppm, roi_f2_ppm : float, optional
-            Gaussian ROI radius (ppm).
         noise_sigma : float, optional
             known noise sigma; estimated from the spectrum by default.
         exclusive_windows : bool, default True
-            each reference peak searches only its own cell (bounded by the midpoints to its
-            neighbours), so two reference records are never relocated onto the same grid point;
-            ``False`` restores the shared fixed window.
+            require local peaks and resolve overlapping windows by joint distance.
 
         Returns
         -------
         list[PeakMeasurement]
-            per-peak results: position, intensity/SNR, detection, method used and fit
-            diagnostics.
+            per-peak position, intensity/SNR, detection, and localization diagnostics.
 
         Raises
         ------
         MeasurementError
-            the spectrum is unreadable, Gaussian was asked for on non-2D data, or a peak is
-            invalid.
+            the spectrum or parameters are invalid, or a removed refinement is requested.
 
         Side effects
         ------------
@@ -498,28 +501,45 @@ def measure_peak_positions(
         raise MeasurementError(tr("window_pts cannot be negative"))
     if sign not in ("abs", "positive", "negative"):
         raise MeasurementError(tr("unknown sign: {p0}", p0=sign))
+    if not np.isfinite(min_snr) or min_snr <= 0:
+        raise MeasurementError("min_snr must be a positive finite number")
+    if window_ppm is not None and (not np.isfinite(window_ppm) or window_ppm <= 0):
+        raise MeasurementError("window_ppm must be a positive finite number")
     if refine not in ("parabolic", "none"):
-        raise MeasurementError(
-            tr(
-                "unknown refine: {p0!r} (parabolic / none; the Gaussian fit was removed)",
-                p0=refine,
-            )
-        )
+        raise MeasurementError(tr(
+            "unknown refine: {p0!r} (parabolic / none; the Gaussian fit was removed)",
+            p0=refine,
+        ))
 
     spectrum_axes = axes if axes is not None else read_spectrum_axes(path)
     axes = spectrum_axes
     data = np.asarray(axes.data, dtype=float)
-    window_by_axis = window_points_by_axis(axes, window_pts=window_pts, window_ppm=window_ppm)
+    window_by_axis = window_points_by_axis(
+        axes, window_pts=window_pts, window_ppm=window_ppm
+    )
     from core.qc import noise as _noise
 
     estimate = _noise.estimate(data)
     data = data - estimate.baseline
-    sigma = float(noise_sigma) if noise_sigma is not None else float(estimate.global_sigma)
+    sigma = (
+        float(noise_sigma)
+        if noise_sigma is not None
+        else float(estimate.global_sigma)
+    )
+    if not np.isfinite(sigma) or sigma < 0:
+        raise MeasurementError("noise_sigma must be finite and non-negative")
+    # Require a real full-dimensional local peak, not an arbitrary window maximum.
+    # Reuse the detector's compact-plateau policy and the same median baseline.
+    from core.qc.peak_detection import PeakDetectionParams, _candidates
+
+    detector = PeakDetectionParams(sigma_multiplier=min_snr, min_snr=min_snr, refine=False)
+    candidates = []
+    for polarity in ((1, -1) if sign == "abs" else ((1,) if sign == "positive" else (-1,))):
+        candidates.extend(_candidates(data, sigma, detector, polarity))
     wanted = {str(n) for n in nuclei} if nuclei else None
-    # Pre-pass: work out each reference peak's integer grid centre on every searched axis -
-    # the "one cell per peak" split below needs the positions of all peaks at once.
+
+
     plans: list[dict[str, Any]] = []
-    centers_by_axis: dict[int, list[int]] = {}
     for index, row in enumerate(peaks, start=1):
         coords = peak_coordinates(row, axes)
         search_axes: list[int] = []
@@ -527,11 +547,8 @@ def measure_peak_positions(
         centers: list[int] = []
         out_of_range = False
         for nucleus, ppm_value in coords.items():
-            if (
-                wanted is not None
-                and nucleus not in wanted
-                and nucleus.split(":", 1)[0] not in wanted
-            ):
+            if (wanted is not None and nucleus not in wanted
+                    and nucleus.split(":", 1)[0] not in wanted):
                 continue
             axis = axes.storage_of(nucleus)
             if axis is None:
@@ -539,17 +556,27 @@ def measure_peak_positions(
             axis_ppm = np.asarray(axes.ppm[axis], dtype=float)
             size = int(data.shape[axis])
             if axis_ppm.size and (
-                ppm_value < float(np.min(axis_ppm)) or ppm_value > float(np.max(axis_ppm))
+                ppm_value < float(np.min(axis_ppm))
+                or ppm_value > float(np.max(axis_ppm))
             ):
-                # a reference position outside the spectrum is still searched near the edge,
-                # so the user can see how far off it is instead of losing the peak.
+
+
                 out_of_range = True
             fraction = axes.fraction_from_ppm(axis, ppm_value)
             search_axes.append(axis)
             search_nuclei.append(nucleus)
             centers.append(int(min(max(round(fraction), 0), size - 1)))
-        for axis, center in zip(search_axes, centers):
-            centers_by_axis.setdefault(axis, []).append(center)
+        window_bounds = {
+            axis: (max(0, center - int(window_by_axis[axis]["points"])),
+                   min(data.shape[axis] - 1, center + int(window_by_axis[axis]["points"])))
+            for axis, center in zip(search_axes, centers)
+        }
+        # Non-searched axes remain at the reference coordinate, never a projection.
+        for nucleus, ppm_value in coords.items():
+            axis = axes.storage_of(nucleus)
+            if axis is not None and axis not in window_bounds:
+                center = int(round(axes.fraction_from_ppm(axis, ppm_value)))
+                window_bounds[axis] = (center, center)
         plans.append(
             {
                 "index": index,
@@ -559,28 +586,33 @@ def measure_peak_positions(
                 "search_nuclei": search_nuclei,
                 "centers": centers,
                 "out_of_range": out_of_range,
+                "bounds": window_bounds,
+                "complete": len(window_bounds) == data.ndim,
             }
         )
-    # Split every axis into cells at the midpoints between neighbouring reference peaks, so a
-    # reference peak only takes the extremum inside its own cell. Two records with different
-    # integer grid centres then have disjoint search regions and can no longer be relocated
-    # onto the same point (fixed 2026-09-19: the previous shared fixed half-width window let a
-    # denser reference peak be swallowed by its stronger neighbour, producing duplicate rows
-    # differing only in reference_peak_id). Records that round to the same grid point still
-    # share a cell - the resolution limit of that spectrum, recorded as-is.
-    cell_bounds: dict[tuple[int, int], tuple[int, int]] = {}
-    if exclusive_windows:
-        for axis, centres in centers_by_axis.items():
-            size = int(data.shape[axis])
-            ordered = sorted(set(centres))
-            for position, center in enumerate(ordered):
-                low = 0 if position == 0 else (ordered[position - 1] + center) // 2 + 1
-                high = (
-                    size - 1
-                    if position == len(ordered) - 1
-                    else (center + ordered[position + 1]) // 2
+    available: dict[int, list[Any]] = {p["index"]: [] for p in plans}
+    lost: set[int] = set()
+    for candidate in candidates:
+        eligible = [p for p in plans if p["search_axes"] and p["complete"] and all(
+            low <= candidate.position[axis] <= high
+            for axis, (low, high) in p["bounds"].items()
+        )]
+        if not eligible:
+            continue
+        if exclusive_windows:
+            # Joint distance only among windows containing this local peak.
+            # Distant H positions cannot clip a nearby N search (or vice versa).
+            def distance(plan: dict[str, Any]) -> float:
+                return sum(
+                    ((candidate.position[axis] - center)
+                     / max(1, int(window_by_axis[axis]["points"]))) ** 2
+                    for axis, center in zip(plan["search_axes"], plan["centers"])
                 )
-                cell_bounds[(axis, center)] = (low, high)
+            owner = min(eligible, key=lambda p: (distance(p), p["index"]))
+            lost.update(p["index"] for p in eligible if p is not owner)
+            eligible = [owner]
+        for plan in eligible:
+            available[plan["index"]].append(candidate)
     results: list[PeakMeasurement] = []
     for plan in plans:
         index = int(plan["index"])
@@ -593,99 +625,66 @@ def measure_peak_positions(
         measurement = PeakMeasurement(
             peak_id=peak_id,
             assignment=assignment,
-            reference_peak_id=str(row.get("reference_peak_id") or reference_peak_id(peak_id)),
+            reference_peak_id=str(
+                row.get('reference_peak_id') or reference_peak_id(peak_id)
+            ),
             reference=coords,
             noise_sigma=sigma,
+            axis_nuclei={f"F{i + 1}": axes.nuclei[storage]
+                         for i, storage in enumerate(axes.logical_to_storage)},
+            found=False,
         )
         measurement.out_of_range = bool(plan["out_of_range"])
+        measurement.localization = {
+            "requested_method": refine,
+            "actual_method": "none",
+            "candidate_ownership_conflict": index in lost,
+            "search_bounds_by_axis": {
+                f"F{axes.logical_to_storage.index(axis) + 1}": {
+                    "low": int(low), "high": int(high), "storage_axis": axis,
+                    "unit": "points", "inclusive": True,
+                } for axis, (low, high) in plan["bounds"].items()
+            },
+        }
         search_axes = plan["search_axes"]
         search_nuclei = plan["search_nuclei"]
         centers = plan["centers"]
         if not search_axes:
             measurement.found = False
+            measurement.localization["failure_reason"] = "incomplete_reference_coordinates"
             results.append(measurement)
             continue
 
-        # bounds must be indexed by data axis: search_axes follows the order nuclei appear in the
-        # peak table (1H usually before 15N), so building in that order would transpose the window.
-        bounds: dict[int, tuple[int, int]] = {}
-        # the physical window bounds (+-half, clipped by the spectrum edge): window_edge
-        # uses only these, never the exclusive cell
+        # Physical bounds are audited separately, never exported as exclusive cells.
         window_bounds: dict[int, tuple[int, int]] = {}
-        # axes whose search was really truncated by the exclusive cell: only those can
-        # produce a cell_edge; the physical window edge stays with window_edge. The
-        # tuple records (low, high, low raised by the neighbour cell, high lowered).
-        exclusive_bounds: dict[int, tuple[int, int, bool, bool]] = {}
         for axis, center in zip(search_axes, centers):
             size = int(data.shape[axis])
             half = int(window_by_axis.get(axis, {}).get("points", 0))
             window_low = max(0, center - half)
             window_high = min(size - 1, center + half)
-            low, high = window_low, window_high
-            # window_edge keeps its old meaning: the extremum sits on the **physical
-            # window** bound (+-half, clipped by the spectrum edge). The edge cut out by
-            # the exclusive cell belongs to cell_edge, so the two stay orthogonal.
             window_bounds[axis] = (window_low, window_high)
-            if (axis, center) in cell_bounds:
-                cell_low, cell_high = cell_bounds[(axis, center)]
-                low = max(low, cell_low)
-                high = min(high, cell_high)
-                low_from_cell = low > window_low
-                high_from_cell = high < window_high
-                if low_from_cell or high_from_cell:
-                    exclusive_bounds[axis] = (
-                        low,
-                        high,
-                        low_from_cell,
-                        high_from_cell,
-                    )
-            bounds[axis] = (low, high)
-        measurement.cell_low = {
-            nucleus: int(bounds[axis][0]) for nucleus, axis in zip(search_nuclei, search_axes)
-        }
-        measurement.cell_high = {
-            nucleus: int(bounds[axis][1]) for nucleus, axis in zip(search_nuclei, search_axes)
-        }
-        slices = tuple(
-            slice(bounds[axis][0], bounds[axis][1] + 1) if axis in bounds else slice(None)
-            for axis in range(data.ndim)
-        )
-        block = data[slices]
-        if block.size == 0 or not np.any(np.isfinite(block)):
-            measurement.found = False
+        eligible = available[index]
+        if not eligible:
+            measurement.localization["failure_reason"] = (
+                "incomplete_reference_coordinates" if not plan["complete"] else
+                "candidate_owned_by_other_reference" if index in lost else
+                "no_local_peak_above_threshold"
+            )
             results.append(measurement)
             continue
-        if sign == "abs":
-            values = np.abs(block)
-        elif sign == "positive":
-            values = block
-        else:
-            values = -block
-        flat = int(np.nanargmax(values))
-        relative = np.unravel_index(flat, values.shape)
-        best = [
-            (bounds[axis][0] + int(relative[axis])) if axis in bounds else int(relative[axis])
-            for axis in range(data.ndim)
-        ]
-        measurement.intensity = float(data[tuple(best)] if np.isfinite(data[tuple(best)]) else 0.0)
-        measurement.snr = abs(measurement.intensity) / sigma if sigma > 0 else 0.0
-        # the extremum sits on **that** exclusive-cell edge = the real top may lie in the
-        # neighbour's cell (2026-09-19). Only the side the neighbour truncated counts;
-        # stopping on the physical window edge is still just window_edge.
-        for axis in search_axes:
-            cell = exclusive_bounds.get(axis)
-            if cell is None:
-                continue
-            low, high, low_from_cell, high_from_cell = cell
-            position = int(best[axis])
-            if (low_from_cell and position == low) or (high_from_cell and position == high):
-                measurement.cell_edge = True
-        # Measured intensity / the identity-table Height: about 1 means the record stopped
-        # on its own top (>1 means it is more likely a shoulder). Fixed 2026-09-19: the
-        # denominator is |Height| - in a negative-peak data set the .list Height is
-        # negative, and the old `> 0` test wrote NaN into the whole column. The ratio is
-        # |measured| / |picked|, so about 1 still means "its own peak top" when the two
-        # share a sign.
+        candidate = max(eligible, key=lambda p: abs(p.height))
+        best = [int(v) for v in candidate.position]
+        measurement.found = True
+        measurement.intensity = float(
+            data[tuple(best)] if np.isfinite(data[tuple(best)]) else 0.0
+        )
+        measurement.snr = (
+            abs(measurement.intensity) / sigma if sigma > 0 else 0.0
+        )
+
+
+
+
         picked = row.get("Intensity")
         if picked in (None, ""):
             picked = row.get("Height", row.get("height"))
@@ -694,7 +693,9 @@ def measure_peak_positions(
         except (TypeError, ValueError):
             picked_value = 0.0
         measurement.intensity_ratio = (
-            abs(float(measurement.intensity)) / abs(picked_value) if picked_value else float("nan")
+            abs(float(measurement.intensity)) / abs(picked_value)
+            if picked_value
+            else float("nan")
         )
         for axis in search_axes:
             lo, hi = window_bounds[axis]
@@ -706,18 +707,19 @@ def measure_peak_positions(
             ):
                 measurement.window_edge = True
 
-        # sub-pixel refine per measured axis, the others held at their best point
+
         fractions = [float(index_) for index_ in best]
         if refine == "parabolic":
+
             qc_fwhm: dict[str, float] = {}
+            qc_fwhm_axis: dict[str, float] = {}
             qc_ok = True
             qc_edge = False
             for axis, nucleus in zip(search_axes, search_nuclei):
                 position = best[axis]
                 size = int(data.shape[axis])
                 if position <= 0 or position >= size - 1:
-                    # the stencil touches the spectrum edge: no linewidth is available,
-                    # so fit_success is reported as false
+
                     qc_ok = False
                     qc_edge = True
                     continue
@@ -726,10 +728,7 @@ def measure_peak_positions(
                     index_tuple = list(best)
                     index_tuple[axis] = position + offset
                     value = float(data[tuple(index_tuple)])
-                    if sign == "abs":
-                        value = abs(value)
-                    elif sign == "negative":
-                        value = -value
+                    value *= candidate.sign
                     profile.append(value)
                 qc = _parabolic_qc(*profile, step_ppm=_axis_step_ppm(axes, axis))
                 fractions[axis] = position + float(qc["offset"])
@@ -740,29 +739,38 @@ def measure_peak_positions(
                     qc_ok = False
                 elif nucleus:
                     qc_fwhm[nucleus] = float(value)
-            measurement.localization = {
+                    qc_fwhm_axis[f"F{axes.logical_to_storage.index(axis) + 1}"] = float(value)
+            measurement.localization.update({
                 "requested_method": "parabolic",
                 "actual_method": "parabolic",
                 "fit_success": qc_ok,
                 "boundary_hit": qc_edge,
                 "fwhm_by_nucleus": qc_fwhm,
+                "fwhm_by_axis": qc_fwhm_axis,
+                "failure_reason": "" if qc_ok else "invalid_or_boundary_parabolic_stencil",
                 "source": tr("core.peaks(three-point parabola)"),
                 "baseline_offset": float(estimate.baseline),
                 "height_reference": "global_median_baseline",
-            }
+            })
 
         for nucleus, _ppm_value in coords.items():
-            if (
-                wanted is not None
-                and nucleus not in wanted
-                and nucleus.split(":", 1)[0] not in wanted
-            ):
+            if (wanted is not None and nucleus not in wanted
+                    and nucleus.split(":", 1)[0] not in wanted):
                 continue
             axis = axes.storage_of(nucleus)
             if axis is None:
                 continue
-            measurement.positions[nucleus] = axes.ppm_at_fraction(axis, fractions[axis])
-            measurement.deltas[nucleus] = measurement.positions[nucleus] - float(coords[nucleus])
+            measurement.positions[nucleus] = axes.ppm_at_fraction(
+                axis, fractions[axis]
+            )
+            measurement.deltas[nucleus] = (
+                measurement.positions[nucleus] - float(coords[nucleus])
+            )
+        for logical, storage in enumerate(axes.logical_to_storage, start=1):
+            if storage in search_axes:
+                measurement.positions[f"F{logical}"] = axes.ppm_at_fraction(
+                    storage, fractions[storage]
+                )
         results.append(measurement)
     return results
 
@@ -792,10 +800,6 @@ def pick_reference_peaks(
         target ``.list`` path; written in the reference directory by default.
     details : dict[str, Any], optional
         an empty dict passed in is filled with the picking details (count, source, method).
-    localization_method : str, default "parabolic"
-        sub-grid refinement (``gaussian`` is 2D only).
-    gaussian_roi_f1_ppm, gaussian_roi_f2_ppm : float, optional
-        Gaussian ROI radius (ppm).
     dataset : Any, optional
         which dataset (for a multi-condition study).
 
@@ -864,8 +868,7 @@ def detect_and_localize(
 
     - the detection convention matches project picking: physical margin (`axis_units`) +
         `peak_detection.detect` (`sigma_multiplier` doubling as `min_snr`) + dominant sign;
-    - refinement `method`: `"parabolic"` (the three-point position from detection) |
-        `"gaussian"` (per-peak 2D fit, 2D only);
+    - localization uses three-point parabolic interpolation only;
     - `targets` (targeted localization, 2026-09-19): let only the listed peaks take part
         in the `method` refinement; detection, row count and `peak_id` numbering are
         **unchanged**, unlisted peaks stay in the table with the detection-stage
@@ -891,10 +894,6 @@ def detect_and_localize(
         edge exclusion radius (physical width); exclusive with ``edge_margin_points``.
     edge_margin_points : int, optional
         edge exclusion radius (points).
-    method : str, default "parabolic"
-        sub-grid refinement (``gaussian`` is 2D only).
-    roi_f1_ppm, roi_f2_ppm : float, optional
-        Gaussian ROI radius (ppm).
     sign_mode : str, default "dominant"
         peak sign convention.
     axes : SpectrumAxes, optional
@@ -935,6 +934,10 @@ def detect_and_localize(
         raise MeasurementError(tr("spectrum does not exist: {p0}", p0=path))
     spectrum_axes = axes if axes is not None else _read_axes(path)
     data = np.asarray(spectrum_axes.data, dtype=float)
+    if sigma_multiplier is not None and (
+        not np.isfinite(sigma_multiplier) or sigma_multiplier <= 0
+    ):
+        raise MeasurementError("sigma_multiplier must be a positive finite number")
     threshold = (
         float(sigma_multiplier)
         if sigma_multiplier is not None and float(sigma_multiplier) > 0
@@ -944,7 +947,7 @@ def detect_and_localize(
         from backend.config import load_processing_defaults
 
         linewidths = load_processing_defaults().get("linewidth_hz") or {}
-    except Exception:  # noqa: BLE001 - unreadable config falls back to the built-in default
+    except Exception:
         linewidths = {}
     if edge_margin_points is not None:
         edge_points = max(0, int(edge_margin_points))
@@ -964,6 +967,7 @@ def detect_and_localize(
         edge_source = "acquisition_and_spectral_evidence"
     estimate = _noise.estimate(data)
     sigma = float(estimate.global_sigma)
+    centered = data - estimate.baseline
     peaks = _detect.detect(
         data,
         _detect.PeakDetectionParams(
@@ -971,6 +975,7 @@ def detect_and_localize(
             sigma_multiplier=threshold,
             min_snr=threshold,
             edge_margin=edge_points,
+            refine=False,
         ),
     )
     axial = None
@@ -978,11 +983,7 @@ def detect_and_localize(
         from core.peaks.axial import filter_axial_peaks
 
         peaks, axial = filter_axial_peaks(
-            data,
-            peaks,
-            experiment,
-            dic=spectrum_axes.dic,
-            axes_ppm=spectrum_axes.ppm,
+            data, peaks, experiment, dic=spectrum_axes.dic, axes_ppm=spectrum_axes.ppm,
             linewidth_hz_by_nucleus=linewidths,
         )
     resolved_sign = str(sign_mode or "auto")
@@ -997,31 +998,38 @@ def detect_and_localize(
         confidence = float(getattr(kind, "confidence", 0.0) or 0.0)
         uncertain = template is None or not np.isfinite(confidence) or confidence < 0.6
         resolved_sign = (
-            "both"
-            if template is not None
-            and template.peak_sign == "mixed"
-            or uncertain
-            and strong_two_sign_evidence(peaks)
-            else "dominant"
+            "both" if template is not None and template.peak_sign == "mixed"
+            or uncertain and strong_two_sign_evidence(peaks) else "dominant"
         )
     if resolved_sign == "dominant":
         peaks = _detect.keep_dominant(peaks)
     elif resolved_sign in ("positive", "negative"):
         sign = 1 if resolved_sign == "positive" else -1
         peaks = [peak for peak in peaks if peak.sign == sign]
+
     target_ids: set[int] | None = None
     if targets is not None:
-        target_ids = {int(value) for value in targets}
+        target_ids = set()
+        for value in targets:
+            try:
+                number = int(value)
+                if isinstance(value, (bool, np.bool_)) or float(value) != number:
+                    raise ValueError("not an integer peak ID")
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise MeasurementError("Target peak IDs must be integers") from exc
+            target_ids.add(number)
         if not target_ids and not allow_empty_targets:
             raise MeasurementError(
                 tr(
                     "the target peak list is empty: give at least one peak_id (an empty list "
                     "raises instead of silently falling back to whole-spectrum localization; pass "
-                    'allow_empty_targets for "this condition refines '
-                    'nothing")',
+                    "allow_empty_targets for \"this condition refines "
+                    "nothing\")",
                 )
             )
-        unknown = sorted(value for value in target_ids if value < 1 or value > len(peaks))
+        unknown = sorted(
+            value for value in target_ids if value < 1 or value > len(peaks)
+        )
         if unknown:
             shown = ", ".join(str(value) for value in unknown[:20])
             tail = tr(" ... ({p0} in total)", p0=len(unknown)) if len(unknown) > 20 else ""
@@ -1038,37 +1046,48 @@ def detect_and_localize(
                     p3=len(peaks),
                 )
             )
-    axis_h = spectrum_axes.storage_of("1H")
-    axis_n = spectrum_axes.storage_of("15N")
-    if any(spectrum_axes.nuclei.count(nucleus) > 1 for nucleus in ("1H", "15N")):
-        raise MeasurementError(
-            tr(
-                "The H/N study peak table cannot represent repeated H or N axes; "
-                "use project peak picking to generate the full-dimensional peak table",
-            )
-        )
+    axis_h = (spectrum_axes.storage_of("1H")
+              if spectrum_axes.nuclei.count("1H") == 1 else None)
+    axis_n = (spectrum_axes.storage_of("15N")
+              if spectrum_axes.nuclei.count("15N") == 1 else None)
     rows: list[dict[str, Any]] = []
     n_boundary = 0
     n_skipped = 0
+    qc_failure_reasons: dict[str, int] = {}
     for index, peak in enumerate(peaks, start=1):
         position = tuple(float(v) for v in peak.position)
         record: dict[str, Any] = {}
         skipped = target_ids is not None and index not in target_ids
         if skipped:
+
             n_skipped += 1
         else:
+            integer = np.asarray(peak.position, dtype=int)
+            # The vertex quotient is invariant to sign: no whole-array copy per peak.
+            position = tuple(
+                _detect.refine_parabolic(centered, integer, axis)
+                for axis in range(data.ndim)
+            )
+
             record = _parabolic_stencil_qc(
-                data,
-                [int(round(v)) for v in peak.position],
-                spectrum_axes,
+                data, [int(round(v)) for v in peak.position], spectrum_axes,
                 baseline=estimate.baseline,
             )
             if record.get("boundary_hit"):
                 n_boundary += 1
+            reason = str(record.get("failure_reason") or "")
+            if reason:
+                qc_failure_reasons[reason] = qc_failure_reasons.get(reason, 0) + 1
+
+
         if skipped:
             fit_success = None
         else:
-            fit_success = None if record.get("fit_success") is None else bool(record["fit_success"])
+            fit_success = (
+                None
+                if record.get("fit_success") is None
+                else bool(record["fit_success"])
+            )
         h_ppm = (
             float(spectrum_axes.ppm_at_fraction(axis_h, position[axis_h]))
             if axis_h is not None
@@ -1079,7 +1098,9 @@ def detect_and_localize(
             if axis_n is not None
             else float("nan")
         )
-        fwhm_map = {str(k): float(v) for k, v in (record.get("fwhm_by_nucleus") or {}).items()}
+        fwhm_map = {
+            str(k): float(v) for k, v in (record.get("fwhm_by_nucleus") or {}).items()
+        }
         rows.append(
             {
                 "peak_id": int(index),
@@ -1090,20 +1111,32 @@ def detect_and_localize(
                 "intensity": float(peak.height),
                 "SNR": float(peak.snr),
                 "detected": True,
-                "localization_method": "parabolic",
+                "localization_requested": "parabolic",
+                "localization_method": "none" if skipped else "parabolic",
                 "fallback": bool(record.get("fallback")),
                 "fallback_reason": str(record.get("fallback_reason", "") or ""),
+                "failure_reason": str(record.get("failure_reason") or ""),
+
                 "fit_success": fit_success,
                 "FWHM_H": fwhm_map.get("1H"),
                 "FWHM_N": fwhm_map.get("15N"),
                 "boundary_hit": (
-                    None if record.get("boundary_hit") is None else bool(record.get("boundary_hit"))
+                    None
+                    if record.get("boundary_hit") is None
+                    else bool(record.get("boundary_hit"))
                 ),
                 "duplicate_localization": False,
             }
         )
-    # P2-5: flag rows sharing a coordinate (the picker's sub-grid refinement can pull
-    # two neighbouring detected peaks onto the same grid point)
+        for logical, storage in enumerate(spectrum_axes.logical_to_storage, start=1):
+            rows[-1][f"F{logical}_ppm"] = float(
+                spectrum_axes.ppm_at_fraction(storage, position[storage])
+            )
+            rows[-1][f"F{logical}_nucleus"] = spectrum_axes.nuclei[storage]
+            rows[-1][f"FWHM_F{logical}"] = (record.get("fwhm_by_axis") or {}).get(
+                f"F{logical}"
+            )
+
     from nmrforge_api.peak_tables import mark_duplicate_localization
 
     n_duplicate = mark_duplicate_localization(rows)
@@ -1121,17 +1154,19 @@ def detect_and_localize(
         "n_peaks": len(rows),
         "n_fallback": 0,
         "fallback_reasons": {},
+        "qc_failure_reasons": qc_failure_reasons,
         "n_boundary_hit": int(n_boundary),
-        # targeted localization (2026-09-19): scope plus counts. Untargeted peaks
-        # are not refined (position from the detection-stage parabola, this method's
-        # QC columns are NaN).
+
+
         "localization_scope": (
             "all" if target_ids is None else ("none" if not target_ids else "subset")
         ),
         "n_targeted": len(target_ids) if target_ids is not None else len(rows),
         "n_skipped": int(n_skipped),
         "targeted_peak_ids": (
-            [int(value) for value in sorted(target_ids)] if target_ids is not None else []
+            [int(value) for value in sorted(target_ids)]
+            if target_ids is not None
+            else []
         ),
         "duplicate_localization": {
             "n_rows": len(rows),

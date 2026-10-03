@@ -909,6 +909,9 @@ class NMRPipeBackend:
         production; for the unified in-memory search see
         workflow.memory_phase_search).
         """
+        from core.data.sweep_width import apply_sweep_width_overrides
+
+        experiment = apply_sweep_width_overrides(experiment, params)
         if experiment.sampling.mode is SamplingMode.NUS:
             return {
                 "success": False,
@@ -950,6 +953,7 @@ class NMRPipeBackend:
                     [Path(seg) for seg in experiment.segments],
                     logs,
                     require_field_drift=True,
+                    experiment=experiment,
                 )
             ):
                 _progress(tr("Reuse converted fid (skip conversion)"))
@@ -971,7 +975,7 @@ class NMRPipeBackend:
         else:
             in_file = f"{experiment.dataset_id}.fid"
             if (work / in_file).is_file() and self._converted_fid_is_current(
-                work, experiment.dataset_id, raw, logs
+                work, experiment.dataset_id, raw, logs, experiment=experiment
             ):
                 _progress(tr("Reuse converted fid (skip conversion)"))
             else:
@@ -1179,6 +1183,17 @@ class NMRPipeBackend:
             }
         runtime = CshRuntime()
         raw = Path(data_dir)
+        from core.data.sweep_width import apply_sweep_width_overrides
+
+        experiment = apply_sweep_width_overrides(experiment, params)
+        from core.data.carrier import normalize_carrier_ppm
+
+        carrier_ppm = None
+        if "carrier_ppm" in (params or {}):
+            carrier_ppm = normalize_carrier_ppm(
+                params["carrier_ppm"],
+                axes={dim.logical_axis for dim in experiment.dimensions},
+            )
         work = self._work_path(experiment)
         work.mkdir(parents=True, exist_ok=True)
         logs: list[str] = []
@@ -1259,6 +1274,7 @@ class NMRPipeBackend:
                 work,
                 [float(v) for v in (params or {}).get("segment_shift_hz", [])],
                 fid_com_overrides=fid_com_overrides,
+                **({"carrier_ppm": carrier_ppm} if carrier_ppm is not None else {}),
             )
             logs += convert_logs
             merged_in = self._merged_fid_in(work, experiment.dataset_id)
@@ -1300,7 +1316,8 @@ class NMRPipeBackend:
                     (work / "nuslist").unlink(missing_ok=True)
         else:
             converted, convert_logs = self._convert(
-                runtime, experiment, raw, work, fid_com_overrides=fid_com_overrides
+                runtime, experiment, raw, work, fid_com_overrides=fid_com_overrides,
+                **({"carrier_ppm": carrier_ppm} if carrier_ppm is not None else {}),
             )
             logs += convert_logs
             fid_path = self._converted_fid_path(work, experiment.dataset_id)
@@ -1394,6 +1411,9 @@ class NMRPipeBackend:
         # mapped here onto ext_lo/ext_hi so SMILE optimisation/sweeps use the same
         # window as the final run (otherwise the default wide window returns and
         # "not enough memory" is reported spuriously)
+        from core.data.sweep_width import apply_sweep_width_overrides
+
+        experiment = apply_sweep_width_overrides(experiment, params)
         _ext_note = apply_final_ext_params(params)
         if experiment.sampling.mode is not SamplingMode.NUS:
             return {
@@ -1454,6 +1474,7 @@ class NMRPipeBackend:
                     [Path(s) for s in experiment.segments],
                     logs,
                     require_field_drift=True,
+                    experiment=experiment,
                 )
             )
             if not merged_ready:
@@ -1526,7 +1547,7 @@ class NMRPipeBackend:
             # (empty fid / size mismatch with the record / unreadable record). Projects
             # without a record are still reused, with an "unverified" note.
             if fid_file.is_file() and not self._converted_fid_is_current(
-                work, experiment.dataset_id, raw, logs
+                work, experiment.dataset_id, raw, logs, experiment=experiment
             ):
                 fid_file.unlink()
                 stale_slice = work / "fid"
@@ -2928,6 +2949,9 @@ class NMRPipeBackend:
             "raw_fingerprint": raw_dir_fingerprint(raw_dirs),
             "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         }
+        from backend.conversion_provenance import conversion_audit
+
+        payload.update(conversion_audit(experiment, work))
         # 2026-09-24: sweep-width convention archive (which value was used when SW_h
         # and SW x SFO1 disagree, and what the raw values were)
         if experiment is not None:
@@ -3006,6 +3030,7 @@ class NMRPipeBackend:
         logs: list[str],
         *,
         require_field_drift: bool = False,
+        experiment: Experiment | None = None,
     ) -> bool:
         """Whether an already converted fid may be reused (2026-09-22 review: a stale or
         incomplete product must not be reused silently).
@@ -3032,6 +3057,11 @@ class NMRPipeBackend:
             return False
         record = self._conversion_record_path(work, dataset_id)
         if not record.is_file():
+            if experiment is not None and any(
+                dim.sw_source == "explicit_hz" for dim in experiment.dimensions
+            ):
+                logs.append("No conversion evidence for explicit sweep width; converting again")
+                return False
             if require_field_drift:
                 # 2026-09-24 review B2: reusing a multi-part dataset requires the
                 # inter-part field drift conclusion to be in the record -- a wholly
@@ -3062,6 +3092,25 @@ class NMRPipeBackend:
                 )
             )
             return False
+        if experiment is not None:
+            recorded_widths = {entry.get("axis"): entry.get("sw_hz_used")
+                               for entry in data.get("sweep_width", [])}
+            for dim in experiment.dimensions:
+                old = recorded_widths.get(dim.logical_axis)
+                if old is None:
+                    if dim.sw_source == "explicit_hz":
+                        logs.append("Unverified explicit sweep width; converting again")
+                        return False
+                else:
+                    try:
+                        unchanged = math.isclose(
+                            float(old), float(dim.sw), rel_tol=1e-7, abs_tol=1e-6
+                        )
+                    except (TypeError, ValueError):
+                        unchanged = False
+                    if not unchanged:
+                        logs.append("Sweep-width settings changed or unverified; converting again")
+                        return False
         recorded = str(data.get("raw_fingerprint") or "")
         if recorded and recorded != raw_dir_fingerprint(raw_dirs):
             logs.append(tr("Raw data changed since the conversion; converting again"))
@@ -3159,6 +3208,7 @@ class NMRPipeBackend:
         is_nus: bool,
         logs: list[str],
         fid_com_overrides: dict[str, str] | None = None,
+        carrier_ppm: dict[str, float] | None = None,
     ) -> bool:
         """In raw_dir: bruker -AUTO -> fid.com -> place into dest_work -> patch ->
         run (the script lives in the work directory and its relative paths resolve
@@ -3225,6 +3275,23 @@ class NMRPipeBackend:
                             patched, fid_com_overrides
                         )
                         corrections += override_corrections
+                    if is_nus:
+                        nuslist_path = convert_dir / "nuslist"
+                        if nuslist_path.is_file():
+                            nuslist_count = len(read_nuslist(nuslist_path))
+                            patched, nus_corrections = patch_nus_expand_count(
+                                patched, nuslist_count,
+                            )
+                            corrections += nus_corrections
+                    explicit_carrier = None
+                    if carrier_ppm is not None:
+                        from backend.carrier_override import apply_carrier_request
+
+                        patched, explicit_carrier = apply_carrier_request(
+                            patched, experiment, carrier_ppm,
+                        )
+                        corrections += [f"CAR {axis}={ppm:g} ppm (explicit API request)"
+                                        for axis, ppm in carrier_ppm.items()]
                     # 2026-09-24: carrier (CAR) convention archive -- decide from the raw
                     # bruker -AUTO text which convention to keep (water peak + gamma
                     # ratio / acqus O1/BF1) and write a sidecar for the "generate FID"
@@ -3232,9 +3299,14 @@ class NMRPipeBackend:
                     # manual.
                     audit = carrier_audit(
                         experiment,
-                        parse_fid_com(text),
-                        manual_keys=set(fid_com_overrides or ()),
+                        parse_fid_com(patched if carrier_ppm is not None else text),
+                        manual_keys=(set(fid_com_overrides or ()) |
+                                     {item["conversion_key"] for item in
+                                      (explicit_carrier or {}).get("axes", {}).values()}),
                     )
+                    if explicit_carrier is not None:
+                        audit = dict(audit or {})
+                        audit["explicit_carrier"] = {**explicit_carrier, "script_name": "fid.com"}
                     if audit:
                         try:
                             atomic_write_text(
@@ -3242,17 +3314,11 @@ class NMRPipeBackend:
                                 json.dumps(audit, ensure_ascii=False, indent=2) + "\n",
                             )
                         except OSError:
+                            if carrier_ppm is not None:
+                                raise
                             pass
                         if audit.get("summary"):
                             logs.append(str(audit["summary"]))
-                    if is_nus:
-                        nuslist_path = convert_dir / "nuslist"
-                        if nuslist_path.is_file():
-                            nuslist_count = len(read_nuslist(nuslist_path))
-                            patched, nus_corrections = patch_nus_expand_count(
-                                patched, nuslist_count
-                            )
-                            corrections += nus_corrections
                     # 2026-09-24: write the fid.com parameters changed this time to a
                     # sidecar; the parameter corrections printed line by line in the log
                     # must also appear in the "generate FID" report (user 2026-09-24).
@@ -3299,6 +3365,19 @@ class NMRPipeBackend:
                     direct_points=physical_direct_points(experiment, convert_dir),
                 )
                 convert_script = dest_work / f"{experiment.dataset_id}_convert.com"
+                if carrier_ppm is not None:
+                    from backend.carrier_override import apply_carrier_request
+
+                    script, explicit_carrier = apply_carrier_request(
+                        script, experiment, carrier_ppm,
+                    )
+                    audit = carrier_audit(experiment, parse_fid_com(script)) or {}
+                    audit["explicit_carrier"] = {**explicit_carrier,
+                                                  "script_name": convert_script.name}
+                    atomic_write_text(
+                        dest_work / f"{experiment.dataset_id}.carrier.json",
+                        json.dumps(audit, ensure_ascii=False, indent=2) + "\n",
+                    )
                 convert_script.write_text(script, encoding="utf-8", newline="\n")
                 run_result = runtime.run(
                     ["csh", str(convert_script)], cwd=str(convert_dir), timeout=600
@@ -3981,6 +4060,7 @@ class NMRPipeBackend:
         raw: Path,
         work: Path,
         fid_com_overrides: dict[str, str] | None = None,
+        carrier_ppm: dict[str, float] | None = None,
     ) -> tuple[bool, list[str]]:
         logs: list[str] = []
         is_nus = experiment.sampling.mode is SamplingMode.NUS
@@ -3992,6 +4072,7 @@ class NMRPipeBackend:
             is_nus,
             logs,
             fid_com_overrides=fid_com_overrides,
+            **({"carrier_ppm": carrier_ppm} if carrier_ppm is not None else {}),
         )
         if not ok and is_nus:
             logs.append(
@@ -4170,6 +4251,7 @@ class NMRPipeBackend:
         work: Path,
         shifts: list[float],
         fid_com_overrides: dict[str, str] | None = None,
+        carrier_ppm: dict[str, float] | None = None,
     ) -> tuple[bool, list[str]]:
         """Multi-segment experiments: convert each segment with bruker, shift it
         (optional), then merge.
@@ -4225,6 +4307,7 @@ class NMRPipeBackend:
                 is_nus,
                 logs,
                 fid_com_overrides=fid_com_overrides,
+                **({"carrier_ppm": carrier_ppm} if carrier_ppm is not None else {}),
             ):
                 return False, logs + [
                     tr(

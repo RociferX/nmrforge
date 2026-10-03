@@ -366,7 +366,7 @@ class Spectrum3D:
   Automatically enter 2D/3D mode according to dimension number;
 - The 3D peak table columns (F1/F2/F3_shift) are mapped according to the current slice plane axis label, and the linkage is not affected
 
-## 11. External interface contract: `nmrforge_api` (API_VERSION = "1.0")
+## 11. External interface contract: `nmrforge_api` (API_VERSION = "1.1", 2026-10-03)
 
 The public Python and CLI interface is versioned independently from the desktop UI. Its purpose is to
 run processing studies and archive provenance, not to perform downstream statistical inference or
@@ -398,6 +398,9 @@ Unified peak table + records, hashes, versions, logs, status, and warnings
   downstream.
 - Statistical summaries, significance testing, assignment, and scientific conclusions are outside
   this interface.
+- Current v1.1 contract: each condition has an independent reference and reference peak table;
+  every combination independently detects/localizes peaks into its own table. The API does not
+  match peaks across conditions or between reference and combination spectra, and does no statistics.
 
 Sampling is classified from supported metadata, grid coverage, and schedule order. Only a standard
 `nuslist` or a file explicitly named by `acqus.NUSLIST` is used. A complete schedule in standard
@@ -410,9 +413,10 @@ currently supports reference construction only.
 
 ```python
 run_reference_study(root, dataset=None, *, datasets=None, params=None,
-                    phase_route=None, peaks=None, direct_range=None,
+                    params_by_condition=None, phase_route=None, peaks=None, direct_range=None,
+                    carrier_ppm=None,
                     sigma_multiplier=None, max_peaks=0,
-                    backend=None, write=True, progress=None) -> ReferenceResult
+                    force=False, backend=None, write=True, progress=None) -> ReferenceResult
 
 run_combination_study(reference, *, combos=None, axes=None, max_runs=256,
                       localization="parabolic", localize_peaks=None,
@@ -421,7 +425,8 @@ run_combination_study(reference, *, combos=None, axes=None, max_runs=256,
                       backend=None, write=True, progress=None) -> StudyResult
 
 run_parameter_study(root, dataset=None, *, datasets=None, combos=None, axes=None,
-                     name="", params=None, phase_route=None, peaks=None,
+                     name="", params=None, params_by_condition=None, phase_route=None, peaks=None,
+                     carrier_ppm=None,
                      sigma_multiplier=None, max_peaks=0, max_runs=256,
                      localization="parabolic", localize_peaks=None,
                      direct_range=None, allow_ext_override=False,
@@ -439,7 +444,8 @@ expand_grid / combos_from_rows / load_combo_table / write_combo_table
 compat_manifest / compat_status / record_stamp / check_conformance
 ```
 
-The API version is `API_VERSION = "1.0"`. See the external API pages for exact signatures,
+The API version is `API_VERSION = "1.1"` (current source contract as of 2026-10-03). The older
+desktop/AppImage 1.0.2 is a separate build and does not include this contract. See the external API pages for exact signatures,
 arguments, return structures, and errors. The command line is `python -m nmrforge_api` with
 `init`, `reference`, `peaks`, `sweep`, `report`, `status`, and `compat` subcommands.
 
@@ -447,6 +453,28 @@ arguments, return structures, and errors. The command line is `python -m nmrforg
 
 - Reference generation selects an identity table (automatically or from an external peak table),
   freezes its threshold, and writes one `reference_peak_table_parabolic.csv`.
+- `params_by_condition` overlays common reference parameters per condition. FT-negation requests,
+  resolved axis values, and actual script commands are separately audited.
+- Reference reuse requires an exact normalized request match, including nested/dotted-equivalent
+  parameters, `phase_route`, direct range, and carrier. The fingerprint is
+  `reference.json.input_fingerprint` with schema `nmrforge_api.reference_input.v1`.
+  Any mismatch, or a missing/invalid legacy fingerprint, raises `ReferenceError`; rebuild only
+  with explicit `force=True` (CLI `--force`). Multi-condition requests preflight all conditions
+  before starting the engine; they never partially rebuild. Resume uses schema
+  `nmrforge_api.resume.v4`.
+- Reference-only `carrier_ppm: Mapping[str, float] | None` is accepted by
+  `build_reference`, `run_reference_study`, and `run_parameter_study`, or through common
+  `params["carrier_ppm"]` / dotted `carrier_ppm.F1`. Explicit keyword values override common
+  params per axis; `params_by_condition` then overrides per axis. Logical axes are F2=x/F1=y
+  in 2D and F3=x/F2=y/F1=z in 3D. Values must be finite numbers (0 and negative are valid);
+  bool, nonfinite values, empty mappings, unknown axes, and axes beyond the data dimensionality
+  are rejected. Unspecified axes retain the selected conversion path's CAR; raw `acqus` is not
+  edited. Carrier values are fingerprinted; changes require `force=True`. Sweeps inherit the
+  reference carrier and reject carrier values in axes, combinations, or base overrides because
+  they reuse the converted FID. CLI `reference` accepts repeatable `--carrier-ppm F1=120.0`.
+- Explicit positive finite `sweep_width_hz` may override acquisition spectral width in reference
+  construction by logical axis; the original and resolved values, source, and consistency ratio
+  are recorded. A sweep reuses the converted FID and cannot change its spectral width.
 - `sigma_multiplier` is selected while building the reference (default 35). Once frozen, a
   different threshold in a sweep is rejected; rebuild the reference to change it.
 - Combination mode requires an explicit reference and exactly one of `combos` or `axes`.
@@ -476,29 +504,43 @@ arguments, return structures, and errors. The command line is `python -m nmrforg
 
 ### 11.4 Peak table fields and stable records
 
-The unified `PEAK_TABLE_COLUMNS` schema has 27 columns:
+The current v1.1 unified `PEAK_TABLE_COLUMNS` schema has 38 columns:
 
 ```text
 workflow_id, condition, dataset,
 peak_id, reference_peak_id, assignment,
-H_ppm, N_ppm, intensity, SNR, detected, localization_method,
-fallback, fallback_reason, fit_success, FWHM_H, FWHM_N,
-boundary_hit, duplicate_localization, cell_low_H, cell_high_H,
-cell_low_N, cell_high_N, cell_edge, intensity_ratio_vs_picked,
-shift_vs_picked_H, shift_vs_picked_N
+H_ppm, N_ppm, intensity,
+SNR, detected, localization_method, localization_requested,
+fallback, fallback_reason, failure_reason,
+fit_success, FWHM_H, FWHM_N,
+boundary_hit, duplicate_localization,
+F1_ppm, F1_nucleus, FWHM_F1,
+F2_ppm, F2_nucleus, FWHM_F2,
+F3_ppm, F3_nucleus, FWHM_F3,
+cell_low_H, cell_high_H, cell_low_N, cell_high_N, cell_edge,
+intensity_ratio_vs_picked, shift_vs_picked_H, shift_vs_picked_N
 ```
 
 - `peak_id` is local to a single spectrum. `reference_peak_id` (`R0001`...) belongs to the
   reference identity table; combination tables leave reference identity and assignment blank.
 - Reference tables may retain identity rows with `detected=false`; combination tables contain
   only detected peaks.
-- `localization_method` is `parabolic`, the only supported method.
-  `fit_success`, `FWHM_H`, `FWHM_N`, and `boundary_hit` describe parabolic localization.
-  `fallback` and `fallback_reason` are compatibility/QC fields and do not imply a switch to
-  another algorithm. There is no `fit_rmse` or `localization_requested` column.
+- `localization_requested` is the requested `parabolic` method; `localization_method` is the
+  actual result (`parabolic` when localized, `none` when not detected or targeted localization
+  was skipped). Unrun/skipped localization QC is NaN and `failure_reason` is empty. An attempted
+  localization failure has an explicit `failure_reason` (for example
+  `no_local_peak_above_threshold`); this is not a fallback. `fallback_reason` remains separate.
+- `fit_success`, `FWHM_*`, and `boundary_hit` describe parabolic localization. Gaussian and
+  `fit_rmse` are removed. H/N columns are compatibility aliases only when that nucleus is unique.
 - `duplicate_localization` flags shared coordinates; it does not drop rows.
-- Reference-only cell and identity fields describe reference measurement. They are `NaN` in
-  combination tables, where detection and localization occur in one pass.
+- `cell_low_H`, `cell_high_H`, `cell_low_N`, `cell_high_N`, and `cell_edge` are always NaN:
+  joint multidimensional Voronoi ownership cannot be represented by per-axis boundaries. Physical
+  search windows are recorded separately in `reference.peak_localization.search_windows.search_bounds_by_axis`
+  (F-axis and closed low/high integer storage points). Candidate ownership conflicts use the
+  separate `candidate_ownership_conflict` audit flag, not `cell_edge`.
+- `intensity_ratio_vs_picked` and H/N shift deltas remain available when measured. Peak tables
+  frozen under the old 29-, 27-, or 36-column contracts must be migrated/rebuilt; old API v0.2
+  tables have no compatibility promise.
 - Intensity is signed relative to the documented global-median background; SNR is the absolute
   height divided by robust noise. Missing or unrun localization metrics remain missing rather than
   being fabricated.

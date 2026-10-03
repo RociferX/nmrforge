@@ -447,12 +447,14 @@ def test_reference_records_closer_than_the_window_stay_distinct(
     rows = load_peaks(_write_peak_table(tmp_path / "reference.list"))
 
     measured = measure_peak_positions(spectrum, rows, window_pts=3)
-    positions = [(item.positions["15N"], item.positions["1H"]) for item in measured]
-    assert len(positions) == 2
-    assert len(set(positions)) == 2, positions
+    positions = [
+        (item.positions["15N"], item.positions["1H"]) for item in measured if item.found
+    ]
+    assert len(positions) == 1  # The overlapping signals have only one genuine local maximum.
+    assert all(not item.positions for item in measured if not item.found)
     # Both records still land on their own peak and are not hijacked by a stronger neighbour
-    assert abs(measured[0].positions["1H"] - _h1_ppm(60)) < 2.0 * _h1_step()
-    assert abs(measured[1].positions["1H"] - _h1_ppm(62)) < 2.0 * _h1_step()
+    found = next(item for item in measured if item.found)
+    assert abs(found.positions["1H"] - _h1_ppm(60)) < 2.0 * _h1_step()
 
     # The legacy caliber (one shared fixed window for all peaks) can still be reproduced
     # explicitly: both records land on the same grid point
@@ -521,15 +523,13 @@ def test_error_hierarchy() -> None:
     assert issubclass(SweepError, Exception)
 
 
-def test_api_version_is_the_first_version() -> None:
-    """First version of the public API (2026-09-22): contract version 1.0 and a single
-    definition point.
-    """
+def test_api_version_is_1_1_with_a_single_definition() -> None:
+    """The current API contract is version 1.1 and has a single definition point."""
     import nmrforge_api
     import nmrforge_api.records as records_module
     import nmrforge_api.session as session_module
 
-    assert API_VERSION == "1.0"
+    assert API_VERSION == "1.1"
     # Single definition point: the public surface re-exports the same object from session
     # (previously three places each had their own literal)
     assert nmrforge_api.API_VERSION is session_module.API_VERSION
@@ -573,17 +573,21 @@ def test_reference_workflow_writes_script_and_one_peak_table(
     assert rows_p[0]["FWHM_H"] > 0 and rows_p[0]["FWHM_N"] > 0
     assert rows_p[0]["boundary_hit"] is False
     assert rows_p[0]["fallback"] is False
-    for removed in ("localization_requested", "fit_rmse"):
-        assert removed not in rows_p[0]
+    assert rows_p[0]["localization_requested"] == "parabolic"
+    assert "fit_rmse" not in rows_p[0]
 
     assert ref.peak_localization["parabolic"]["n_peaks"] == 2
     assert "gaussian" not in ref.peak_localization
     assert set(ref.peak_localization) == {
         "parabolic",
         "exclusive_windows",
+        "exclusive_policy",
+        "minimum_snr",
         "window_by_axis",
         "window_ppm",
         "window_pts",
+        "cell_geometry",
+        "search_windows",
     }
 
     assert ref.phase_record()["F2"]["phase_mode"] == "auto"
@@ -616,9 +620,7 @@ def test_reference_peak_table_has_unique_coordinates(
 def test_reference_peak_table_carries_cell_qc_columns(
     tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """P1-3: the reference tables write real values in the 8 new cell/identity QC columns;
-    `shift_vs_picked_*` = measured - picked (ppm).
-    """
+    """Unrepresentable cell geometry is NaN; intensity and shift diagnostics remain measured."""
     from core.peaks.peak_table import load_peaks
 
     monkeypatch.setattr(sys.modules[__name__], "_PEAK_A", (30, 60))
@@ -641,12 +643,15 @@ def test_reference_peak_table_carries_cell_qc_columns(
 
     assert list(rows[0]) == list(PEAK_TABLE_COLUMNS)
     for row in rows:
+        # Joint multidimensional ownership has no separable cell geometry.
         for column in ("cell_low_H", "cell_high_H", "cell_low_N", "cell_high_N"):
-            assert isinstance(row[column], int), (column, row[column])
-        assert row["cell_low_H"] <= row["cell_high_H"]
-        assert row["cell_low_N"] <= row["cell_high_N"]
-        assert isinstance(row["cell_edge"], bool)
+            assert math.isnan(row[column]), (column, row[column])
+        assert math.isnan(row["cell_edge"])
 
+        if not row["detected"]:
+            assert math.isnan(row["H_ppm"]) and math.isnan(row["N_ppm"])
+            assert math.isnan(row["intensity_ratio_vs_picked"])
+            continue
         assert math.isfinite(row["intensity_ratio_vs_picked"])
         assert row["intensity_ratio_vs_picked"] > 0
 
@@ -656,56 +661,52 @@ def test_reference_peak_table_carries_cell_qc_columns(
         assert row["shift_vs_picked_N"] == pytest.approx(row["N_ppm"] - picked["15N"], abs=1e-6)
 
     summary = ref.peak_localization["parabolic"]
-    assert summary["n_cell_edge"] == sum(1 for row in rows if row["cell_edge"] is True)
+    assert summary["n_cell_edge"] is None
+    assert len(ref.peak_localization["search_windows"]) == 2
     ratio = summary["intensity_ratio_vs_picked"]
-    ratios = sorted(row["intensity_ratio_vs_picked"] for row in rows)
-    assert ratio["n"] == 2
+    ratios = sorted(row["intensity_ratio_vs_picked"] for row in rows if row["detected"])
+    assert ratio["n"] == len(ratios) == 1
 
-    assert ratio["median"] == pytest.approx(ratios[1], rel=1e-6)
-    assert ratio["max"] == pytest.approx(ratios[1], rel=1e-6)
+    assert ratio["median"] == pytest.approx(ratios[0], rel=1e-6)
+    assert ratio["max"] == pytest.approx(ratios[0], rel=1e-6)
 
 
-def test_cell_edge_only_fires_on_the_exclusive_cell_edge(
+def test_cell_edge_does_not_turn_a_merged_shoulder_into_a_peak(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`cell_edge` only judges the edge of the exclusive cell and is orthogonal to the
-    physical window edge (``window_edge``).
-
-    When two reference peaks sit farther apart than the window, the neighbour's cell cannot
-    cut into this peak's search interval -> `cell_edge` is always false and the cell bounds
-    equal the window bounds that caliber actually used; the legacy caliber
-    (``exclusive_windows=False``) has no neighbour truncation at all, so it is always false
-    there too.
-    """
+    """A neighbor's shoulder must not be reported as a peak without local peak evidence."""
     from core.peaks.peak_table import load_peaks
 
     spectrum = _write_ft2(tmp_path / "far.ft2")
     rows = load_peaks(_write_peak_table(tmp_path / "reference.list"))
     for exclusive in (True, False):
         measured = measure_peak_positions(spectrum, rows, window_pts=3, exclusive_windows=exclusive)
-        assert [item.cell_edge for item in measured] == [False, False]
+        assert [item.cell_edge for item in measured] == [None, None]
         for item in measured:
-            # Not truncated by a neighbour: cell bounds = the +/-3 point window bounds
-            assert item.cell_high["1H"] - item.cell_low["1H"] == 6
-            assert item.cell_high["15N"] - item.cell_low["15N"] == 6
+            assert item.cell_low == item.cell_high == {}
+            for bounds in item.localization["search_bounds_by_axis"].values():
+                assert bounds["high"] - bounds["low"] == 6
             # Stopped on its own peak top -> ratio close to 1 (~0.89 for the smoothed
             # synthetic peak)
             assert item.intensity_ratio == pytest.approx(1.0, abs=0.2)
 
-    # A neighbour closer than the window: the extremum is cut by the neighbour's cell ->
-    # cell_edge true, but the physical window is untouched, so window_edge stays false
-    # (the two are orthogonal; otherwise window_edge would degenerate to almost always true)
+    # When close peaks merge, do not report each search interval's shoulder as a peak.
     monkeypatch.setattr(sys.modules[__name__], "_PEAK_A", (30, 60))
     monkeypatch.setattr(sys.modules[__name__], "_PEAK_B", (30, 62))
     near = _write_ft2(tmp_path / "near.ft2")
     near_rows = load_peaks(_write_peak_table(tmp_path / "near.list"))
     truncated = measure_peak_positions(near, near_rows, window_pts=3)
-    assert [item.cell_edge for item in truncated] == [True, True]
-    assert all(item.window_edge is False for item in truncated)
-    assert all(item.boundary is False for item in truncated)
-    # With the two peaks merged into one blob the extremum is pulled towards the neighbour
-    # -> the intensity ratio is clearly > 1 (not its own peak top)
-    assert all(item.intensity_ratio > 1.1 for item in truncated)
+    assert sum(item.found for item in truncated) == 1
+    assert any(
+        item.localization["candidate_ownership_conflict"]
+        for item in truncated if not item.found
+    )
+    assert all(item.cell_edge is None for item in truncated)
+    for item in truncated:
+        if not item.found:
+            assert item.positions == {}
+        else:
+            assert item.positions
 
 
 def test_workflow_peak_tables_write_nan_in_cell_columns(tmp_path: Path, bruker_dir: Path) -> None:
@@ -886,7 +887,7 @@ def test_workflow_tables_carry_parabolic_qc_and_duplicate_flag(
     assert summary["n_peaks"] == 2
     assert summary["n_boundary_hit"] == 0
     assert "fit_rmse" not in rows_p[0]
-    assert "localization_requested" not in rows_p[0]
+    assert rows_p[0]["localization_requested"] == "parabolic"
 
 
 def test_reference_parabolic_table_estimates_linewidth(tmp_path: Path, bruker_dir: Path) -> None:
@@ -1372,7 +1373,7 @@ def test_parabolic_runs_never_emit_gaussian_fallback_warnings(
         assert not (Path(run.run_dir) / "peak_table_gaussian.csv").exists()
 
 
-def test_two_conditions_share_parameters_and_peak_identity(
+def test_two_conditions_share_parameters_and_build_independent_references(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
     """Spec I: one workflow uses the same parameters for A/B, and each condition gets its
@@ -1415,12 +1416,11 @@ def test_two_conditions_share_parameters_and_peak_identity(
             assert rows
             assert all(row["reference_peak_id"] == "" for row in rows)
             assert all(row["condition"] == run.condition for row in rows)
-    # Condition B's reference reuses the primary condition's peak identity
-    refs = {key: ref for key, ref in result.references.items()}
-    shared = [ref for ref in refs.values() if ref.peak_source.startswith("shared:")]
-    assert len(shared) == 1
-    assert shared[0].condition == "B"
-    assert shared[0].peak_count == 2
+    # The external table applies to the primary condition; others pick peaks independently.
+    refs = {ref.condition: ref for ref in result.references.values()}
+    assert refs["A"].peak_source == "external"
+    assert refs["B"].peak_source == "auto"
+    assert refs["B"].peak_table_sha256 != refs["A"].peak_table_sha256
     # The fid is converted once per condition (the reference)
     assert backend.convert_calls == 2
 
@@ -1463,10 +1463,10 @@ def test_two_conditions_use_their_own_reference_parameter_bases(
         assert run.parameters_used["ext_hi"] == "6.5"
 
 
-def test_external_peak_identity_is_propagated_to_all_conditions(
+def test_external_peak_identity_is_limited_to_the_primary_condition(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """After an external peak table replaces the primary identity, B must re-copy that identity."""
+    """An external peak table replaces only the primary condition's peak identities."""
     external = tmp_path / "one-reference.list"
     export_peaks_poky(
         external,
@@ -1491,11 +1491,11 @@ def test_external_peak_identity_is_propagated_to_all_conditions(
         backend=_FakeSweepBackend(),
     )
     refs = list(result.references.values())
-    assert [ref.peak_count for ref in refs] == [1, 1]
-    assert len({ref.peak_table_sha256 for ref in refs}) == 1
-    assert refs[1].peak_source == "shared:A"
-    # The reference identity (external .list) is still shared across conditions; combination
-    # tables now pick peaks independently -> no reference identity written
+    assert refs[0].peak_source == "external"
+    assert refs[0].peak_count == 1
+    assert refs[1].peak_source == "auto"
+    assert refs[1].peak_table_sha256 != refs[0].peak_table_sha256
+    # Combination peak picking is independent and creates no cross-condition identity mapping.
     for run in result.runs:
         rows = read_peak_table(Path(run.peak_table_path("parabolic")))
         assert rows
@@ -2141,7 +2141,9 @@ def test_cli_peaks_applies_external_threshold_when_reference_is_built(
     assert payload["conditions"][0]["params"]["detection"]["threshold_source"] == "user"
     # Reference already set (20 sigma) -> changing the threshold errors (exit code 2)
     assert cli_main(["peaks", "--study", str(root), "--sigma", "60"]) == 2
-    assert "锁定" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "锁定" in captured.err
 
 
 def test_frozen_default_threshold_cannot_be_changed_later(tmp_path: Path, bruker_dir: Path) -> None:
@@ -2352,9 +2354,7 @@ def test_direct_range_parser_normalises_order() -> None:
 
 
 def test_reference_mode_accepts_direct_range(tmp_path: Path, bruker_dir: Path) -> None:
-    """Reference mode can take a direct-dimension range: it reaches the backend params and is
-    archived; a change rebuilds the reference.
-    """
+    """Reference ranges are recorded; changes require force=True before rebuilding."""
     root = tmp_path / "direct_range_reference"
     backend = _FakeSweepBackend()
     result = run_reference_study(
@@ -2371,8 +2371,10 @@ def test_reference_mode_accepts_direct_range(tmp_path: Path, bruker_dir: Path) -
     assert calls and str(calls[-1].get("ext_lo")) == "10.5"
     assert str(calls[-1].get("ext_hi")) == "6.5"
     first_run_id = reference.run_id
-    # Changed to another range -> the reference is rebuilt (not silently reused)
-    again = run_reference_study(root, direct_range=(11.0, 6.0), backend=backend)
+    # A changed range requires explicit authorization to rebuild.
+    with pytest.raises(ReferenceError, match="force=True"):
+        run_reference_study(root, direct_range=(11.0, 6.0), backend=backend)
+    again = run_reference_study(root, direct_range=(11.0, 6.0), backend=backend, force=True)
     rebuilt = again.reference()
     assert rebuilt is not None
     assert str(rebuilt.params.get("ext_lo")) == "11"
@@ -2623,7 +2625,7 @@ def test_detect_and_localize_has_no_gaussian_method_choice(tmp_path: Path) -> No
     assert meta["n_fallback"] == 0
     assert all(row["localization_method"] == "parabolic" for row in rows)
     assert all("fit_rmse" not in row for row in rows)
-    assert all("localization_requested" not in row for row in rows)
+    assert all(row["localization_requested"] == "parabolic" for row in rows)
 
 
 def test_combination_zero_peak_warning_is_explicit(
@@ -3010,9 +3012,10 @@ def test_cli_unexpected_error_is_actionable_not_a_traceback(
     bad = tmp_path / "not_a_dir.txt"
     bad.write_text("x", encoding="utf-8")
     assert cli_main(["status", "--study", str(bad)]) == 2
-    out = capsys.readouterr().out
-    assert "错误:" in out and "提示:" in out and DEBUG_ENV in out
-    assert "Traceback" not in out, "默认不能把裸 traceback 甩给用户"
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "错误:" in captured.err and "提示:" in captured.err and DEBUG_ENV in captured.err
+    assert "Traceback" not in captured.err, "默认不能把裸 traceback 甩给用户"
 
     # Exception -> hint mapping: paths, missing fields and invalid content each say what to do
     assert "找不到文件或目录" in describe_exception(FileNotFoundError(2, "no such file", "x.json"))
@@ -3035,8 +3038,9 @@ def test_cli_debug_flag_and_env_show_the_traceback(
 
     assert cli_main(["status", "--study", str(bad), "--debug"]) == 2
     captured = capsys.readouterr()
-    assert "完整堆栈(debug)" in captured.out
-    assert "Traceback" in captured.err, "堆栈走 stderr(debug 通道),不混进给用户看的 stdout"
+    assert captured.out == ""
+    assert "完整堆栈(debug)" in captured.err
+    assert "Traceback" in captured.err, "Stack traces use stderr rather than JSON stdout."
 
     monkeypatch.setenv(DEBUG_ENV, "1")
     assert cli_main(["status", "--study", str(bad)]) == 2
@@ -3089,28 +3093,39 @@ def test_combination_inherits_the_reference_flip(tmp_path: Path, bruker_dir: Pat
     assert run.status in (STATUS_SUCCESS, STATUS_WARNING)
     sampling = run.parameters_resolved["sampling"]
     assert sampling["flags"] == {"flip_f1": True}
-    assert sampling["flags_source"] == "reference(locked)"
+    assert sampling["flags_source"] == "reference"
     payload = json.loads(Path(run.run_dir, "run.json").read_text(encoding="utf-8"))
     assert payload["parameters_resolved"]["sampling"]["flags"] == {"flip_f1": True}
 
 
-def test_sweep_rejects_the_flip_as_an_axis(tmp_path: Path, bruker_dir: Path) -> None:
-    """The flip is a sign convention fixed when building the reference, not a sweepable axis."""
+def test_sweep_allows_boolean_ft_sign_axes_but_locks_phase_routes(
+    tmp_path: Path, bruker_dir: Path
+) -> None:
+    """FT sign booleans are sweepable; phase routes and phases remain locked to the reference."""
     backend = _FakeSweepBackend()
     session = open_study(tmp_path / "flip_locked", backend=backend)
     add_dataset(session, bruker_dir / "hsqc_2d")
     reference = build_reference(session, params={"phase_route": "none"})
-    with pytest.raises(SweepError, match="sampling.flip_f1"):
-        plan_sweep(reference, combos=[{"sampling.flip_f1": True}])
-    with pytest.raises(SweepError, match="sampling.flip_f2"):
-        plan_sweep(reference, axes={"sampling.flip_f2": [True, False]})
-    # The official names (ft_neg_f1/ft_neg_f2) are locked too; global ft_neg/ft_alt is also
-    # blocked
-    with pytest.raises(SweepError, match="sampling.ft_neg_f1"):
-        plan_sweep(reference, combos=[{"sampling.ft_neg_f1": True}])
-    with pytest.raises(SweepError, match="sampling.ft_neg_f2"):
-        plan_sweep(reference, axes={"sampling.ft_neg_f2": [True, False]})
-    with pytest.raises(SweepError, match="sampling.ft_neg"):
-        plan_sweep(reference, combos=[{"sampling.ft_neg": False}])
+    plan = plan_sweep(
+        reference,
+        combos=[
+            {"sampling.flip_f1": True, "sampling.ft_neg_f2": False},
+            {"sampling.flip_f1": False, "sampling.ft_neg_f2": True},
+        ],
+    )
+    assert plan.n_workflows == 2
+    boolean_axes = plan_sweep(
+        reference,
+        axes={"sampling.flip_f2": [True, False], "sampling.ft_neg_f1": [True, False]},
+    )
+    assert boolean_axes.n_workflows == 4
+    global_ft_neg = plan_sweep(
+        reference, combos=[{"sampling.ft_neg": True}, {"sampling.ft_neg": False}]
+    )
+    assert global_ft_neg.n_workflows == 2
     with pytest.raises(SweepError, match="sampling.ft_alt"):
         plan_sweep(reference, combos=[{"sampling.ft_alt": False}])
+    with pytest.raises(SweepError, match="phase_route"):
+        plan_sweep(reference, combos=[{"phase_route": "unified"}])
+    with pytest.raises(SweepError, match="phases"):
+        plan_sweep(reference, combos=[{"phases": {"F2": [1.0, 0.0]}}])

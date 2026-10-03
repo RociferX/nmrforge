@@ -1,6 +1,6 @@
-# 03 · API reference (v1.0)
+# 03 · API reference (v1.1)
 
-See `nmrforge_api/__init__.py`(`API_VERSION = "1.0"`) for top-level exports; since 2026-09-22 `nmrforge_api` is released as its **first version**, with the contract version defined once in `nmrforge_api.session`.
+See `nmrforge_api/__init__.py`(`API_VERSION = "1.1"`) for top-level exports; v1.1 is the current source contract as of 2026-10-03, with the version defined once in `nmrforge_api.session`. The existing AppImage 1.0.2 is a separate older build and does not include this API contract.
 
 ## 3.1 Sessions and Datasets
 
@@ -14,7 +14,7 @@ dataset_info(session, dataset=None) -> dict
 - Open if `root/project.json` exists, otherwise create a new NMRForge project; research status
   (`study/study.json`)Restore condition dataset list;
 - `condition` automatically assigns the next unused letter (A/B/C...) by default; the label must be unique;
-- Import = link raw + write metadata + register import run, **do not do**Convert/deal with
+- Import links raw data, writes metadata, and registers an import run; it does not convert or process raw data.
 
 `StudySession` Key attributes: `root`, `datasets`, `dataset` (main condition), `conditions`.
 `dataset_by_condition(label)`, `study_dir`, `work_dir`, `reference_dir`,
@@ -23,7 +23,8 @@ dataset_info(session, dataset=None) -> dict
 ## 3.2 Reference workflow
 
 ```python
-build_reference(session, dataset=None, *, params=None, phase_route=None,
+build_reference(session, dataset=None, *, params=None, direct_range=None,
+                phase_route=None, carrier_ppm=None,
                 progress=None, force=False) -> ReferenceSpectrum
 load_reference(session, dataset=None) -> ReferenceSpectrum | None
 load_references(session) -> dict[str, ReferenceSpectrum]        # key = "exp/data"
@@ -41,9 +42,21 @@ build_reference_peak_tables(session, reference, *, window_pts=None,
   Phase optimisation), frozen spectrum and **actually executed script**; the actual results of automatic phase identification are written.
   `direct_phase`(`ReferenceSpectrum.phase_record()` gives `phase_mode="auto"` +.
   `actual_p0/actual_p1`);
-- `ensure_reference_peaks`: the main condition selects peaks automatically (or uses an external
-  peak table) to establish identities in `reference.list`; other conditions share those identities.
-  It writes one `reference_peak_table_parabolic.csv`;
+- `ensure_reference_peaks`: each condition independently selects peaks on its own reference
+  spectrum. An external peak table applies to the main condition only. Every condition has its own
+  reference.list and reference peak table; conditions do not share peak identities.
+- Reference reuse requires an exact normalized request match, including parameters, phase route,
+  and direct range. The reference record stores the nmrforge_api.reference_input.v1 fingerprint.
+  Any mismatch or missing/invalid legacy fingerprint raises ReferenceError and requires explicit
+  force=True (CLI --force); no automatic rebuild occurs. All conditions are preflighted before
+  engine processing starts.
+- carrier_ppm is accepted by build_reference, run_reference_study, and run_parameter_study, or
+  through params["carrier_ppm"] / dotted carrier_ppm.F1. Explicit keyword values override common
+  params per axis; params_by_condition then overrides per axis. Logical axes are F2=x/F1=y in 2D
+  and F3=x/F2=y/F1=z in 3D. Values must be finite numbers (zero/negative valid); bool, NaN/Inf,
+  empty maps, unknown axes, and axes beyond the data dimensionality are rejected. Unspecified axes
+  retain the conversion path's CAR; raw acqus is unchanged. Changed carriers require force=True.
+  Sweeps inherit the reference carrier and reject carrier scans because the converted FID is reused.
 - `sigma_multiplier` (peak selection threshold, σ multiple) **can be specified externally when generating the reference**: default 35σ;
   Once the reference peak table is frozen, all subsequent workflows can only use the reference threshold -- and then throw different thresholds.
   `ReferenceError` (Change the threshold value to the reconstruction reference: `force=True` or delete the condition.
@@ -164,11 +177,11 @@ window_points_by_axis(axes, *, window_pts=None, window_ppm=None) -> dict
 - `PeakMeasurement`:`peak_id`, `reference_peak_id`, `assignment`, `reference`,
   `positions`, `deltas`, `intensity`, `noise_sigma`, `snr`, `found`,
   `window_edge`, `boundary`, `out_of_range`, `localization`.
-- `exclusive_windows` (default `True`): the window half-width is only an **upper bound**; each
-  reference peak's search region is truncated at the midpoints to its neighbours, so a record
-  only takes the extremum inside its own cell and two reference records are never relocated
-  onto the same grid point (fixed 2026-09-19; `False` is the previous wording). Records that
-  round to the same grid point still share a cell - the resolution limit of that spectrum.
+- `exclusive_windows` is retained for API compatibility. Search ownership is joint in
+  multidimensional space and is not represented by independent per-axis bounds or the CSV
+  `cell_edge` field. Physical windows are recorded at
+  `reference.peak_localization.search_windows.search_bounds_by_axis`; candidate ownership
+  conflicts are audited separately.
 
 ## 3.6 Unify peak tables and records
 
@@ -193,17 +206,24 @@ The interface splits "generate reference" and "run processing based on parameter
 ### Reference mode
 
 ```python
-run_reference_study(root, datasets={"A": "~/data/a"},
-                    params=None,                  # may carry reference_optimize(**testing only**, see 05 §5.10)
-                    phase_route=None, peaks=None,
-                    direct_range=(10.5, 6.5),         # direct-dimension range (high, low; ppm)
+run_reference_study(root, dataset=None, *, datasets=None, name="", params=None,
+                    params_by_condition=None,
+                    phase_route=None, peaks=None, direct_range=None,
+                    carrier_ppm=None,
                     sigma_multiplier=25,              # peak-picking threshold (settable in this mode only)
                     max_peaks=0,
-                    backend=None, write=True, progress=None) -> ReferenceResult
+                    force=False, backend=None, write=True, progress=None) -> ReferenceResult
+
+run_parameter_study(root, dataset=None, *, datasets=None, combos=None, axes=None,
+                    name="", params=None, params_by_condition=None,
+                    phase_route=None, peaks=None, carrier_ppm=None,
+                    direct_range=None, sigma_multiplier=None, max_peaks=0,
+                    max_runs=256, force=False, resume=True,
+                    backend=None, write=True, progress=None) -> StudyResult
 ```
 
-- Import condition data (optional) -> automatic reference spectrum and script -> one parabolic reference peak table; no parameter combinations are run
-  Combination;
+- Import condition data (optional) -> an independent reference spectrum, script, and parabolic
+  peak table for each condition; no parameter combinations are run.
 - The peak selection threshold, reference peak table (external peak table), and localization are all determined at this stage, and then locked;
 - Reference phase window/baseline **Automatic optimisation **On by default; `params["reference_optimize"]` can be turned off or
   Limited candidate (Test only/Recurrence/audit; real experiments are not available, and must be stated in the record after use);

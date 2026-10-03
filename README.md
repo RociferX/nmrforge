@@ -32,7 +32,7 @@ Repository: <https://github.com/RociferX/nmrforge>
 Zenodo concept DOI (all archived versions): [10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415). A version-specific DOI applies only to its archived snapshot.
 
 > This page describes the **1.0.2 source** and its desktop/Python/CLI interfaces
-> (`nmrforge_api`, contract version 1.0). Published binaries are listed in GitHub Releases.
+> (`nmrforge_api`, current contract version 1.1 as of 2026-10-03). Published binaries are listed in GitHub Releases.
 > Regression coverage is in the test suite; behaviour changes are declared through the compat process
 > (`nmrforge_api/compat_declaration.py`: behaviour digests plus the
 > `same/additive/behavior_changed/contract_changed` levels) rather than by "defaults may still
@@ -41,9 +41,10 @@ Zenodo concept DOI (all archived versions): [10.5281/zenodo.22909415](https://do
 > ### Desktop application and Python/CLI API
 >
 > The desktop application and `nmrforge_api` are supported interfaces in the same source tree.
-> The Python API is versioned separately (`API_VERSION = "1.0"`) and exposes a compatibility
+> The Python API is versioned separately (`API_VERSION = "1.1"`; current source contract as of 2026-10-03) and exposes a compatibility
 > manifest for behaviour and contract changes. A released AppImage is a versioned binary built
 > from a specific source revision; newer source updates do not update an existing AppImage.
+> The current source API contract does not imply that the existing 1.0.2 AppImage includes v1.1.
 >
 > Check the manifest and release notes when comparing numerical results across software versions,
 > and validate results against the data and experiment at hand.
@@ -215,7 +216,7 @@ python -m nmrforge_api reference --study ./study
 python -m nmrforge_api peaks --study ./study
 
 # 4. run a parameter grid
-python -m nmrforge_api sweep --study ./study --grid grid.yaml
+python -m nmrforge_api sweep --study ./study --reference ./study --grid grid.yaml
 ```
 
 ## GUI usage (Track A - mature)
@@ -250,7 +251,7 @@ python -m nmrforge_api --help
 python -m nmrforge_api init       --study DIR --dataset BRUKER_DIR
 python -m nmrforge_api reference  --study DIR
 python -m nmrforge_api peaks      --study DIR
-python -m nmrforge_api sweep      --study DIR --grid grid.yaml
+python -m nmrforge_api sweep      --study DIR --reference DIR --grid grid.yaml
 python -m nmrforge_api report     --study DIR
 python -m nmrforge_api status     --study DIR
 ```
@@ -258,24 +259,21 @@ python -m nmrforge_api status     --study DIR
 ## Python API
 
 ```python
-from nmrforge_api import (
-    position_uncertainty,
-    run_parameter_study,
-    uncertainty_summary,
-)
+from nmrforge_api import run_reference_study, run_combination_study
 
-result = run_parameter_study(
+run_reference_study(
     "~/studies/hsqc_params",       # study root (resumable)
     "~/data/bmr12345/1",           # extracted Bruker dataset directory
+)
+result = run_combination_study(
+    "~/studies/hsqc_params",
     axes={"zero_fill": [1, 2, 4], "window.F1.off": [0.35, 0.45, 0.55]},
 )
 print(result.summary["status_counts"])      # what this run did (execution summary)
 
-# Statistics are a **separate** step: pair the same peak across the runs of one
-# workflow to get peak-position uncertainty (the CSP detection floor).
-# ``StudyResult.summary`` reports execution only and carries no statistics.
-by_run = {run.workflow_id: run.measurements for run in result.runs}
-print(uncertainty_summary(position_uncertainty(by_run))["delta_std_ppm"])
+# The API does not match peaks across conditions or spectra and does not calculate statistics.
+# Downstream analysis must apply its own matching criteria before statistical analysis;
+# independent peak-picking runs are not a CSP detection floor.
 ```
 
 The scripting API is documented separately in [docs/external-api/README.md](docs/external-api/README.md);
@@ -349,7 +347,7 @@ These are deliberate, documented boundaries rather than unfinished features:
   repository; do not run the tests from inside it.
 - The MATLAB-style analysis features that earlier versions contained (HSQC CSP analysis) were
   removed in 2026-09 (see the release notes for that version).
-- The Python API is at its first version (`API_VERSION = "1.0"`); later changes follow the
+- The current Python API contract is v1.1 (`API_VERSION = "1.1"`, 2026-10-03); later changes follow the
   `compat_manifest()` classification and are recorded in the
   [release notes](https://github.com/RociferX/nmrforge/releases).
 

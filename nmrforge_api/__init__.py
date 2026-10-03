@@ -1,23 +1,28 @@
-"""NMRForge parameter-combination API (v1.0 - first version; specification finalised
-2026-09-13, released as the first version on 2026-09-22).
+"""NMRForge parameter-combination API (v1.1, current contract finalised 2026-10-03).
 
 What it does (Qt-free, scriptable, cluster friendly):
 
 1. read the raw NMR data and a **user-defined table of parameter combinations**;
-2. build a **reference workflow** by automatic optimisation: one reference script and two
-      reference peak tables (parabolic / 2D Gaussian); a baseline, not a claimed optimum;
+2. build a **reference workflow** by automatic optimisation: one reference processing
+      script and one reference peak table (three-point parabolic localisation); a baseline
+      for later parameter perturbations, not a claimed global optimum. Gaussian fitting was
+      removed on 2026-09-26 (user request 7), leaving parabolic localisation only;
 3. one parameter combination becomes one **workflow_id** (W0001...): each condition starts from
-      its own reference parameters, applies batch and combination overrides, then processes;
-      localisation is the chosen parabolic / gaussian / both, and only that table is written;
+      its own effective reference parameters, applies batch and combination overrides, then
+      processes; peaks are picked independently and refined with three-point parabolic
+      localisation, writing that combination's own peak table;
 4. keep full provenance: ``parameters_requested`` / ``parameters_used`` and the **actual**
       results of automatic parameters (``actual_p0``/``actual_p1``, the SMILE nSigma used and
-      the noise sigma), the full script and log, versions and status;
-   (success / success_with_warning / failed);
-5. two conditions (A/B) run in one workflow with one parameter set, sharing
-      ``reference_peak_id`` while each writes its own peak table.
+      noise sigma), the full script and log, software/NMRPipe/SMILE versions and status
+      (success / success_with_warning / failed);
+5. each condition has its own reference and peak table; one workflow applies the same
+      perturbation parameters independently to each condition. Peak identities are valid
+      only within their own spectrum: ``reference_peak_id`` is not shared and no
+      cross-spectrum correspondence is established.
 
-What it does **not** do (software boundary, 2026-09-13): CSP, robustness, statistical analysis,
-significance testing and scientific conclusions - downstream analysis does those.
+What it does **not** do (software boundary, 2026-09-13): CSP, robustness calculations,
+statistical analysis, significance testing or scientific conclusions. Downstream analysis
+programs perform these using the standard peak tables.
 
 Minimal usage::
 

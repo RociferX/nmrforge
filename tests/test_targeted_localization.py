@@ -1,13 +1,11 @@
 """Targeted localization (2026-09-19 requirement): refine only the selected
 peaks with the chosen method.
 
-Acceptance (as given by the user):
+Current acceptance criteria:
 
-- **Equivalence**: on the same workflow, targeted and full-spectrum runs give
-  per-peak identical ``H_ppm``/``N_ppm`` (1e-9) and the same
-  ``fit_success``/fallback reason for the **same batch of peaks**;
-- **Detection unchanged**: row count and ``peak_id`` numbering are unchanged;
-  peaks not listed as targets keep the detection-stage parabola position;
+- **Target equivalence**: selected peaks retain full-spectrum coordinates and QC;
+- **Non-target detections**: row count and ``peak_id`` values stay unchanged; non-target coordinates
+  remain at integer detection grid points with method ``none`` and empty localization QC;
 - **Recorded**: ``run.json`` stores the target source (path + sha256 + peak
   count) + n_targeted/n_skipped;
 - **Errors**: an empty list / a missing file / an unknown ``peak_id`` / a
@@ -169,9 +167,7 @@ def _parabolic_rows(run) -> list[dict]:
 
 # ------------------------------------------------------------- unit/integration layer
 def test_targeted_matches_full_spectrum_on_the_same_peaks(tmp_path: Path) -> None:
-    """Equivalence (core acceptance): target peaks match per peak; peaks not
-    listed keep the detection-stage parabola position.
-    """
+    """Targets match full-spectrum localization; non-targets retain integer detection points."""
     spectrum = _write_ft2(tmp_path / "spec.ft2")
     full, full_meta = _rows(spectrum)
     ids = [row["peak_id"] for row in full]
@@ -183,20 +179,32 @@ def test_targeted_matches_full_spectrum_on_the_same_peaks(tmp_path: Path) -> Non
 
     targets = (ids[0], ids[-1])
     sub, sub_meta = _rows(spectrum, targets=targets)
-    assert [row["peak_id"] for row in sub] == ids
+    from nmrglue.fileio import pipe
+
+    dic, data = pipe.read(str(spectrum))
+    uc_n = pipe.make_uc(dic, data, dim=0)
+    uc_h = pipe.make_uc(dic, data, dim=1)
+    assert [row["peak_id"] for row in sub] == ids  # Detection and IDs stay unchanged.
     full_by_id = {row["peak_id"]: row for row in full}
     for row in sub:
         reference = full_by_id[row["peak_id"]]
 
-        assert row["H_ppm"] == reference["H_ppm"]
-        assert row["N_ppm"] == reference["N_ppm"]
-        assert row["localization_method"] == "parabolic"
         if row["peak_id"] in targets:
+            assert row["H_ppm"] == reference["H_ppm"]
+            assert row["N_ppm"] == reference["N_ppm"]
+            assert row["localization_method"] == "parabolic"
             assert bool(row["fit_success"]) == bool(reference["fit_success"])
             assert row["FWHM_H"] == reference["FWHM_H"]
             assert row["FWHM_N"] == reference["FWHM_N"]
             assert row["boundary_hit"] == reference["boundary_hit"]
         else:
+            assert row["localization_method"] == "none"
+            assert uc_h.f(row["H_ppm"], "ppm") == pytest.approx(
+                round(uc_h.f(row["H_ppm"], "ppm")), abs=1e-9
+            )
+            assert uc_n.f(row["N_ppm"], "ppm") == pytest.approx(
+                round(uc_n.f(row["N_ppm"], "ppm")), abs=1e-9
+            )
             assert row["fit_success"] is None
             assert row["FWHM_H"] is None and row["FWHM_N"] is None
             assert row["fallback"] is False
@@ -395,15 +403,18 @@ def test_targeted_run_records_sources_and_matches_full_run(
     full_by_id = {row["peak_id"]: row for row in full_rows}
     for row in rows:
         reference = full_by_id[row["peak_id"]]
-        assert row["H_ppm"] == reference["H_ppm"]
-        assert row["N_ppm"] == reference["N_ppm"]
         if row["peak_id"] == target_id:
+            assert row["localization_method"] == "parabolic"
+            assert row["H_ppm"] == reference["H_ppm"]
+            assert row["N_ppm"] == reference["N_ppm"]
             assert bool(row["fit_success"]) == bool(reference["fit_success"])
             assert row["FWHM_H"] == reference["FWHM_H"]
             assert row["FWHM_N"] == reference["FWHM_N"]
         else:
+            assert row["localization_method"] == "none"
             assert math.isnan(row["fit_success"])
             assert math.isnan(row["FWHM_H"]) and math.isnan(row["FWHM_N"])
+            assert row["fallback"] is False
 
 
 def test_changing_the_target_file_content_invalidates_the_resume_cache(
@@ -839,4 +850,17 @@ def test_condition_aware_readers_and_low_level_api(tmp_path: Path) -> None:
     assert none_meta["n_targeted"] == 0
     assert none_meta["n_skipped"] == len(rows) == len(none_rows)
     assert [row["peak_id"] for row in none_rows] == [row["peak_id"] for row in rows]
-    assert [row["H_ppm"] for row in none_rows] == [row["H_ppm"] for row in rows]
+    assert all(row["localization_method"] == "none" for row in none_rows)
+    assert all(row["fit_success"] is None for row in none_rows)
+    from nmrglue.fileio import pipe
+
+    dic, data = pipe.read(str(spectrum))
+    uc_n = pipe.make_uc(dic, data, dim=0)
+    uc_h = pipe.make_uc(dic, data, dim=1)
+    assert all(
+        uc_h.f(row["H_ppm"], "ppm")
+        == pytest.approx(round(uc_h.f(row["H_ppm"], "ppm")), abs=1e-9)
+        and uc_n.f(row["N_ppm"], "ppm")
+        == pytest.approx(round(uc_n.f(row["N_ppm"], "ppm")), abs=1e-9)
+        for row in none_rows
+    )

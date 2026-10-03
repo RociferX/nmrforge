@@ -1,6 +1,6 @@
-# nmrforge_api external documentation (API contract 1.0)
+# nmrforge_api external documentation (API contract 1.1 · 2026-10-03)
 
-> `nmrforge_api` is the public, versioned scripting interface (`API_VERSION = "1.0"`) and does
+> `nmrforge_api` is the public, versioned scripting interface (`API_VERSION = "1.1"`) and does
 > not depend on Qt. Use `compat_manifest()` and the release notes to identify behaviour or contract
 > changes between versions. Source updates and released AppImages are separate deliverables.
 
@@ -9,8 +9,11 @@
 freezes a reference workflow, executes user-provided combinations and writes one parabolic peak
 table per candidate spectrum with processing provenance and QC records.
 
-The software only performs processing and archiving; **statistical inference and scientific
-conclusions are outside its scope** and belong to downstream analysis. The public functions,
+The current v1.1 contract writes one independent reference and reference peak table per condition,
+then one independently detected combination table per condition and workflow. It does not match
+peaks across conditions or from combinations to reference identities. The software only performs
+processing and archiving; **statistical inference and scientific conclusions are outside its scope**
+and belong to downstream analysis. The public functions,
 records, and compatibility behaviour are described in this documentation set.
 
 ## Validation boundary: engineering regression vs scientific validation
@@ -43,8 +46,9 @@ validation boundaries.
 | [10-troubleshooting.md](10-troubleshooting.md) | Common errors, warning processing, breakpoint resume |
 | [examples/](examples/) | Runnable example(one step/step by step/Measure only) |
 
-Contract version: `API_VERSION = "1.0"`; the public entry points and output fields are described
-in this document set.
+Contract version: `API_VERSION = "1.1"` (2026-10-03); the public entry points and output fields are described
+in this document set. The source API and desktop/AppImage are separate release lines; the existing
+1.0.2 AppImage does not contain the v1.1 API contract.
 
 ## Install and run
 
@@ -60,7 +64,7 @@ python -m nmrforge_api --help
 ```python
 from nmrforge_api import run_reference_study, run_combination_study
 
-# reference mode: reference spectrum + script + one parabolic reference peak table (the threshold is set here and locked afterwards)
+# reference mode: each condition gets its own spectrum, script, and peak table (threshold locked afterwards)
 run_reference_study(
     "~/studies/hsqc_params",
     datasets={"A": "~/data/apo", "B": "~/data/holo"},

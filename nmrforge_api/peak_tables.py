@@ -1,23 +1,13 @@
-"""Unified peak table: isomorphic CSV from both localisation methods, with stable identity.
+"""Unified peak table CSV with stable per-spectrum peak identities and localisation QC.
 
-Specification (the user API spec of 2026-09-13); the compliance ledger is
-``docs/reviews/2026-09-13-api-spec-compliance.md``:
-
-- each workflow runs parabolic and 2D Gaussian localisation on **the same spectrum** and writes
-  two peak tables with **exactly the same structure**;
-- shared columns: ``workflow_id`` / ``reference_peak_id`` / ``assignment`` / ``H_ppm`` /
-  ``N_ppm`` / ``intensity`` / ``SNR`` / ``detected`` / ``localization_method``;
-- localization QC columns: ``fit_success`` / ``FWHM_H`` / ``FWHM_N`` / ``fit_rmse`` /
-  ``boundary_hit``; since 2026-09-19 (P3-7) the parabolic table carries real values
-  too (the three-point parabola gives an equivalent linewidth and an edge flag), and
-  only ``fit_rmse`` stays Gaussian-only (``NaN`` for parabolic);
-- ``duplicate_localization`` (2026-09-19, P2-5): true for rows sharing a coordinate;
-- a reference peak that was **not** detected keeps its row (``detected=false``);
-- a failed fit or fallback is **never silent**: ``fallback`` / ``fallback_reason`` land in the
-  table.
-
-Two further columns, ``condition`` / ``dataset``, tell the two datasets of one workflow apart
-in a multi-condition study; provenance beyond the specification's "at least" list.
+Each workflow independently picks peaks on its own spectrum and writes one fixed-schema table.
+The current v1.1 contract has 38 columns: workflow and dataset identity, 1H/15N compatibility
+coordinates, logical F1/F2/F3 coordinates and nuclei, requested and actual localisation method,
+failure/fallback details, fit QC, duplicate-coordinate flags, and per-peak cell diagnostics.
+Gaussian fitting and ``fit_rmse`` were removed; localisation uses three-point parabolic
+refinement. H/N aliases are populated only when the corresponding nucleus is unique, and
+duplicate detection uses complete logical-dimension coordinates. Undetected reference peaks
+remain as rows with ``detected=false``.
 """
 
 from __future__ import annotations
@@ -45,13 +35,24 @@ PEAK_TABLE_COLUMNS: tuple[str, ...] = (
     "SNR",
     "detected",
     "localization_method",
+    "localization_requested",
     "fallback",
     "fallback_reason",
+    "failure_reason",
     "fit_success",
     "FWHM_H",
     "FWHM_N",
     "boundary_hit",
     "duplicate_localization",
+    "F1_ppm",
+    "F1_nucleus",
+    "FWHM_F1",
+    "F2_ppm",
+    "F2_nucleus",
+    "FWHM_F2",
+    "F3_ppm",
+    "F3_nucleus",
+    "FWHM_F3",
     "cell_low_H",
     "cell_high_H",
     "cell_low_N",
@@ -94,6 +95,12 @@ _FLOAT_COLUMNS: frozenset[str] = frozenset(
         "SNR",
         "FWHM_H",
         "FWHM_N",
+        "F1_ppm",
+        "FWHM_F1",
+        "F2_ppm",
+        "FWHM_F2",
+        "F3_ppm",
+        "FWHM_F3",
         "intensity_ratio_vs_picked",
         "shift_vs_picked_H",
         "shift_vs_picked_N",
@@ -109,7 +116,12 @@ _TEXT_COLUMNS: frozenset[str] = frozenset(
         "reference_peak_id",
         "assignment",
         "localization_method",
+        "localization_requested",
         "fallback_reason",
+        "failure_reason",
+        "F1_nucleus",
+        "F2_nucleus",
+        "F3_nucleus",
     }
 )
 
@@ -156,13 +168,12 @@ def _fmt(value: Any) -> str:
 def format_cell(column: str, value: Any) -> str:
     """One column's values -> CSV text (the column name decides the type).
 
-    Spec E3: fields a run cannot produce are ``NaN``, not false/0 - otherwise both tables
-    would have the same columns but not the same meaning. Since 2026-09-19 (P3-7) only
-    ``fit_rmse`` is Gaussian-only for parabolic tables (a three-point parabola is exact
-    and therefore residual-free); the parabolic fit_success / FWHM_* / boundary_hit come
-    from that parabola.
+    Fields a run cannot produce are ``NaN``, not false/0, so the shared table schema keeps a
+    consistent meaning. Localisation QC comes from the three-point parabolic refinement.
     """
     if value is None:
+        return "" if column in _TEXT_COLUMNS else NAN_TEXT
+    if str(value).strip().lower() == "nan":
         return "" if column in _TEXT_COLUMNS else NAN_TEXT
     if column in _BOOL_COLUMNS:
         return "true" if _as_bool(value) else "false"
@@ -215,7 +226,10 @@ def read_peak_table(path: Path | str) -> list[dict[str, Any]]:
                     else int(round(number))
                 )
             else:
-                row[key] = "" if value is None else value
+                row[key] = (
+                    "" if value is None or key in _TEXT_COLUMNS
+                    and str(value).strip().lower() == "nan" else value
+                )
         rows.append(row)
     return rows
 
@@ -233,15 +247,27 @@ def _fwhm_by_nucleus(record: Mapping[str, Any]) -> dict[str, float]:
     return out
 
 
-def _coordinate_key(row: Mapping[str, Any]) -> tuple[int, int] | None:
-    """The row coordinate key (ppm rounded to 1e-6); None when H or N is missing."""
+def _coordinate_key(row: Mapping[str, Any]) -> tuple[Any, ...] | None:
+    """Use complete logical F-axis identity for duplicate checks; retain legacy H/N rows."""
+    if any(row.get(f"F{axis}_nucleus") for axis in (1, 2, 3)):
+        values: list[tuple[str, str, int]] = []
+        for axis in (1, 2, 3):
+            nucleus = str(row.get(f"F{axis}_nucleus") or "")
+            if not nucleus:
+                continue
+            number = _as_float(row.get(f"F{axis}_ppm"))
+            if number is None or not math.isfinite(number):
+                return None
+            values.append((f"F{axis}", nucleus, int(round(number * 1e6)))
+            )
+        return tuple(values) if values else None
     values: list[int] = []
     for column in ("H_ppm", "N_ppm"):
         number = _as_float(row.get(column))
         if number is None or not math.isfinite(number):
             return None
         values.append(int(round(number * 1e6)))
-    return (values[0], values[1])
+    return ("HN", values[0], values[1])
 
 
 def mark_duplicate_localization(rows: Sequence[dict[str, Any]]) -> int:
@@ -254,8 +280,11 @@ def mark_duplicate_localization(rows: Sequence[dict[str, Any]]) -> int:
     point, and even the reference table's one-cell-per-peak rule shares a cell at the
     resolution limit; such rows are flagged, never dropped.
     """
-    buckets: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    buckets: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
     for row in rows:
+        if not _as_bool(row.get("detected", True)):
+            row["duplicate_localization"] = False
+            continue
         key = _coordinate_key(row)
         if key is None:
             row["duplicate_localization"] = False
@@ -278,25 +307,31 @@ def peak_table_row(
     condition: str = "",
     dataset: str = "",
     method: str = "parabolic",
+    requested_method: str | None = None,
     fallback_reason: str = "",
 ) -> dict[str, Any]:
     """One measurement -> one peak-table row (shared by both methods).
 
-    The QC columns are driven by ``measurement.localization``: a Gaussian fit gives
-    ``fit_success`` / ``FWHM_*`` / ``fit_rmse`` / ``boundary_hit``, a three-point
-    parabola gives ``fit_success`` / ``FWHM_*`` (an equivalent linewidth) /
-    ``boundary_hit``. Keys the record does not carry are written as NaN (only the
-    Gaussian path has a ``fit_rmse``). Positions come from the nucleus (``H_ppm``
-    for 1H, ``N_ppm`` for 15N).
+    QC columns come from ``measurement.localization`` and the three-point parabolic refinement.
+    Keys the record does not carry are written as NaN. Positions are stored by logical axis;
+    the H/N compatibility aliases are populated only for unique matching nuclei.
     """
     record = _localization_record(measurement)
     fwhm = _fwhm_by_nucleus(record)
+    fwhm_axis = {
+        str(axis): value
+        for axis, value in (record.get("fwhm_by_axis") or {}).items()
+        if _as_float(value) is not None
+    }
+    positions = dict(measurement.positions or {})
+    axis_nuclei = dict(getattr(measurement, "axis_nuclei", None) or {})
     cell_low = dict(getattr(measurement, "cell_low", None) or {})
     cell_high = dict(getattr(measurement, "cell_high", None) or {})
     row: dict[str, Any] = {
         "workflow_id": str(workflow_id),
         "condition": str(condition),
         "dataset": str(dataset),
+        "peak_id": int(measurement.peak_id),
         "reference_peak_id": str(
             getattr(measurement, "reference_peak_id", "")
             or reference_peak_id(getattr(measurement, "peak_id", 0))
@@ -307,31 +342,58 @@ def peak_table_row(
         "intensity": _as_float(getattr(measurement, "intensity", None)),
         "SNR": _as_float(getattr(measurement, "snr", None)),
         "detected": bool(getattr(measurement, "found", False)),
-        "localization_method": str(method),
-        "fallback": bool(record.get("fallback") or fallback_reason),
-        "fallback_reason": str(record.get("fallback_reason") or fallback_reason or ""),
+        "localization_method": str(
+            "none" if not getattr(measurement, "found", False)
+            else record.get("actual_method") or method
+        ),
+        "localization_requested": str(
+            record.get("requested_method") or requested_method or method
+        ),
+        "fallback": bool(record.get("fallback", False)),
+        "fallback_reason": str(
+            record.get("fallback_reason") or fallback_reason or ""
+        ),
+        "failure_reason": str(record.get("failure_reason") or ""),
         "duplicate_localization": False,
     }
+    for axis in ("F1", "F2", "F3"):
+        nucleus = str(axis_nuclei.get(axis) or "")
+        position = positions.get(axis)
+        if position is None and nucleus:
+            position = positions.get(nucleus)
+        row[f"{axis}_ppm"] = _as_float(position)
+        if row[f"{axis}_ppm"] is None:
+            row[f"{axis}_ppm"] = float("nan")
+        row[f"{axis}_nucleus"] = nucleus
+        row[f"FWHM_{axis}"] = _as_float(fwhm_axis.get(axis))
+        if row[f"FWHM_{axis}"] is None:
+            row[f"FWHM_{axis}"] = float("nan")
     success = record.get("fit_success")
     edge = record.get("boundary_hit")
     row["fit_success"] = None if success is None else bool(success)
     row["FWHM_H"] = fwhm.get("1H")
     row["FWHM_N"] = fwhm.get("15N")
     row["boundary_hit"] = None if edge is None else bool(edge)
-    # P1-3 per-peak cell/identity QC. Only the reference measurement (which relocates
-    # records from the peak identity table) writes real values; combination (workflow)
-    # tables pick and localize in one step, so all eight columns stay NaN there.
+    # Per-peak cell and identity QC. The reference measurement writes real values;
+    # combination tables pick and localize in one step, so these fields remain NaN.
     if cell_low or cell_high:
         row["cell_low_H"] = cell_low.get("1H")
         row["cell_high_H"] = cell_high.get("1H")
         row["cell_low_N"] = cell_low.get("15N")
         row["cell_high_N"] = cell_high.get("15N")
-        row["cell_edge"] = bool(getattr(measurement, "cell_edge", False))
-        row["intensity_ratio_vs_picked"] = _as_float(getattr(measurement, "intensity_ratio", None))
+        edge_value = getattr(measurement, "cell_edge", None)
+        row["cell_edge"] = None if edge_value is None else bool(edge_value)
+    else:
+        for column in _CELL_COLUMNS[:5]:
+            row[column] = None
+    if getattr(measurement, "reference", None):
+        row["intensity_ratio_vs_picked"] = _as_float(
+            getattr(measurement, "intensity_ratio", None)
+        )
         row["shift_vs_picked_H"] = _as_float((measurement.deltas or {}).get("1H"))
         row["shift_vs_picked_N"] = _as_float((measurement.deltas or {}).get("15N"))
     else:
-        for column in _CELL_COLUMNS:
+        for column in _CELL_COLUMNS[5:]:
             row[column] = None
     return row
 
@@ -373,7 +435,7 @@ def peak_table_digest(path: Path | str) -> dict[str, Any]:
         "path": str(target),
         "sha256": sha256_file(target),
         "n_rows": len(rows),
-        "n_detected": sum(1 for row in rows if row.get("detected")),
+        "n_detected": sum(1 for row in rows if row.get("detected") is True),
     }
 
 

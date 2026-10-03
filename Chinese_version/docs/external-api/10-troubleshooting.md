@@ -1,4 +1,4 @@
-# 10 · 排查(v1.0)
+# 10 · 排查(v1.1)
 
 ## 10.1 常见错误与处理
 
@@ -23,7 +23,7 @@
 | --- | --- |
 | `peak_count_zero` | 该组合在锁定阈值下一个峰都没检出:确认该组合的谱没坏,或重建参考改阈值 |
 | `boundary_hit` | 有峰的三点抛物线顶点贴在 ±0.5 点边界(真峰顶可能落在三点模板之外):核对谱/窗口,或接受该定位并看 `n_boundary_hit` 计数 |
-| `duplicate_localization` | 同表出现同坐标(ppm 1e-6)的重复行:参考表在独占邻域修复后属分辨率极限,组合表还有亚格点精修把相邻检出峰收进同一格的情形;下游不要把重复行当成两个独立观测 |
+| `duplicate_localization` | 同表出现同坐标(ppm 1e-6)的重复行:独立记录可能因存储点分辨率或亚格点精修落在同一坐标;下游不要把重复行当成两个独立观测 |
 | `direct_range_override` | 本批用了 `--allow-ext-override`/`allow_ext_override=True`,脚本直接维范围与参考冻结范围不一致:确认这是有意为之 |
 | (已移除) | `peak_not_detected` / `peak_window_edge` / `peak_out_of_range` / `window_points_fallback`:2026-09-14 起组合模式独立选峰,不再产出 |
 | (已移除) | `gaussian_fallback` / `gaussian_unsupported_ndim`:2026-09-26 起二维高斯拟合算法整体删除,边界警告改为与算法无关的 `boundary_hit` |

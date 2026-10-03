@@ -1,14 +1,14 @@
-# 02 · Get started quickly (v1.0)
+# 02 · Get started quickly (v1.1)
 
 ## 1. Two modes (from 2026-09-14)
 
-The interface splits the work into two modes: **Reference mode** (generate reference) and **Combined mode** (run according to parameter combination).
-Processing), the combination mode **must explicitly specify the reference**.
+The interface has two stages: reference mode builds the reference spectra and tables;
+combination mode processes parameter combinations against an explicitly specified reference.
 
 ```python
-from nmrforge_api import run_reference_study, run_combination_study
+from nmrforge_api import run_reference_study, run_combination_study, run_parameter_study
 
-# 1) reference mode: import the data + auto-optimise the reference spectrum/script + reference peak table
+# 1) reference mode: build an independent reference spectrum/script and peak table per condition
 reference = run_reference_study(
     "~/studies/hsqc_params",              # study root (reusable / resumable)
     datasets={"A": "~/data/bmr12345/1"},  # condition A (raw Bruker directory)
@@ -33,11 +33,12 @@ for run in result.runs:
           run.peak_table_path("parabolic"))
 ```
 
-- The reference mode only builds a reference (1 script + 2 peak tables) and does not run any combination; the peak selection threshold is determined here
-  Afterwards, **full locking** (write the threshold key in the combination table and an error will be reported directly. If you want to change the threshold, please rebuild the reference);
+- The reference mode builds one reference and one peak table per condition; it does not run combinations. The peak selection threshold is determined here.
+  It is locked for combinations: threshold overrides are rejected. Change it by explicitly
+  rebuilding the reference with `force=True`.
 - The combination mode does not generate a reference: the parameter base takes the valid parameter of the reference, and the combination table only covers the keys it explicitly specifies;
   The reference does not exist or the peak table is missing -> `ReferenceError` (prompts to run reference mode first);
-- **Independent peak selection for combinations** (2026-09-14): Each combination uses the reference locking threshold independently on its own candidate spectrum
+- **Independent references and combination peak selection**: Each condition has its own reference; each combination uses the reference-locked threshold independently on its candidate spectrum
   peak selection -> the combination’s own complete peak table; `reference_peak_id`/`assignment`
   stay blank and matching against the reference peak table is done downstream;
 - Localisation uses three-point parabolic refinement. Requests for removed methods raise an error;
@@ -62,7 +63,7 @@ result = run_parameter_study(
 The same `W0001` uses the same user parameter for A and B, and each outputs a peak table:
 
 ```text
-study/workflows/W0001/A/peak_table_parabolic.csv      # the default refinement method
+study/workflows/W0001/A/peak_table_parabolic.csv      # this condition's independent table
 study/workflows/W0001/B/peak_table_parabolic.csv
 ```
 
