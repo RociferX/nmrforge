@@ -304,12 +304,12 @@ merged keeping first-seen order). Semantics:
 
 - **Detection and the peak set are untouched**: the target list only decides which peaks take
   the method's refinement -- picking, row count and `peak_id` numbering never change;
-- unlisted peaks **stay in the table** with the detection-stage three-point parabola estimate
-  (the method that row actually used); that method's QC columns
-  (`fit_success`/`FWHM_*`/`boundary_hit`) are `NaN` (not fitted, **not** a failure)
-  and `fallback` is false;
-- a per-peak failure is recorded as usual (`fit_success=false` + `fallback_reason`) and
-  **never** re-fits another candidate; `n_fallback` counts only peaks that were really fitted;
+- unlisted peaks **stay in the table** at their integer detection-grid coordinates, with
+  `localization_requested="parabolic"`, `localization_method="none"`, unrun localization QC
+  (`fit_success`/`FWHM_*`/`boundary_hit`) as `NaN`, an empty `failure_reason`, and
+  `fallback=false`;
+- a targeted parabolic refinement failure is recorded in `failure_reason` and **never**
+  re-fits another candidate; `fallback` / `fallback_reason` are reserved for actual fallback;
 - record: `run.json.parameters_resolved.detection.localization_targets` =
   `{scope, source, path, sha256, n_targets, peak_ids, reference_peak_ids?}` (same style as
   `direct_range.source`); `peak_localization.<method>` also carries `localization_scope`

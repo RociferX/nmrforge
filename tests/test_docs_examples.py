@@ -195,23 +195,34 @@ def _run_documented_python_example(code: str, root: Path, dataset: Path) -> tupl
     import nmrforge_api.study as study_module
 
     backend = _DocBackend()
-    real = study_module.run_parameter_study
+    real_parameter = study_module.run_parameter_study
+    real_reference = study_module.run_reference_study
+    real_combination = study_module.run_combination_study
 
-    def wrapper(doc_root, doc_dataset=None, **kwargs):
+    def parameter_wrapper(doc_root, doc_dataset=None, **kwargs):
         kwargs.setdefault("backend", backend)
         kwargs.setdefault("params", {"phase_route": "none"})
-        return real(root, dataset, **kwargs)
+        return real_parameter(root, dataset, **kwargs)
+
+    def reference_wrapper(doc_root, doc_dataset=None, **kwargs):
+        kwargs.setdefault("backend", backend)
+        kwargs.setdefault("params", {"phase_route": "none"})
+        return real_reference(root, dataset, **kwargs)
+
+    def combination_wrapper(doc_reference, **kwargs):
+        kwargs.setdefault("backend", backend)
+        return real_combination(str(root), **kwargs)
 
     used: set[str] = set()
     for line in code.splitlines():
         used.update(SUMMARY_ACCESS.findall(line))
 
     namespace: dict[str, Any] = {}
-    nmrforge_api.run_parameter_study = wrapper  # the example does from nmrforge_api import ...
-    try:
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(nmrforge_api, "run_parameter_study", parameter_wrapper)
+        monkeypatch.setattr(nmrforge_api, "run_reference_study", reference_wrapper)
+        monkeypatch.setattr(nmrforge_api, "run_combination_study", combination_wrapper)
         exec(compile(code, str(README), "exec"), namespace)  # noqa: S102 - documentation example
-    finally:
-        nmrforge_api.run_parameter_study = real
     return namespace.get("result"), used
 
 

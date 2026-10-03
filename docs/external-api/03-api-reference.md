@@ -128,8 +128,10 @@ run_sweep(session, plan, *, reference=None, datasets=None,
 - `localize_peaks` (**targeted localization**, 2026-09-19): a CSV path (at least a
   `peak_id` column) / a sequence of peak numbers / `LocalizationTargets`; **only those
   peaks take the chosen method's refinement**. Detection, row count and `peak_id`
-  numbering are unchanged and unlisted peaks stay (position from the detection-stage
-  parabola, that method's QC columns as NaN = not done, not a failure); a combination
+  numbering are unchanged and unlisted peaks retain their integer detection-grid
+  coordinates (`localization_requested="parabolic"`, `localization_method="none"`, unrun QC
+  columns as NaN, empty `failure_reason`, and `fallback=false`); only targeted peaks receive
+  parabolic refinement, and an attempted failure is recorded in `failure_reason`; a combination
   may override it with the combination table's `localization.targets`; default = the
   whole spectrum;
 - `localize_peaks` (**condition granularity**, 2026-09-20): the CSV may carry a

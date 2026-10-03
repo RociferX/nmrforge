@@ -35,7 +35,7 @@
 
 ## 6.2 Unified peak table fields (**38 columns**)
 
-The current v1.1 unified table contains **38 columns**, in the order below. Older 29-, 27-, and
+The v1.1 unified table has currently **38 columns**, in the order below. Older 29-, 27-, and
 36-column tables are historical formats, not a current compatibility promise; rebuild old reference
 peak tables from the frozen reference spectrum before reuse.
 
@@ -105,8 +105,9 @@ intensity_ratio_vs_picked, shift_vs_picked_H, shift_vs_picked_N
 - **Targeted localization**: `localization.targets`, the CLI `--localize-peaks`, and the API
   `localize_peaks=` select which detected peaks receive the three-point parabolic refinement.
   Detection, row count and `peak_id` numbering are unchanged; unlisted peaks retain their
-  detection-stage coordinates and have unrun localization QC as `NaN`, not as a failure. A
-  per-peak failure is recorded in `failure_reason`. The resolved targets are recorded
+  integer detection-grid coordinates (`localization_requested="parabolic"`,
+  `localization_method="none"`, unrun localization QC as `NaN`, empty `failure_reason`, and
+  `fallback=false`). A targeted refinement failure is recorded in `failure_reason`. The resolved targets are recorded
   in `run.json.parameters_resolved.detection.localization_targets`; the method summary is under
   `peak_localization.parabolic`;
 - **Condition granularity (2026-09-20)**: when the target list is written per condition (a CSV `condition` column or a condition mapping), the same `localization_targets` record keeps `path`/`sha256` for the **whole source** (whole-file hash) while `peak_ids`/`n_targets`/`n_skipped` describe **this run (this condition)**, adds `condition` (this run's condition) and `on_missing` (the missing-row policy), and gives per-condition detail in `by_condition` `{peak_ids, n_targets, line_ranges, path + sha256, from}`; without a `condition` column (shared by the batch) `by_condition` is `"all"`, and `peak_localization.<method>` counts stay **per run**;
