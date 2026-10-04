@@ -1,6 +1,6 @@
 # AppImage 打包方案（NMRForge）
 
-当前源码版本为 **1.0.3**，本轮仅发布源码以归档 API v1.1，不重建 AppImage。
+当前为 **v1.0.3 仅源码发布**，用于归档 API v1.1，不重建 AppImage。
 已有 [v1.0.2 Release](https://github.com/RociferX/nmrforge/releases/tag/v1.0.2)（2026-10-02）
 的 AppImage 保持原样，由公开提交 `77b535f` 构建，不包含后续 API 更新。
 源码保持 Apache-2.0；单份 Linux 二进制在运行时切换界面语言。

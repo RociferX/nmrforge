@@ -432,11 +432,16 @@ def test_packaging_policy_declares_source_and_appimage_release() -> None:
             f"released with {released}",
             f"{released} 源码与 AppImage 发布准备中",
             f"{released} source and AppImage release in preparation",
+            f"{released} 仅源码发布",
+            f"source-only {released} release",
         )
     )
     assert "AppImage" in text
     assert "wheel" in text
     assert "APPIMAGE_RELEASE_CHECKLIST.md" in text
+    if f"{released} 仅源码发布" in text or f"source-only {released} release" in text:
+        assert "1.0.2" in text and "77b535f" in text
+        assert "不重建 AppImage" in text or "No AppImage is rebuilt" in text
 
 
 def test_appimage_build_keeps_the_machine_local_config_out() -> None:

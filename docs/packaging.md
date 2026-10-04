@@ -1,6 +1,6 @@
 # AppImage packaging solution (NMRForge)
 
-Current source version: **1.0.3**, a source-only release archiving API v1.1. No AppImage is rebuilt.
+Current distribution: **source-only v1.0.3 release**, archiving API v1.1. No AppImage is rebuilt.
 The existing v1.0.2 AppImage (2026-10-02), built from public commit `77b535f`, is unchanged
 and does not contain the later API updates.
 See the [release](https://github.com/RociferX/nmrforge/releases/tag/v1.0.2) for assets,
