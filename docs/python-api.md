@@ -1,8 +1,9 @@
 # Python API
 
-The public scripting contract is `API_VERSION = "1.1"`, independently of software version
-1.0.2. Install from source containing this contract: previously released AppImages do not
-gain newer API functionality automatically. Check `compat_manifest()` before reusing results.
+The public scripting contract is `API_VERSION = "1.1"`; this source release uses software version
+1.0.3. The previously released AppImage remains at 1.0.2 and does not gain newer API functionality
+automatically. Install from source containing this contract and check `compat_manifest()` before
+reusing results.
 
 | Surface | Import | Stability |
 | --- | --- | --- |

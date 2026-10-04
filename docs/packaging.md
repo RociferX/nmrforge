@@ -1,7 +1,8 @@
 # AppImage packaging solution (NMRForge)
 
-Status: **Source and AppImage released with v1.0.2** (2026-10-02), built from public commit
-`77b535f`. Later documentation commits do not change the binary's build source.
+Current source version: **1.0.3**, a source-only release archiving API v1.1. No AppImage is rebuilt.
+The existing v1.0.2 AppImage (2026-10-02), built from public commit `77b535f`, is unchanged
+and does not contain the later API updates.
 See the [release](https://github.com/RociferX/nmrforge/releases/tag/v1.0.2) for assets,
 checksums and verification boundaries. The source stays Apache-2.0.
 The supported binary distribution is a single Linux AppImage with runtime language

@@ -1,4 +1,4 @@
-# nmrforge_api 对外文档(API 契约 1.0)
+# nmrforge_api 对外文档(API 契约 1.1 · 2026-10-03)
 
 > `nmrforge_api` 是公开、版本化且不依赖 Qt 的脚本接口(`API_VERSION = "1.1"`,2026-10-03 当前源码契约)。
 > 跨版本比较数值前，请查看 `compat_manifest()` 中的行为指纹、兼容级别与受影响步骤。

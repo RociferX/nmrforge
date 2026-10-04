@@ -7,7 +7,7 @@ python -m nmrforge_api --help
 ```
 
 当前命令行属于 API v1.1；请在含该契约的源码检出里完成可编辑安装后使用，
-不要把软件版本 1.0.2 或已发布 AppImage 等同于最新 API 源码；见
+本轮源码软件版本为 1.0.3，已发布 AppImage 仍为 1.0.2；见
 [installation.md](installation.md)。
 
 ## 子命令

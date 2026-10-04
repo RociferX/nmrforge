@@ -2,8 +2,8 @@
 
 Distribution packaging assets.
 
-> v1.0.2 ships **both the source and the Linux AppImage** (one artefact; the interface language is
-> switched at run time). This directory holds the build assets; the release gate and its record are
+> v1.0.3 is source-only; the existing v1.0.2 Linux AppImage is unchanged (one artefact with runtime
+> language switching). This directory holds the build assets; the release gate and its record are
 > in the release checklist kept in the maintainer's private repository.
 
 | Path | Role |

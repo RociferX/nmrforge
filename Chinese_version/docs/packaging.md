@@ -1,6 +1,10 @@
 # AppImage 打包方案（NMRForge）
 
-状态：**v1.0.2 已发布**（2026-10-02），提供源码与 AppImage。源码保持 Apache-2.0，Linux AppImage 随 Release 分发，单份产物在运行时切换界面语言。二进制由公开提交 `77b535f` 构建，随后文档更新不改变该构建来源；此前 v1.0.1 是历史快照。实际资产、验证与未做项见 `APPIMAGE_RELEASE_CHECKLIST.md` 和 [Release](https://github.com/RociferX/nmrforge/releases/tag/v1.0.2)。
+当前源码版本为 **1.0.3**，本轮仅发布源码以归档 API v1.1，不重建 AppImage。
+已有 [v1.0.2 Release](https://github.com/RociferX/nmrforge/releases/tag/v1.0.2)（2026-10-02）
+的 AppImage 保持原样，由公开提交 `77b535f` 构建，不包含后续 API 更新。
+源码保持 Apache-2.0；单份 Linux 二进制在运行时切换界面语言。
+实际资产、验证与未做项见 `APPIMAGE_RELEASE_CHECKLIST.md`。
 
 本页记录 Linux AppImage 的构建方案；每次发布前必须完成根目录
 `APPIMAGE_RELEASE_CHECKLIST.md`，并按最终捆绑的 PySide6/Qt 与其他组件复核许可。

@@ -11,8 +11,8 @@
 
 ### 能在 Windows 或 macOS 上跑吗?
 
-GUI 与测试套件在 Windows 和 Linux 上可运行。macOS 目前未测,也没有 CI。
-两条路都行:Linux AppImage(v1.0.1,界面中英运行时切换)或从源码安装;Windows 上目前用源码安装。
+Linux 是目标运行平台，Windows 仅作为编辑环境；macOS 未验证。
+当前 1.0.3 从源码安装；已有 Linux AppImage 为 1.0.2（界面中英运行时切换），不包含后续 API 更新。
 
 ### nmrForge 会把我的数据发到什么地方吗?
 

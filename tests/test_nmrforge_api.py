@@ -1,11 +1,10 @@
-"""nmrforge_api (v1.0 -- the first version; spec frozen 2026-09-13, released as the first
-version from 2026-09-22) regression.
+"""nmrforge_api v1.1 contract regressions (frozen 2026-10-03; software version is separate).
 
-Covers: the reference workflow (1 script + 2 peak tables), workflow_id, three-layer parameter
-archival, combination mode writing a localized peak table per external selection, the three
-status values, the full log and versions, independent reference bases for each condition, actual
-values of automatic parameters, software boundaries (no CSP/statistics), the CLI and "no Qt
-dependency".
+Covers: reference workflows (1 script + 1 parabolic peak table), workflow_id,
+three-layer parameter archival, independently detected combination peak tables,
+status values, logs and versions, condition-specific reference bases,
+resolved automatic parameters, software boundaries (no CSP/statistics),
+the CLI and independence from Qt.
 
 Spec-compliance ledger: ``docs/reviews/2026-09-13-api-spec-compliance.md``.
 """

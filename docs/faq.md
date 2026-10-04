@@ -12,9 +12,9 @@ editable repository checkout.
 
 ### Can I run it on Windows or macOS?
 
-The GUI and test suite run on Windows and Linux. macOS is currently untested and has no CI.
-Both are available: a Linux AppImage (v1.0.1, interface language switched at run time) or a source install; on Windows use
-the source install.
+Linux is the target runtime; Windows is an editing environment. macOS has not been validated.
+Install the current 1.0.3 from source. The existing Linux AppImage remains 1.0.2 (with runtime
+language switching) and does not include the later API updates.
 
 ### Does nmrForge send my data anywhere?
 

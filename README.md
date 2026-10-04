@@ -23,15 +23,15 @@ warning and output it produced so that the result can be reproduced and audited.
 > and keep the evidence (quality metrics, resolved parameters, run records) alongside the
 > spectrum.
 
-Source version: **1.0.2** · Release channel: **stable**
+Source version: **1.0.3** · Release channel: **stable**
 Author: **Xuanfeng Li**, University of Science and Technology of China · Source licence: Apache-2.0 (see [LICENSE](LICENSE) and [NOTICE](NOTICE))
 Bundled-library licensing and redistribution: [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md).
-Distribution: source plus a Linux AppImage (one artefact; the interface language is switched at run time)
+Distribution: 1.0.3 is source-only; the Linux AppImage remains 1.0.2 (one artefact with runtime language switching)
 Releases: <https://github.com/RociferX/nmrforge/releases>
 Repository: <https://github.com/RociferX/nmrforge>
 Zenodo concept DOI (all archived versions): [10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415). A version-specific DOI applies only to its archived snapshot.
 
-> This page describes the **1.0.2 source** and its desktop/Python/CLI interfaces
+> This page describes the **1.0.3 source** and its desktop/Python/CLI interfaces
 > (`nmrforge_api`, current contract version 1.1 as of 2026-10-03). Published binaries are listed in GitHub Releases.
 > Regression coverage is in the test suite; behaviour changes are declared through the compat process
 > (`nmrforge_api/compat_declaration.py`: behaviour digests plus the

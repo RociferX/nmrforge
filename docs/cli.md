@@ -7,9 +7,9 @@ implementation as the desktop application. It does not require Qt:
 python -m nmrforge_api --help
 ```
 
-The current CLI contract is API v1.1. Install from a source checkout containing that contract;
-the software version remains 1.0.2 and previously released AppImages do not update automatically.
-See
+The current CLI contract is API v1.1. This source release uses software version 1.0.3; the
+previously released AppImage remains at 1.0.2. Install from a source checkout containing that
+contract. See
 [Installation](installation.md). Processing requires separately installed NMRPipe; NUS
 reconstruction also requires SMILE.
 

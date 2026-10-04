@@ -47,7 +47,7 @@ schedule is rejected during import. Trailing zero padding is not treated as miss
   The rest is completed by subsequent independent analysis codes based on the unified peak table;
 - No peak attribution/Identify (an external peak table can be used as a reference peak, but the software does not infer the assignment);
 - No peak overlap decoupling or deconvolution; sub-grid localisation is by three-point parabola;
-- Parameter-combination studies support 2D NUS; 3D NUS processing is supported by the desktop workflow, while API reference/sweep support is limited as documented in [05](05-inputs-and-data.md);
+- API v1.1 can build 3D NUS references but cannot run their parameter combinations; 2D uniform and 2D NUS support combination studies. See [05](05-inputs-and-data.md) for the input boundaries;
 - No parallel scheduling (serial + breakpoint resume);
 - The research parameter space is not automatically generated (`axes` is just a convenient expansion entry; `combos=` is executed as is)
 
