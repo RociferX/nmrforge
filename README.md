@@ -380,15 +380,15 @@ as well - see [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## Evidence
 
-- [Real-data evidence (public data set)](docs/evidence/real-data-comparison.md) - a dated
-  **historical evidence snapshot** from **one public data set** (the raw Bruker data of BMRB
-  timedomain entry 53374): the
-  final spectra with the published deposited chemical shifts overlaid, one-to-one per-peak recovery
-  (**84.1%** at the tight tolerance of 1H 0.01 / 15N 0.05 ppm, 93.5% at 0.02/0.10 ppm), the chance
-  background under the same convention (2.0%), QC scores and a real-machine repeatability snapshot. The
+- [Real-data evidence (public data)](docs/evidence/real-data-comparison.md) - a dated evidence snapshot
+  covering **four public data sets across the four processing paths** (2D/3D x uniform/NUS), all from
+  non-viral, non-pathogenic sources: the final spectra next to the reference spectrum shipped with each
+  data set, the deposited chemical shifts overlaid for the entries that have them, one-to-one per-peak
+  recovery at a tolerance ladder, the chance background under the same convention, QC scores and a
+  real-machine repeatability snapshot. The
   criterion lives outside the software instead of comparing it with itself. These figures describe
-  that historical run only; they are not a validation of the current source revision, a guarantee
-  for other data, or a scientific conclusion. See the evidence page for its date and scope.
+  those runs only; they are not a validation of the current source revision, a guarantee
+  for other data, or a scientific conclusion. See the evidence page for its dates and scope.
 
 ## Tests
 

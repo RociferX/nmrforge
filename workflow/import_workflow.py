@@ -38,7 +38,7 @@ KEY_FILES = ("acqus", "acqu2s", "acqu3s", "ser", "fid", "nuslist")
 # patch_fid_com): they must be copied for real, never linked -- a hard link or symlink would write
 # the change back into the source data (G2B-009 compatibility clause "backend-generated files such
 # as fid.com are always written physically and stay unaffected").
-# 2026-09-22: a real dataset caught the source directory being rewritten -- BMRB 53374 ships
+# 2026-09-22: a real dataset caught the source directory being rewritten -- it shipped
 # profY.dat (no Z), which was not on the whitelist and went through a symlink, so the conversion
 # wrote right through it in the source directory (and the source fingerprint changed with it).
 WRITABLE_RAW_NAMES = {"fid.com", "profY.dat", "profYZ.dat"}  # copied for real, never linked

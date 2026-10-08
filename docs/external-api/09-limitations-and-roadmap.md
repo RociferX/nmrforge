@@ -107,17 +107,17 @@ check on **public data** are in
 
 | Element | How it is done |
 | --- | --- |
-| Data | the original Bruker data of one real 2D 15N-1H HSQC (**public entry 53374, downloadable**) |
+| Data | the original Bruker data of real 15N-1H HSQC / HNCO data sets (**public BMRB timedomain entries, downloadable**) |
 | Expected positions | the **published deposited chemical shifts** of the same sample and condition (never given to peak picking; used only as an external criterion) |
 | Matching | one-to-one greedy nearest first over a tolerance ladder; the global reference shift is calibrated **once** and then frozen |
 | Control | the expected table shifted per peak independently under the same tolerance (fixed seed, 200 draws) gives the chance background |
 
-Result: at a tight tolerance (1H 0.01 / 15N 0.05 ppm) **84.1% (90 of 107) of the expected peaks are
-matched one-to-one** (93.5% at 0.02 / 0.10 ppm) with median position residuals of 0.0012 / 0.0164 ppm,
-against a 2.0% chance background. On the 15N axis that tolerance is smaller than one data point
-(0.055 ppm per point), so most of the peaks that fail are stopped by the threshold rather than missing -
-the per-peak distances are in the match CSV. That layer answers "can the automatic processing reproduce
-external truth"; it does
+Result (2026-09-22 2D uniform run): at a tight tolerance (1H 0.01 / 15N 0.05 ppm) **84.1% (90 of 107) of
+the expected peaks are matched one-to-one** (93.5% at 0.02 / 0.10 ppm) with median position residuals of
+0.0012 / 0.0164 ppm, against a 2.0% chance background. On the 15N axis that tolerance is smaller than one
+data point (0.055 ppm per point), so most of the peaks that fail are stopped by the threshold rather than
+missing - the per-peak distances are in the match CSV. That layer answers "can the automatic processing
+reproduce external truth"; it does
 **not** cover your sample, your parameter choices or your scientific conclusion - so still write the
 three things above separately when you cite a product.
 
