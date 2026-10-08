@@ -43,20 +43,30 @@ print(len(values), values[:3])
 
 ## 8.3 Recommended processing conventions
 
-1. **Peak Alignment**: Peak table in combined mode **None** `reference_peak_id` (independent peak selection) -- Press.
-   The `H_ppm`/`N_ppm` tolerance matches the peaks of each combination back to `reference_peak_id` of the reference peak table.
-   (or your own designation), and clearly record the matching tolerance, unmatched peaks and number of peaks;
-2. **Localization**: the supported method is three-point parabolic localization. Treat legacy
-   Gaussian tables as historical outputs and keep them separate from current records;
-3. **weight/Missing**: When a certain combination does not match a certain reference peak **Do not delete silently** -- Clearly mark it in the analysis.
-   (The missing mechanism may be related to the scanned parameter; the `detected=false` row in the reference peak table is also retained);
-4. **Recalculable**: Attached to the analysis product are the script/spectral hashes in `records/manifest.json` and.
-   `grid_sha256`, and `versions` of the software used;
-5. **Do not write back to the research root**: Please place the analysis results in your own directory (the software product is the execution record.
-   Analysis should not overwrite them).
+1. **Peak correspondence:** combination tables leave `reference_peak_id` blank and `peak_id`
+   is local to each spectrum. Downstream analysis must establish correspondence and record its
+   evidence, tolerances and ambiguity. Use complete F-axis coordinates; H/N aliases alone may
+   lose information in 3D or repeated-nucleus data. Coordinates do not establish identity by themselves.
+2. **Localisation:** successful refinement records `localization_method=parabolic`; undetected
+   identities or targeted-skipped peaks record `none`. Read `detected`, `localization_requested`,
+   `failure_reason` and QC together. Positive and negative peaks use symmetric QC. FWHM is an
+   equivalent curvature linewidth, not a multi-peak lineshape fit. Keep legacy Gaussian outputs
+   separate from current records.
+3. **Missing peaks:** do not silently discard unmatched peaks. Record missingness and the analysis
+   policy; it may depend on the processing parameters. Reference rows with `detected=false`
+   are also retained.
+4. **Reproducibility:** retain the script/spectrum hashes from `records/manifest.json`,
+   `grid_sha256`, and software/tool versions alongside downstream products.
+5. **No writeback:** save analysis results outside the study root; do not overwrite execution records.
 
 ## 8.4 Sharding and parallelism (optional)
 
-The upper limit of the number of combinations `max_runs` (default 256); if you want to parallelize, please split according to the **parameter axis** (each machine runs different subsystems).
-Grids, each with a study root), and finally press the button on the analysis side to merge the long tables -- the same reference and peak identity are guaranteed to be comparable.
-Key points: File `records/manifest.json` together when sharding to facilitate checking whether they have the same reference.
+`max_runs` defaults to 256. For external parallel execution, split the parameter grid into separate
+study roots; do not concurrently write the same root. Build and validate each shard's reference
+explicitly. Combinations cannot repair or regenerate invalid FID inputs.
+
+Before joining result tables downstream, compare source and reference evidence, parameter definitions
+and behaviour fingerprints, and establish peak correspondence explicitly. Identical parameters or
+reference records do not guarantee shared peak identities. Preserve each shard's
+`records/manifest.json`. See [input and output boundaries](09-limitations-and-roadmap.md#98-input-and-output-boundaries)
+and the [FID reuse boundary](09-limitations-and-roadmap.md#99-fid-reuse-boundary).

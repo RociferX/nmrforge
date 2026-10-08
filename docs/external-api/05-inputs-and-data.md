@@ -101,7 +101,8 @@ The upper limit of the number of combinations `max_runs` (default 256); combinat
 | `ext_lo`/`ext_hi`/`extract` | Extraction window (deterministic parameter, generally no need to enter the grid) |
 | `points_per_line` | Target point distance/line width points(deterministic parameter) |
 | `linewidth_hz` | Each core line width (Hz), affecting the default physical width conversion |
-| `sampling.auto_phase` etc. | Sampling/phase switch (lock key, writing directly will report an error) |
+| `sampling.auto_phase` / `sampling.ft_alt` | Locked in combinations; change when explicitly rebuilding the reference |
+| `sampling.ft_neg` / `sampling.ft_neg_f1/f2` / `sampling.flip_f1/f2` | Explicit boolean FT-neg candidates; global ft_neg takes precedence; changes do not automatically reoptimise phase |
 
 ### Phase axis (retain prefix)
 
@@ -188,7 +189,8 @@ Combination table/Grid key support**Dot number path**, so the two dimensions (an
 | Line width (Hz) | `linewidth_hz.F1=12`, `linewidth_hz.F2=9` | Per-dimensional line width: affects automatic zero filling target and physical width conversion |
 | target number resolution | `points_per_line.F1=4`, `points_per_line.F2=2` | "points per linewidth" per dimension (target for automatic SI) |
 | phase | `phase.F1.p0`, `phase_delta.F2.p0` | Axis-by-axis absolute phase / deviation from reference |
-| Sampling switch | `sampling.*` | Lock key (phase lock semantics), writing into the combination table will report an error |
+| FT-neg candidates | `sampling.ft_neg`, `sampling.ft_neg_f1/f2`, `sampling.flip_f1/f2` | Explicit booleans; global ft_neg takes precedence; changing them does not automatically reoptimise phase |
+| Locked sampling settings | `sampling.auto_phase`, `sampling.ft_alt` | Rejected in combinations; change them when explicitly rebuilding the reference |
 
 ```csv
 window.F1.off,window.F2.off,zero_fill.F1,baseline.F2.enabled,points_per_line.F1

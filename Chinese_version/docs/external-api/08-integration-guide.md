@@ -45,9 +45,9 @@ print(len(values), values[:3])
 1. **峰对应**:组合模式的峰表**没有** `reference_peak_id`(独立选峰),本谱 `peak_id`
    也不能跨谱连接。跨谱对应需由下游分析建立并记录所用证据、阈值和不确定性；
    仅凭 H/N 坐标匹配时须检查峰拥挤、重叠和歧义，不能视为 API 已自动追踪峰;
-2. **定位口径**:`localization_method` 为 `parabolic`;负峰的独立检测 QC 可能出现
-   `fit_success=false` 或 FWHM 为 NaN，这是已知问题，不能单凭这些字段判定峰位无效。
-   若沿用旧研究根里残留的
+2. **定位口径**:成功精修时 `localization_method=parabolic`；未检出或 targeted 跳过为
+   `none`，结合 `detected`、`localization_requested`、`failure_reason` 和 QC 判断。
+   正负峰采用对称 QC；FWHM 为等效曲率线宽，不是多峰线形拟合结果。若沿用旧研究根里残留的
    `gaussian` 峰表,请当作历史产物另行标注,不要和新表混用;
 3. **权重/缺失**:某组合没匹配到某参考峰时**不要静默删除**——在分析里明确标注
    (缺失机制可能与被扫参数相关;参考峰表里的 `detected=false` 行同样保留);
@@ -61,5 +61,7 @@ print(len(values), values[:3])
 组合数上限 `max_runs`(缺省 256);要并行请按**参数轴**拆分(各机器跑不同子
 网格、各自一个研究根),最后在分析侧按键合并长表。合并前须核对参考，并由下游
 分析处理不同谱间的峰对应；参数与参考记录本身不保证峰身份可比。多条件参考峰集
-限制及统一峰表的 3D 坐标限制见 [09-limitations-and-roadmap.md](09-limitations-and-roadmap.md) §9.8。
+边界见 [09-limitations-and-roadmap.md](09-limitations-and-roadmap.md) §9.8–9.9；完整逻辑轴坐标
+仍须按 F1/F2/F3 身份使用，不能把同核轴或 H/N 别名混为一谈。每片独立建立/校验参考，
+不要并发写同一研究根；组合中不能以重转 FID 兜底。
 要点:分片时把 `records/manifest.json` 一起归档,便于核对是否同一参考。

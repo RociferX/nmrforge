@@ -159,12 +159,15 @@ Unified phase route), GUI page shall not bypass this controller and directly cal
   (`core.experiment.acquisition_mode_detector.sign_sampling_flags`), and the derived runs while
   the reference is built (per-axis phase preview / joint evaluation spectra) and the final run
   **must use the same sign convention**;
-  these keys **must not** be used as combination sweep axes (`plan_sweep` raises an error; the
-  same locked keys as `sampling.auto_phase`);
+  API v1.1 permits explicit boolean FT-neg, per-axis keys and flip aliases as combination
+  candidates. Phase routes, `sampling.auto_phase` and `sampling.ft_alt` remain locked. Reference
+  construction applies FT flags before phase optimisation; changing FT-neg in a combination
+  does not automatically reoptimise phase. Supply the desired phase/phase_delta explicitly;
   `ReferenceSpectrum.sampling_flags` is a **derived read-only** attribute (taken from `params`),
   recorded together with `reference.json`, the reference record and `run.json`'s
   `parameters_resolved.sampling.flags`
-  (`flags_source: reference(locked)`); the automatic rule's conclusion is recorded per
+  (default `flags_source: reference(locked)`, with explicit candidate requests/resolution audited);
+  the automatic rule's conclusion is recorded per
   dimension in `mode_symbol.dims` of `*.fid.conversion.json`
   (`neg_decision`/`neg_basis`/`neg_reason`/`neg_applied`);
 - Process parameter unified dict keys (the rest): `baseline`(per-dimension baseline correction,

@@ -141,10 +141,12 @@ unified 相位路线),GUI 页面不得绕过本控制器直接调 Backend。
   影响符号/方向的键(`ft_neg`/`ft_neg_f1`/`ft_neg_f2`/`flip_f1`/`flip_f2`/`ft_alt`)是**单一来源**
   (`core.experiment.acquisition_mode_detector.sign_sampling_flags`),参考建立过程中的
   派生运行(逐轴相位预览/联合评估谱)与终跑**必须同一符号约定**;
-  这些键**不得**作为组合扫描轴(`plan_sweep` 报错,锁定键同 `sampling.auto_phase`);
+  当前 v1.1 允许显式布尔 FT-neg/逐轴键及 flip 别名作为组合候选；相位路线、
+  `sampling.auto_phase` 与 `sampling.ft_alt` 仍锁定。建立参考时 FT 标志先应用，之后优化相位；
+  组合更改 FT-neg 不自动重新优化相位，请在候选中显式指定所需 phase/phase_delta。
   `ReferenceSpectrum.sampling_flags` 是**派生只读**属性(从 `params` 取),随
   `reference.json`、参考记录与 `run.json` 的 `parameters_resolved.sampling.flags`
-  (`flags_source: reference(locked)`)一起留档;自动判据的结论逐维记在
+  (默认 `flags_source: reference(locked)`，显式候选另记请求/解析值)一起留档;自动判据的结论逐维记在
   `*.fid.conversion.json` 的 `mode_symbol.dims`
   (`neg_decision`/`neg_basis`/`neg_reason`/`neg_applied`);
 - 处理参数统一 dict 键(其余):`baseline`(每维基线校正,见下)、`stages`(列表,

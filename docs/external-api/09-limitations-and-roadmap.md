@@ -121,20 +121,16 @@ external truth"; it does
 **not** cover your sample, your parameter choices or your scientific conclusion - so still write the
 three things above separately when you cite a product.
 
-## 9.6 Relationship to the main program: the API has no algorithms of its own
+## 9.6 Relationship to the desktop application: shared processing, separate entry-point validation
 
-- the API does not run a second implementation: the reference spectrum, the combined
-  localisation and the parameter sweep call the same code as the main program (the desktop
-  application and the command line), and the products come from it. Whatever optimisation the
-  main program performs therefore applies to the API as well and **needs no separate proof**;
-- the API layer has no special algorithmic design: it only makes calling the main program more
-  flexible (batches, combinations, resume, records and machine-readable products). Thresholds,
-  defaults, optimisation and QC follow the main program and are versioned in `compat`;
-- so this interface document only states what goes in, what comes out and how errors are
-  reported; the quality of the processing, and the evidence that it works, belong to the main
-  program (documentation entry point in README) and are not duplicated here;
-- historical public-data evidence is linked from the documentation index; it is not a validation
-  guarantee for the current source tree or other data.
+- The API reuses the NMRPipe/SMILE processing chain, spectrum-axis mapping and peak components;
+  it does not implement a second processing engine.
+- Parameter merging, reference freezing, independent detection, table serialization and resume
+  remain API-specific orchestration and require their own validation. Shared components do not
+  prove that entry-point parameters are applied or that exported axes and QC are correct.
+- Compatibility fingerprints record versioned behaviour, not scientific validity. Historical
+  public-data evidence supports the recorded revision, input and route only; it does not
+  automatically validate other API inputs or parameter combinations.
 
 ## 9.7 Reading the boundary: common misreadings
 
@@ -155,6 +151,31 @@ three things above separately when you cite a product.
 - "The conversion record matched" is not "the input was not touched": above 8 MiB the recorded
   fingerprint degrades to `size + mtime_ns` (see `core/data/raw_fingerprint.py`), so it proves
   that the raw input is the one the converter saw - it is not content attestation.
+
+## 9.8 Input and output boundaries
+
+- Each condition builds an independent reference spectrum and peak table; an external identity
+  table applies only to the main condition. IDs are local to each table, not cross-spectrum links.
+- The unified 38-column table retains F1/F2/F3 coordinates, nuclei and equivalent linewidths.
+  H/N aliases are blank for ambiguous repeated nuclei. Use complete logical-axis identity.
+- Targeted localisation refines only selected peaks; other detected peaks retain integer-grid
+  positions, actual method `none` and uncomputed localisation QC (`NaN`).
+- Reference-only positive finite `sweep_width_hz` and explicit `carrier_ppm` are audited by axis.
+  Combinations cannot change conversion calibration. `params_by_condition`/`--condition-params`
+  can overlay common reference parameters independently for each condition.
+- Boolean FT-neg values and flip aliases may be combination candidates; phase routes and FT-alt
+  remain locked. Reference construction applies FT flags before phase optimisation. FT-neg
+  changes in combinations do not automatically reoptimise phase.
+- CLI rejects different `--study` and `--reference` roots before writing. Within one root,
+  combinations write workflow/results records; they are not an entirely read-only API call.
+- Conversion provenance records raw digital-filter parameters, script hashes and conversion
+  commands; reference audit separates requested/resolved/actual FT commands and stage timing.
+  An unverified correction method is `unknown`, not inferred as executed from metadata.
+
+Legacy shared-identity or incomplete-axis references must be rebuilt. The API generates independent
+spectra/tables and processing records only; matching, missingness policies and statistical analysis
+are downstream responsibilities. Historical uncertainty helpers are not part of this two-stage
+processing interface, and local peak IDs cannot be treated as corresponding peaks without matching.
 
 ## 9.9 FID reuse boundary
 

@@ -100,7 +100,8 @@ max_runs: 128
 | `ext_lo`/`ext_hi`/`extract` | 提取窗口(确定性参数,一般不必进网格) |
 | `points_per_line` | 目标点距/线宽点数(确定性参数) |
 | `linewidth_hz` | 各核线宽(Hz),影响物理宽度换算的缺省 |
-| `sampling.auto_phase` 等 | 采样/相位开关(锁定键,直接写会报错) |
+| `sampling.auto_phase` / `sampling.ft_alt` | 组合中的锁定键；需在显式重建参考时修改 |
+| `sampling.ft_neg` / `sampling.ft_neg_f1/f2` / `sampling.flip_f1/f2` | 显式布尔 FT-neg 候选；全局 ft_neg 优先，更改不自动重新优化相位 |
 
 ### 相位轴(保留前缀)
 
@@ -156,7 +157,8 @@ run_parameter_study(..., peaks="library.list")   # 或 peak_id,H_ppm,N_ppm CSV
 | 线宽(Hz) | `linewidth_hz.F1=12`、`linewidth_hz.F2=9` | 每维线宽:影响自动填零目标与物理宽度换算 |
 | 目标数字分辨率 | `points_per_line.F1=4`、`points_per_line.F2=2` | 每维“每线宽点数”(自动 SI 的目标) |
 | 相位 | `phase.F1.p0`、`phase_delta.F2.p0` | 逐轴绝对相位 / 相对参考的偏差 |
-| 采样开关 | `sampling.*` | 锁定键(相位锁定语义),写进组合表会报错 |
+| FT-neg 候选 | `sampling.ft_neg`, `sampling.ft_neg_f1/f2`, `sampling.flip_f1/f2` | 显式布尔值；全局 ft_neg 优先，更改不自动重新优化相位 |
+| 锁定采样设置 | `sampling.auto_phase`, `sampling.ft_alt` | 写入组合会报错；须在重建参考时修改 |
 
 ```csv
 window.F1.off,window.F2.off,zero_fill.F1,baseline.F2.enabled,points_per_line.F1
