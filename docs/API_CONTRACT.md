@@ -412,7 +412,7 @@ currently supports reference construction only.
 ### 11.2 Public entry points
 
 ```python
-run_reference_study(root, dataset=None, *, datasets=None, params=None,
+run_reference_study(root, dataset=None, *, datasets=None, segmented=False, params=None,
                     params_by_condition=None, phase_route=None, peaks=None, direct_range=None,
                     carrier_ppm=None,
                     sigma_multiplier=None, max_peaks=0,
@@ -424,7 +424,7 @@ run_combination_study(reference, *, combos=None, axes=None, max_runs=256,
                       allow_ext_override=False, resume=True,
                       backend=None, write=True, progress=None) -> StudyResult
 
-run_parameter_study(root, dataset=None, *, datasets=None, combos=None, axes=None,
+run_parameter_study(root, dataset=None, *, datasets=None, segmented=False, combos=None, axes=None,
                      name="", params=None, params_by_condition=None, phase_route=None, peaks=None,
                      carrier_ppm=None,
                      sigma_multiplier=None, max_peaks=0, max_runs=256,
@@ -451,6 +451,18 @@ arguments, return structures, and errors. The command line is `python -m nmrforg
 
 ### 11.3 Reference, combination, and targeting rules
 
+- Dataset import defaults to `segmented=False`. With `segmented=True`, provide the complete
+  ordered list of at least two original Bruker directories; one list forms one condition,
+  and a mapping of labels to lists forms multiple conditions. Every segment is preflighted
+  for supported acquisition/sampling and compatible axes/calibration. Duplicate paths or changed
+  source lists/order are rejected; `force=True` does not replace a condition's source binding.
+- Only reference construction imports and generates/merges FID inputs. Combinations validate
+  and reuse the frozen reference FID read-only, including single-file, uniform 3D slices and
+  merged inputs. Missing/invalid FID, changed source/conversion/schedule evidence, changed
+  conversion parameters, or legacy references without frozen evidence require an explicit
+  `force=True` rebuild (CLI: `reference --force`). There is no automatic reconversion or
+  source cleanup. Resume cannot bypass these checks. GUI conversion behaviour is unchanged.
+  Fast fingerprints are not content authentication; see the [FID reuse boundary](external-api/09-limitations-and-roadmap.md#99-fid-reuse-boundary).
 - Reference generation selects an identity table (automatically or from an external peak table),
   freezes its threshold, and writes one `reference_peak_table_parabolic.csv`.
 - `params_by_condition` overlays common reference parameters per condition. FT-negation requests,

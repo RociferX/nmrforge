@@ -825,6 +825,9 @@ def build_reference(
     from backend.conversion_provenance import read_conversion_provenance
 
     reference.conversion_provenance = read_conversion_provenance(work)
+    from backend.reference_fid import freeze_fid_input
+
+    freeze_fid_input(work, data_id, reference.conversion_provenance)
     save_reference(session, reference)
     session.save_state(reference=reference.to_dict())
 

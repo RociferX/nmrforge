@@ -9,6 +9,15 @@
 - 标注 NUS 的数据只有在合法日程完整覆盖且为标准顺序时才按 uniform 处理;全覆盖
   乱序仍按日程归位。NUS 声明下缺日程且采样坐标无法还原时导入拒绝;`ser` 无零行
   本身不足以证明 uniform。判定与证据见 `reference.sampling_evidence`;
+- 多段导入必须显式开启 `segmented=True`（CLI 用 `init --segmented`）并给出至少两个
+  完整 Bruker 原始数据目录的有序列表；默认仍是单目录。列表是用户指定的完整段集合，
+  不会从某个目录自动发现或推断更多段，也不接受把单个字符串当作段列表。段可以来自
+  不同父目录，但路径不能重复。逐段动力学实验和缺少 `nuslist` 的 NUS 输入拒绝导入；
+  导入校验维数、核、有效 TD、谱宽、采样模式、采集轴布局、SFO 频率及载频兼容。
+  这些校验不证明两段具有相同样品/实验条件；调用方须确认它们属于同一条件、适合合并。
+- 多段是**同一条件**的一份采集，不是多个独立条件或跨谱平均。uniform 段按后端既有
+  重复采集叠加；NUS 同一点的重复采样叠加，互补采样按已采点合并。采样率按去重后的
+  采样点并集相对总覆盖计算。该入口不建立不同条件或不同 workflow 谱之间的峰关系。
 
 ## 5.2 条件(A/B…)
 
@@ -18,6 +27,31 @@ run_parameter_study(root, datasets={"A": "…/apo", "B": "…/holo"}, combos=[..
 add_dataset(session, "…/apo", condition="A")
 add_dataset(session, "…/holo", condition="B")
 ```
+
+显式多段导入时，`dataset` / `source` 接受完整有序目录列表，`datasets` 可用 mapping
+表示多个条件：
+
+```python
+# 单条件：两个原始目录按给定顺序合并为条件 A
+run_parameter_study(root, dataset=["…/part1", "…/part2"], segmented=True,
+                    combos=[{"zero_fill": 1}])
+
+# 多条件：每个值都是一个条件自己的完整有序段列表
+run_parameter_study(root,
+                    datasets={"A": ["…/a1", "…/a2"],
+                              "B": ["…/b1", "…/b2"]},
+                    segmented=True, combos=[{"zero_fill": 1}])
+
+# 分步入口同样可用：
+add_dataset(session, ["…/part1", "…/part2"], condition="A", segmented=True)
+```
+
+`segmented` 只接受真正的 `bool`，缺省 `False`；开启后至少两个目录，且不允许重复路径。
+开启时顶层 `datasets=[s1, s2]` 表示一个条件；需要多个条件时应使用上面的 mapping，避免把
+条件与段列表混淆。关闭标志时原单目录调用保持不变。段列表和顺序会记录并参与输入复用
+比较；同一研究里更换段或改变顺序请新建条件或研究根。`force=True` 只重建参数参考，
+不改变已绑定的源段。再次打开已有段数据、不再传 dataset/datasets 运行 reference/sweep 时，
+不需要重传标志。
 
 - 条件标签必须唯一(重复报错,不覆盖);缺省自动分配 A/B/C…;
 - 每个条件各自建立**参考**(相位/噪声/自动参考峰表来自该条件自身数据);

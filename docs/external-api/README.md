@@ -10,11 +10,18 @@ freezes a reference workflow, executes user-provided combinations and writes one
 table per candidate spectrum with processing provenance and QC records.
 
 The current v1.1 contract writes one independent reference and reference peak table per condition,
-then one independently detected combination table per condition and workflow. It does not match
+then one independently detected combination table per condition and workflow. A condition may use
+one raw Bruker directory by default, or an explicitly enabled ordered list of two or more source
+directories (`segmented=True`). Reference construction imports, converts and merges these sources;
+combination runs only process the frozen reference FID and never convert or merge as a fallback. It does not match
 peaks across conditions or from combinations to reference identities. The software only performs
 processing and archiving; **statistical inference and scientific conclusions are outside its scope**
 and belong to downstream analysis. The public functions,
 records, and compatibility behaviour are described in this documentation set.
+
+If the reference FID is missing or damaged, its source/conversion evidence differs, or a request would
+require conversion or merging, a combination run fails and requires rebuilding the reference with
+`force=True` (`reference --force` on the CLI).
 
 ## Validation boundary: engineering regression vs scientific validation
 
@@ -47,8 +54,8 @@ validation boundaries.
 | [examples/](examples/) | Runnable example(one step/step by step/Measure only) |
 
 Contract version: `API_VERSION = "1.1"` (2026-10-03); the public entry points and output fields are described
-in this document set. The source API and desktop/AppImage are separate release lines; the existing
-1.0.2 AppImage does not contain the v1.1 API contract.
+in this document set. This source release is software 1.0.4; the source API and desktop/AppImage are
+separate release lines. The existing 1.0.2 AppImage does not contain this API contract.
 
 ## Install and run
 

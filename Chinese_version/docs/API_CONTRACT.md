@@ -356,6 +356,16 @@ class Spectrum3D:
 
 ### 11.1 工作流语义
 
+2026-10-08：`add_dataset`、`run_reference_study`、`run_parameter_study` 支持
+keyword-only `segmented: bool = False`。开启时 source/dataset 接受至少两个
+Bruker 原始目录的完整有序列表；多条件用 `datasets={"A": [a1, a2], ...}`。
+不是批量独立导入，不猜容器，不要求同一父目录；CLI init 对应 `--segmented`
+和重复 `--dataset`。条件绑定完整段列表及顺序，更换需要新条件/研究根，force 不改源绑定。
+共用 workflow 导入预检：逐段先拒绝动力学、缺表 NUS，再验证维数/核/有效 TD/谱宽/
+采样模式/轴布局/频率/载频。uniform 重复叠加，NUS 同点叠加或互补合并，沿用后端。
+DatasetRef 在多段时额外留档 segmented/segments（原始源列表），DataEntry.segments 指向
+实际处理副本；导入 metadata.source_segments 与逐段输入 SHA 保留来源，峰表38列不变。
+
 ```text
 Raw data(A/B…)
     ↓  参考工作流(各条件独立自动优化与选峰):每个条件各有 reference 脚本 + 峰表
@@ -650,8 +660,12 @@ study/
 
 1. 不 import Qt/gui;不修改 GUI 状态;
 2. 不替换项目活动谱:候选谱只写 `study/workflows/`;
-3. 同一条件内 fid 只转换一次(参考运行);workflow 之间只允许被扫参数不同
-   (相位默认锁定在参考值,偏差用 `phase_delta.<轴>.p0|p1`);
+3. 只有参考阶段导入/生成及合并 FID；workflow 只处理该条件已冻结的转换产物，禁止自动重转。
+   workflow 之间只允许被扫参数不同
+   (相位默认锁定在参考值,偏差用 `phase_delta.<轴>.p0|p1`)。
+   FID 缺失/损坏、源输入或冻结转换证据不一致、转换期参数变化时，要求用户 force=True
+   重新建立参考。NUS 组合不清理源、不修改参考 FID 或采样表；3D uniform 切片按已有流复用。
+   具体边界见[API 限制](external-api/09-limitations-and-roadmap.md#99-fid-复用边界);
 4. 以参考脚本为模板:每个条件按“自己的参考有效参数 → 批次
    `base_overrides` → 组合显式键”生成 `parameters_used`;不得复制其它条件的基底;
 5. 每 workflow × 每条件必须留:完整脚本、统一峰表(`peak_table_parabolic.csv`)、

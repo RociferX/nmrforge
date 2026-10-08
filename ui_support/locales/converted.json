@@ -7,6 +7,7 @@
     "backend/memory_disk.py",
     "backend/memory_guard.py",
     "backend/nmrpipe_backend.py",
+    "backend/reference_fid.py",
     "backend/runtime.py",
     "backend/script_generator.py",
     "core/audit/qc_audit.py",

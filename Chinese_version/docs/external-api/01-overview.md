@@ -71,7 +71,9 @@ Complete provenance + QC
 ## 运行语义(硬约束)
 
 1. **不 import Qt / 不改 GUI 状态**——可在集群运行,有专项测试守护;
-2. **每个条件 fid 只转换一次**——workflow 之间参数是唯一变量;
+2. **workflow 只处理参考阶段生成的 FID**——不重新导入、转换或合并；FID 缺失、损坏、
+   输入/转换证据不一致或参数要求重转时直接报错，要求用 `force=True` 重建参考。支持单文件、
+   3D uniform 切片目录及多段合并 FID；详见[FID 复用边界](09-limitations-and-roadmap.md#99-fid-复用边界);
 3. **相位锁定参考值**——直接维跳过相位搜索、间接维沿用参考优化相位;人工偏差
    用 `phase_delta.<轴>.p0|p1`(相对参考)或 `phase.<轴>.p0|p1`(绝对值);
 4. **候选谱不替换活动谱**——只写 `study/workflows/`,项目状态不受影响;

@@ -506,6 +506,9 @@ def read_segments(paths: list[Path | str]) -> Experiment:
             exp.ndim,
             [d.nucleus for d in exp.dimensions],
             _effective_td(exp),
+            exp.sampling.mode,
+            exp.acquisition_order,
+            [d.acquisition_mode for d in exp.dimensions],
         )
 
     def _same_sw(a: Experiment, b: Experiment) -> bool:
@@ -518,18 +521,33 @@ def read_segments(paths: list[Path | str]) -> Experiment:
         if len(a.dimensions) != len(b.dimensions):
             return False
         for da, db in zip(a.dimensions, b.dimensions):
+            if not (math.isfinite(da.sw) and math.isfinite(db.sw)):
+                return False
             if abs(da.sw - db.sw) > 1e-4 * max(abs(da.sw), abs(db.sw), 1.0):
                 return False
         return True
 
+    def _same_calibration(a: Experiment, b: Experiment) -> bool:
+        # Separate conversions handle digital-filter/byte-order differences, but cannot
+        # combine different physical carriers; tolerances only cover metadata precision.
+        for da, db in zip(a.dimensions, b.dimensions):
+            for va, vb, absolute in ((da.sf, db.sf, 1e-6),
+                                     (da.o1p, db.o1p, 1e-3), (da.o1, db.o1, 1.0)):
+                if not (math.isfinite(va) and math.isfinite(vb)):
+                    return False
+                if not math.isclose(va, vb, rel_tol=1e-8, abs_tol=absolute):
+                    return False
+        return True
+
     for extra in dirs[1:]:
         other = read_dataset(extra)
-        if _key(other) != _key(base) or not _same_sw(other, base):
+        if (_key(other) != _key(base) or not _same_sw(other, base)
+                or not _same_calibration(other, base)):
             raise ValueError(
                 tr(
                     "dataset segment parameters disagree: {p0} vs {p1} (dimensionality / nuclei / "
-                    "TD / sweep width must all "
-                    "match)",
+                    "TD / sweep width / sampling mode / acquisition layout / frequency / carrier "
+                    "must all match)",
                     p0=dirs[0],
                     p1=extra,
                 )

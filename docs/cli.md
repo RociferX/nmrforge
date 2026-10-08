@@ -7,7 +7,7 @@ implementation as the desktop application. It does not require Qt:
 python -m nmrforge_api --help
 ```
 
-The current CLI contract is API v1.1. This source release uses software version 1.0.3; the
+The current CLI contract is API v1.1. This source release uses software version 1.0.4; the
 previously released AppImage remains at 1.0.2. Install from a source checkout containing that
 contract. See
 [Installation](installation.md). Processing requires separately installed NMRPipe; NUS
@@ -17,7 +17,7 @@ reconstruction also requires SMILE.
 
 | Command | Purpose |
 | --- | --- |
-| `init` | Create a study and register a Bruker dataset under a condition. |
+| `init` | Create a study and register a Bruker dataset under a condition, including an explicitly ordered segment list. |
 | `reference` | Build and freeze the reference spectrum, processing script, and reference metadata. |
 | `peaks` | Select reference peaks or register an external peak list; writes one parabolic reference table. |
 | `sweep` (alias `workflows`) | Execute user-specified parameter combinations against an explicit frozen reference. |
@@ -29,6 +29,8 @@ reconstruction also requires SMILE.
 
 ```bash
 python -m nmrforge_api init --study ./study --dataset /path/to/bruker/dataset --condition A
+python -m nmrforge_api init --study ./study-segmented --segmented \
+    --dataset /path/to/segment1 --dataset /path/to/segment2 --condition A
 python -m nmrforge_api reference --study ./study
 python -m nmrforge_api peaks --study ./study
 python -m nmrforge_api sweep --study ./study --reference ./study --combos design.csv
@@ -40,6 +42,13 @@ For multiple conditions, register each dataset with a unique condition label bef
 references. The reference stage creates the peak identities; the sweep stage requires the reference
 explicitly and independently detects peaks on each candidate spectrum under the locked reference
 threshold.
+
+`init` defaults to one source directory. With `--segmented`, repeat `--dataset` at least twice;
+their order defines one condition's complete segment list. Reference and sweep commands reuse the
+registered input and do not need the flag again. Combination runs process only the frozen reference
+FID. If it is missing or invalid, source/conversion evidence differs, or a requested parameter would
+require conversion or merging, the command fails and asks you to rebuild the reference with
+`reference --force`; it does not automatically reconvert. See the [full CLI reference](external-api/04-cli-reference.md).
 
 ## `sweep` options
 

@@ -28,7 +28,8 @@ Design constraints (fully decoupled from the GUI):
 - datasets are read-only: import goes through ``workflow.import_workflow.import_data``
   (including the Kinetics and other policy guards), never around them;
 - several conditions (A/B): each gets its own reference (phase and noise optimised on its
-  own data), while peak identity and the user parameter set are **shared** - CSP needs both.
+  own data); peak identity is valid only within that condition, and downstream processing
+  handles relationships across spectra.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -96,6 +98,8 @@ class DatasetRef:
     raw_dir: str = ""
     file_count: int = 0
     total_bytes: int = 0
+    segmented: bool = False
+    segments: list[str] = field(default_factory=list)  # ordered original source directories
 
     @property
     def key(self) -> str:
@@ -107,7 +111,7 @@ class DatasetRef:
         return condition_token(self.condition, fallback=f"{self.exp_id}_{self.data_id}")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "exp_id": self.exp_id,
             "data_id": self.data_id,
             "title": self.title,
@@ -120,6 +124,9 @@ class DatasetRef:
             "file_count": int(self.file_count),
             "total_bytes": int(self.total_bytes),
         }
+        if self.segmented:
+            result.update(segmented=True, segments=list(self.segments))
+        return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DatasetRef:
@@ -135,6 +142,8 @@ class DatasetRef:
             raw_dir=str(data.get("raw_dir", "")),
             file_count=int(data.get("file_count", 0) or 0),
             total_bytes=int(data.get("total_bytes", 0) or 0),
+            segmented=bool(data.get("segmented", False)),
+            segments=[str(p) for p in (data.get("segments") or [])],
         )
 
 
@@ -387,10 +396,39 @@ def open_study(
     return session
 
 
+def _normalize_dataset_source(
+    source: Path | str | Sequence[Path | str], *, segmented: bool = False
+) -> tuple[Path, list[Path]]:
+    """Distinguish a single directory from a complete ordered segment list."""
+    if not isinstance(segmented, bool):
+        raise DatasetError(tr("segmented must be a boolean (true or false)"))
+    if segmented:
+        if not isinstance(source, Sequence) or isinstance(source, (str, bytes)):
+            raise DatasetError(
+                tr("segmented=True requires a list of at least 2 dataset directories")
+            )
+        values = list(source)
+        if len(values) < 2:
+            raise DatasetError(
+                tr("segmented=True requires a list of at least 2 dataset directories")
+            )
+    else:
+        values = [source]
+    paths = []
+    for value in values:
+        if not isinstance(value, (str, Path)) or not str(value).strip():
+            raise DatasetError(tr("each dataset source must be a non-empty directory path"))
+        paths.append(Path(value).expanduser().resolve())
+    if segmented and len(set(paths)) != len(paths):
+        raise DatasetError(tr("segmented import contains duplicate dataset directories"))
+    return paths[0], paths if segmented else []
+
+
 def add_dataset(
     session: StudySession,
-    source: Path | str,
+    source: Path | str | Sequence[Path | str],
     *,
+    segmented: bool = False,
     condition: str = "",
     exp_id: str = "",
     title: str = "",
@@ -408,8 +446,11 @@ def add_dataset(
     ----------
     session : StudySession
         a session returned by :func:`open_study`.
-    source : Path | str
-        a Bruker data directory (with ``acqus``); imported read-only, originals untouched.
+    source : Path | str | Sequence[Path | str]
+        a Bruker data directory (with ``acqus``); with segmented enabled, pass the complete
+        ordered segment list. Source files remain read-only; segments may have different parents.
+    segmented : bool, default False
+        combine at least two directories with matching parameters as one condition.
     condition : str, optional
         condition label (``A``/``B``...); conditions share one user parameter set.
     exp_id, title : str, optional
@@ -437,9 +478,14 @@ def add_dataset(
     Examples
     --------
         ref = add_dataset(study, "path/to/bruker", condition="A")
+        ref = add_dataset(study, ["raw/seg1", "raw/seg2"], segmented=True, condition="A")
     """
-    from workflow.import_workflow import import_data
+    from workflow.import_workflow import _prepare_import_source, import_data
 
+    src, segments = _normalize_dataset_source(source, segmented=segmented)
+    for path in segments or [src]:
+        if not path.exists():
+            raise DatasetError(tr("dataset path does not exist: {p0}", p0=path))
     label = str(condition or "").strip() or session.next_condition_label()
     existing = session.dataset_by_condition(label)
     if existing is not None:
@@ -451,20 +497,14 @@ def add_dataset(
                 p1=existing.key,
             )
         )
-    src = Path(source).expanduser()
-    if not src.exists():
-        raise DatasetError(tr("dataset path does not exist: {p0}", p0=src))
-    src = src.resolve()
     try:
-        from core.data.bruker_reader import read_dataset
-
-        experiment = read_dataset(src)
+        experiment, _, _ = _prepare_import_source(
+            src, segmented=segmented, segments=segments if segmented else None
+        )
     except Exception as exc:  # noqa: BLE001 - public-archive data is often zipped or repacked
         raise DatasetError(
             tr(
-                "not recognisable as a raw Bruker dataset: {p0} ({p1}: {p2}). This API needs an "
-                "unpacked Bruker directory containing "
-                "acqus/ser.",
+                "dataset import preflight failed: {p0} ({p1}: {p2})",
                 p0=src,
                 p1=type(exc).__name__,
                 p2=exc,
@@ -480,7 +520,10 @@ def add_dataset(
         entry = manager.create_experiment(title or src.name)
         target_exp = entry.id
     try:
-        result = import_data(manager, target_exp, src)
+        result = import_data(
+            manager, target_exp, src, segmented=segmented,
+            segments=segments if segmented else None,
+        )
     except Exception as exc:  # noqa: BLE001 - policy guards (e.g. Kinetics) raise too
         raise DatasetError(tr("import failed: {p0}: {p1}", p0=type(exc).__name__, p1=exc)) from exc
 
@@ -504,6 +547,8 @@ def add_dataset(
         raw_dir=str(result.raw_dir or ""),
         file_count=int(result.file_count),
         total_bytes=int(result.total_bytes),
+        segmented=segmented,
+        segments=[str(seg) for seg in segments],
     )
     return session.add_dataset_ref(ref)
 

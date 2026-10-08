@@ -7,7 +7,7 @@
 ```python
 open_study(root, *, name="", backend=None, config=None, create=True) -> StudySession
 add_dataset(session, source, *, condition="", exp_id="", title="",
-            make_default=True) -> DatasetRef
+            make_default=True, segmented=False) -> DatasetRef
 dataset_info(session, dataset=None) -> dict
 ```
 
@@ -15,6 +15,12 @@ dataset_info(session, dataset=None) -> dict
   (`study/study.json`)恢复条件数据集列表;
 - `condition` 缺省自动分配下一个未用字母(A/B/C…);标签必须唯一;
 - 导入 = 链接 raw + 写 metadata + 登记 import 运行,**不做**转换/处理。
+- 默认 `segmented=False`：`source` 是一个 Bruker 原始数据目录。显式设为
+  `True` 时，`source` 必须是至少两个完整 Bruker 原始数据目录组成的有序列表，
+  这些段作为同一个条件的一份数据集；不能用单个字符串代替目录列表，也不会自动发现段。
+  标志严格要求 `bool`，段路径不能重复。逐段动力学实验及缺少 `nuslist` 的 NUS
+  输入会拒绝；段的维数、核、有效 TD、谱宽、采样模式、采集轴布局、SFO 频率及载频必须一致。
+  段可来自不同父目录，列表顺序会被保存并用于后续输入比较。
 
 `StudySession` 关键属性:`root`、`datasets`、`dataset`(主条件)、`conditions`、
 `dataset_by_condition(label)`、`study_dir`、`work_dir`、`reference_dir`、
@@ -132,6 +138,10 @@ run_sweep(session, plan, *, reference=None, datasets=None,
   DC 纠正 `POLY -time`)一并进入组合基底,且候选运行在参考的**条件工作目录**里
   执行——复用参考已转换的 fid,脚本与参考脚本同目录;每个运行目录都保存完整
   `process.com` + SHA-256(找不到时报 `processing_script_not_found`);
+- 组合严格只处理参考阶段已有的转换 FID：单文件、3D uniform 切片目录和多段合并 FID
+  都从参考阶段产物读取。若 FID 缺失/损坏、源输入或转换证据不一致，或请求的参数需要
+  重新转换/合并，直接报错并要求用 `reference --force` / `force=True` 重建参考；组合不会
+  自动重转、清理源数据或修改参考 FID / 采样表。GUI 默认转换逻辑不受此 API 约束影响；
 - `parameters_used` 基底 = 该条件参考运行的有效参数(相位锁定),随后应用批次
   `base_overrides`,组合表最后只覆盖它显式指定的键;阈值类键(`sigma_multiplier`/`min_snr`/`threshold_sigma`/
   `detection.sigma_multiplier`)写进组合表 → `SweepError`(阈值锁定在参考);
@@ -224,17 +234,26 @@ write_records(session, *, reference=None, references=None, plan, runs,
 ### 参考模式
 
 ```python
-run_reference_study(root, datasets={"A": "~/data/a"},
+run_reference_study(root, dataset=None, *, datasets=None, segmented=False,
                     params=None,                  # 可含 reference_optimize(**仅测试用**,见 05 §5.10)
-                    params_by_condition={"B": {"zero_fill": 2}},
-                    phase_route=None, peaks=None,
-                    direct_range=(10.5, 6.5),         # 直接维范围(high, low;ppm)
-                    sigma_multiplier=25,              # 选峰阈值(仅此模式可定)
-                    max_peaks=0,
+                    params_by_condition=None, phase_route=None, peaks=None,
+                    direct_range=None, sigma_multiplier=None, max_peaks=0,
                     backend=None, write=True, progress=None) -> ReferenceResult
+run_parameter_study(root, dataset=None, *, datasets=None, segmented=False,
+                    ...) -> StudyResult
 ```
 
+`segmented` 必须是严格的 bool，缺省为 `False`，保持原来的
+单目录输入方式。开启时，单条件可用 `dataset=[s1, s2]` 或 `datasets=[s1, s2]`；
+其中列表是一个条件的完整有序段列表，至少两个原始目录。多条件时用
+`datasets={"A": [a1, a2], "B": [b1, b2]}`，每个值都是该条件的完整有序段列表。
+顶层 `datasets=[s1, s2]` 也只表示一个条件；要表达多个条件请用 mapping。单条件
+的 `dataset` 与 `datasets` 不可同时提供。
+
 - 导入条件数据(可选)→ 各条件独立优化参考谱/脚本并独立选峰,得到各自参考峰表;不做参数组合;
+- 段列表按给定顺序绑定到一个条件；相同目录不得重复。现有研究要更换段列表或顺序，
+  应使用新条件或新研究根；`force=True` 只重建参数参考，不更改源段绑定。重开已有段数据
+  做 reference/sweep 且不再传 dataset/datasets 时不必再次传 `segmented=True`。
 - `params_by_condition` 按条件覆盖公共 `params`;未知条件报错。`peaks=` 外部峰表只登记到
   主条件,不会复制到其他条件;
 - 选峰阈值、参考峰表(外部峰表)都在这阶段确定,之后**锁定**;峰定位固定为
@@ -272,6 +291,10 @@ run_combination_study(reference,                  # ← 必填:显式指定参�
 - 组合**不生成参考**:参数基底 = 该参考的有效参数(相位锁定),组合表只覆盖它
   显式指定的键;**选峰阈值随参考锁定**(阈值键写进组合表 → `SweepError`,
   提示「要改阈值请重建参考」);
+- 组合只从参考工作目录读取已有转换 FID（多段为合并 FID）。FID 缺失/损坏、原始输入或
+  转换证据不一致、或请求参数要求重转/重合并时直接报错；请用 `reference --force` /
+  `force=True` 重建参考后再运行。组合不自动转换、不清理源数据，也不改参考 FID 或采样表。
+  `run_parameter_study` 仍是一键便利入口：先完成参考阶段，再执行组合。
 - **组合独立选峰**:每个组合在自己的候选谱上独立检出该组合自己的完整峰表
   (`peak_id` = 本谱序号,`reference_peak_id`/`assignment` 留空),峰与参考峰表的
   匹配由使用者自己的分析完成;逐组合记录 `parameters_resolved.detection`(锁定阈值来源

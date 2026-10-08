@@ -74,6 +74,21 @@ study/workflows/W0001/B/peak_table_parabolic.csv
 
 ## 3. 分步用法(需要精细控制时)
 
+同一条件由多个 Bruker 原始目录组成时，显式启用分段模式并按采集顺序传完整目录列表：
+
+```python
+reference = run_reference_study(
+    "~/studies/segmented",
+    dataset=["~/data/segment1", "~/data/segment2"],
+    segmented=True,
+)
+```
+
+若有多个条件，使用 `datasets={"A": ["~/data/a1", "~/data/a2"],
+"B": ["~/data/b1", "~/data/b2"]}`；顶层
+`datasets=[s1, s2]` 仍表示一个条件。分段导入至少两个目录，默认单目录用法不变。
+完整校验和复用边界见[输入与数据](05-inputs-and-data.md)。
+
 ```python
 from nmrforge_api import (
     add_dataset, build_reference, ensure_reference_peaks, open_study,
@@ -97,6 +112,8 @@ print(records)
 ```bash
 python -m nmrforge_api init      --study ~/studies/s1 --dataset ~/data/a --condition A
 python -m nmrforge_api init      --study ~/studies/s1 --dataset ~/data/b --condition B
+python -m nmrforge_api init      --study ~/studies/segmented --segmented \
+    --dataset ~/data/segment1 --dataset ~/data/segment2 --condition A
 python -m nmrforge_api reference --study ~/studies/s1
 python -m nmrforge_api peaks     --study ~/studies/s1
 python -m nmrforge_api sweep     --study ~/studies/s1 --reference ~/studies/s1 \

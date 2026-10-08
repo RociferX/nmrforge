@@ -14,7 +14,7 @@ python -m nmrforge_api --help
 
 | 子命令 | 用途 |
 | --- | --- |
-| `init` | 创建一个 study,并登记某个条件的 Bruker 数据集。 |
+| `init` | 创建一个 study,并登记某个条件的 Bruker 数据集；可显式登记同条件的有序分段。 |
 | `reference` | 生成并冻结参考谱、参考脚本与参考峰表。 |
 | `peaks` | 在参考谱上选峰,或登记一张外部峰表。 |
 | `sweep`(别名 `workflows`) | 针对冻结的参考跑参数组合。 |
@@ -25,12 +25,18 @@ python -m nmrforge_api --help
 
 ```bash
 python -m nmrforge_api init      --study ./study --dataset /path/to/bruker/dataset
+python -m nmrforge_api init      --study ./study-segmented --segmented \
+    --dataset /path/to/segment1 --dataset /path/to/segment2 --condition A
 python -m nmrforge_api reference --study ./study
 python -m nmrforge_api peaks     --study ./study
 python -m nmrforge_api sweep     --study ./study --grid grid.yaml --reference ./study
 python -m nmrforge_api report    --study ./study
 python -m nmrforge_api status    --study ./study
 ```
+
+`init` 默认接受至多一个 `--dataset`；加 `--segmented` 后需重复提供至少两个完整原始
+Bruker 目录，按参数顺序组成一个条件。reference/sweep 重开已登记的数据时无需再次传该标志。
+分段模式及校验边界见[完整 CLI 参考](external-api/04-cli-reference.md)。
 
 ## `sweep` 选项
 

@@ -271,6 +271,57 @@ def _raise_if_nus_schedule_missing(experiment: Experiment) -> None:
     )
 
 
+def _prepare_import_source(
+    source: Path | str,
+    *,
+    segmented: bool = False,
+    segments: list[Path | str] | None = None,
+) -> tuple[Experiment, list[Path], str | None]:
+    """Read-only preflight shared by API/project import; return experiment, segments and kind."""
+    src = Path(source).resolve()
+    if segmented:
+        from core.data.bruker_reader import (
+            classify_segment_kind,
+            discover_segment_dirs,
+            read_segments,
+        )
+
+        # An explicit list includes every segment; otherwise retain GUI container discovery.
+        paths = (
+            [Path(seg).resolve() for seg in segments]
+            if segments is not None
+            else ([src] if (src / "acqus").is_file() else discover_segment_dirs(src))
+        )
+        if len(paths) < 2:
+            raise ImportWorkflowError(
+                tr("segmented import requires at least 2 Bruker dataset directories")
+            )
+        if len(set(paths)) != len(paths):
+            raise ImportWorkflowError(tr("segmented import contains duplicate dataset directories"))
+        for path in paths:
+            _validate_dataset_dir(path)
+            _raise_if_kinetics_source(path)
+        experiment = read_segments(paths)
+        _raise_if_kinetics(experiment)
+        if experiment.sampling.mode is SamplingMode.NUS and not experiment.sampling.nus_list:
+            # Locate the actual segment missing a schedule, rather than reporting only the first.
+            for path in paths:
+                _raise_if_nus_schedule_missing(read_dataset(path))
+        _raise_if_nus_schedule_missing(experiment)
+        return experiment, paths, classify_segment_kind(paths)
+
+    _validate_dataset_dir(src)
+    paths = [Path(seg).resolve() for seg in (segments or [])]
+    for path in paths:
+        _validate_dataset_dir(path)
+    for candidate in [src, *paths]:
+        _raise_if_kinetics_source(candidate)
+    experiment = read_dataset(src)
+    _raise_if_kinetics(experiment)
+    _raise_if_nus_schedule_missing(experiment)
+    return experiment, paths, None
+
+
 def import_data(
     manager: ProjectManager,
     exp_id: str,
@@ -298,55 +349,18 @@ def import_data(
 
     src = Path(source).resolve()
     _progress(tr("== import start: {p0} → {p1} ==", p0=src, p1=exp_id))
-    segment_paths: list[Path] = []
-    segment_kind: str | None = None
+    experiment, segment_paths, segment_kind = _prepare_import_source(
+        src, segmented=segmented, segments=segments
+    )
     segment_label: str | None = None
     if segmented:
-        # Single data segment collection: source is the container directory containing all segments
-        # (different from batch import, which creates entries for multiple independent data sets;
-        # here they are merged into one DataEntry).
-        from core.data.bruker_reader import (
-            classify_segment_kind,
-            discover_segment_dirs,
-            read_dataset_container,
-        )
-
-        preflight_dirs = [src] if (src / "acqus").is_file() else discover_segment_dirs(src)
-        for candidate in preflight_dirs:
-            _raise_if_kinetics_source(candidate)
-        experiment, discovered = read_dataset_container(src)
-        _raise_if_kinetics(experiment)
-        _raise_if_nus_schedule_missing(experiment)
-        if len(discovered) < 2:
-            raise ImportWorkflowError(
-                tr(
-                    "segmented import requires at least 2 segmented subdirectories containing "
-                    "acqus (non-data subdirectories are ignored): "
-                    "{p0}",
-                    p0=src,
-                )
-            )
         experiment.dataset_id = src.name  # Container name as data identifier.
-        segment_paths = [Path(seg).resolve() for seg in discovered]
-        # 0.2.199-patch29cu: Identify repeated experiment superposition (uniform/NUS same point) and
-        # NUS segmentation.
-        segment_kind = classify_segment_kind(discovered)
         segment_label = {
             "repeat_uniform": tr("Repeat-experiment overlay (uniform, identical parameters)"),
             "repeat_nus": tr("Repeat-experiment overlay (NUS, identical sampling points)"),
             "segmented_nus": tr("segmented (NUS complementary sampling point)"),
         }.get(segment_kind, segment_kind)
         experiment.sampling.evidence.append(tr("Multi-segment type: {p0}", p0=segment_label))
-    else:
-        _validate_dataset_dir(src)
-        segment_paths = [Path(seg).resolve() for seg in (segments or [])]
-        for seg in segment_paths:
-            _validate_dataset_dir(seg)
-        for candidate in [src, *segment_paths]:
-            _raise_if_kinetics_source(candidate)
-        experiment = read_dataset(src)
-        _raise_if_kinetics(experiment)
-        _raise_if_nus_schedule_missing(experiment)
 
     _progress(tr("◆ parameters: {p0}", p0=_experiment_brief(experiment)))
     if segment_label is not None:
@@ -453,7 +467,20 @@ def import_data(
                     checksums[f"seg_{index:02d}/{name}"] = digest
         else:
             checksums = _key_checksums(effective_root)
-        manifest_checksums, file_count, total_bytes = _manifest(effective_root)
+        if segmented and copied_dir is None:
+            # Explicit segments need not share a parent; audit exactly the selected trees.
+            manifest_checksums = {}
+            file_count = total_bytes = 0
+            for index, seg in enumerate(segment_paths, start=1):
+                segment_manifest, segment_count, segment_bytes = _manifest(seg)
+                manifest_checksums.update({
+                    f"segments/{index:02d}/{name}": digest
+                    for name, digest in segment_manifest.items()
+                })
+                file_count += segment_count
+                total_bytes += segment_bytes
+        else:
+            manifest_checksums, file_count, total_bytes = _manifest(effective_root)
         data_entry.checksums = checksums
         _progress(
             tr(
@@ -465,6 +492,9 @@ def import_data(
         )
 
         inputs = {"source_path": str(src)}
+        if segmented:
+            inputs.update({f"source_segment:{index:02d}": str(seg)
+                           for index, seg in enumerate(segment_paths, start=1)})
         inputs.update({f"sha256:{name}": digest for name, digest in sorted(checksums.items())})
         run = manager.start_run(
             exp_id,
@@ -494,6 +524,7 @@ def import_data(
             "segments": [str(seg) for seg in data_entry.segments],
             "segment_kind": segment_kind,
             "segment_kind_label": segment_label,
+            "source_segments": [str(seg) for seg in segment_paths] if segmented else [],
             "link_stats": dict(link_stats),  # G2B-009:hardlink/symlink/copy/writable
             "manifest": {
                 "file_count": file_count,

@@ -36,6 +36,21 @@
 
 ## 6.2 统一峰表字段(当前 **38 列**)
 
+多段导入的来源留档：`study.json` 与参考/组合 records 的 `datasets` 中，
+该条件的引用增加 `segmented: true` 与 `segments: [原始目录1, 原始目录2, ...]`，
+顺序与输入一致；单目录引用不增加这些可选字段。逐条件 `run.json.dataset` 同样保存源段列表。
+项目 DataEntry.segments 与导入 `metadata.json.segments` 是处理时实际使用的段目录，
+原始列表单独存入 `metadata.json.source_segments`；导入运行的输入按段记录源路径及 SHA-256。
+段列表和顺序绑定条件输入，组合 resume 指纹也包含它们；不能只比较第一段判断可复用。
+这不增加峰表列，也不创建跨谱或跨条件峰对应关系。
+
+参考 `conversion_provenance.reference_fid` 冻结 FID 文件的快速指纹与工作 `nuslist` 指纹，
+组合的 `parameters_resolved.input` 记录 `policy="reference_fid_only"` 及 `reference_run_id`。
+组合开始前校验且每次处理前复核；输入不再符合冻结证据时要求重建参考，不现场重转。
+快速指纹沿用 ≤8 MiB 内容 SHA-256、大文件 size+mtime_ns 口径，不是内容级认证。
+旧参考缺少这些证据需用 `force=True` 重建，不能仅重复调用默认参考缓存。
+resume 指纹绑定冻结 FID 证据与严格策略，旧宽松运行不静默复用。
+
 峰定位只有三点抛物线一种方法(2026-09-26 用户需求⑦:二维高斯拟合算法整体删除),
 所以每个 workflow 只写**一张** `peak_table_parabolic.csv`,参考侧也只有
 `reference_peak_table_parabolic.csv` 一张身份表;`records/` 里唯一的组合汇总表是

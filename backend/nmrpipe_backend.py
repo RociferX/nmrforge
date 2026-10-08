@@ -940,7 +940,15 @@ class NMRPipeBackend:
         # converted product is reused, "reusing converted fid" is emitted instead, so
         # repeated process calls (preview/joint/candidate) do not keep showing a
         # misleading conversion progress
-        if experiment.segments:
+        if "_reference_fid_only" in (params or {}):
+            try:
+                in_file, _ = self.validate_reference_fid(
+                    experiment, work, (params or {})["_reference_fid_only"], dict(params or {})
+                )
+            except (ValueError, OSError) as exc:
+                return {"success": False, "message": str(exc), "logs": logs}
+            _progress(tr("Reuse frozen reference FID (conversion disabled)"))
+        elif experiment.segments:
             merged_in = self._merged_fid_in(work, experiment.dataset_id)
             merged_ready = merged_in is not None
             in_file = merged_in or f"merged/{experiment.dataset_id}.fid"
@@ -1440,7 +1448,15 @@ class NMRPipeBackend:
         if _ext_note:
             logs.append(_ext_note)
 
-        if experiment.segments:
+        if "_reference_fid_only" in params:
+            try:
+                in_file, nuslist_count = self.validate_reference_fid(
+                    experiment, work, params["_reference_fid_only"], params
+                )
+            except (ValueError, OSError) as exc:
+                return {"success": False, "message": str(exc), "logs": logs}
+            logs.append(tr("Reuse frozen reference FID (conversion disabled)"))
+        elif experiment.segments:
             # 0.2.124: bad points are deleted from the source ser/nuslist with a
             # backup kept (user request)
             audit = QcAuditLog(work)
@@ -2899,6 +2915,25 @@ class NMRPipeBackend:
     def _conversion_record_path(self, work: Path, dataset_id: str) -> Path:
         """Path of the conversion record: next to the fid, holding the raw fingerprint."""
         return work / f"{dataset_id}.fid.conversion.json"
+
+    def validate_reference_fid(
+        self, experiment: Experiment, work: Path, context: dict[str, Any], params: dict[str, Any],
+    ) -> tuple[str, int]:
+        """Validate the reference input without conversion or source/FID repair."""
+        from backend.reference_fid import validate_fid_input
+
+        if experiment.segments:
+            in_file = self._merged_fid_in(work, experiment.dataset_id)
+        else:
+            single = work / f"{experiment.dataset_id}.fid"
+            in_file = single.name if single.is_file() else _slice_in_file(
+                work / "fid", experiment.dataset_id
+            )
+        count = validate_fid_input(
+            work, experiment, context, params, self._fid_products(work, experiment.dataset_id),
+            in_file,
+        )
+        return str(in_file), count
 
     @staticmethod
     def _fid_products(work: Path, dataset_id: str) -> dict[str, int]:

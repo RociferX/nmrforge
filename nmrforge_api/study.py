@@ -51,6 +51,7 @@ from nmrforge_api.reference import (
 from nmrforge_api.session import (
     DatasetRef,
     StudySession,
+    _normalize_dataset_source,
     add_dataset,
     open_study,
 )
@@ -121,56 +122,94 @@ class StudyResult:
 
 
 def _resolve_conditions(
-    datasets: Mapping[str, str] | Sequence[Any] | None,
-    dataset: str | Path | None,
-) -> list[tuple[str, str]]:
+    datasets: Mapping[str, Any] | Sequence[Any] | None,
+    dataset: str | Path | Sequence[Path | str] | None,
+    *,
+    segmented: bool = False,
+) -> list[tuple[str, Any]]:
     """``datasets``/``dataset`` -> [(condition label, dataset path)].
 
     - ``datasets={"A": path, "B": path}`` (recommended for several conditions);
     - ``datasets=[("A", path), ("B", path)]`` or ``[pathA, pathB]`` (labelled A/B);
     - ``dataset=path``: a single condition (legacy callers).
     """
-    out: list[tuple[str, str]] = []
+    if not isinstance(segmented, bool):
+        raise DatasetError(tr("segmented must be a boolean (true or false)"))
+    if datasets is not None and dataset is not None:
+        raise DatasetError(tr("pass either dataset or datasets, not both"))
+    out: list[tuple[str, Any]] = []
     if datasets is not None:
         if isinstance(datasets, Mapping):
             for label, path in datasets.items():
-                out.append((str(label), str(path)))
+                out.append((str(label), path))
         else:
+            if not isinstance(datasets, Sequence) or isinstance(datasets, (str, bytes)):
+                raise DatasetError(tr("datasets must be a condition mapping or a sequence"))
+            if segmented:
+                out.append(("", datasets))
+                return out
             for item in datasets:
                 if isinstance(item, (tuple, list)) and len(item) == 2:
-                    out.append((str(item[0]), str(item[1])))
+                    out.append((str(item[0]), item[1]))
                 else:
-                    out.append(("", str(item)))
+                    out.append(("", item))
     if dataset is not None:
-        out.append(("", str(dataset)))
+        out.append(("", dataset))
     return out
 
 
-def _register_conditions(session: StudySession, conditions: Sequence[tuple[str, str]]) -> None:
-    """Register the user condition datasets; an identical existing one is reused."""
-    for label, path in conditions:
-        source = str(Path(path).expanduser().resolve())
-        existing = (
-            session.dataset_by_condition(label)
-            if label
-            else (session.dataset if len(session.datasets) == 0 else None)
-        )
+def _register_conditions(
+    session: StudySession, conditions: Sequence[tuple[str, Any]], *, segmented: bool = False
+) -> None:
+    """Preflight all inputs, then register; reuse requires identical segment order."""
+    from workflow.import_workflow import _prepare_import_source
+
+    prepared = []
+    seen = set()
+    used = set(session.conditions)
+    for index, (label, path) in enumerate(conditions):
+        label = label.strip()
+        if not label:
+            if index < len(session.datasets):
+                label = session.datasets[index].condition
+            else:
+                label = next(
+                    (letter for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" if letter not in used),
+                    f"C{len(used) + 1}",
+                )
+        if label in seen:
+            raise DatasetError(tr("duplicate condition label: {p0}", p0=label))
+        seen.add(label)
+        used.add(label)
+        source, segments = _normalize_dataset_source(path, segmented=segmented)
+        existing = session.dataset_by_condition(label)
         if existing is not None:
-            if Path(existing.source).resolve() != Path(source):
+            if (
+                Path(existing.source).resolve() != source
+                or existing.segmented != segmented
+                or [str(Path(seg).resolve()) for seg in existing.segments]
+                != [str(seg) for seg in segments]
+            ):
                 raise DatasetError(
                     tr(
-                        "condition {p0!r} is bound to dataset {p1}; use another condition label "
-                        "for {p2}, or a separate study "
-                        "root",
+                        "condition {p0!r} is bound to different dataset sources or segment order; "
+                        "use another condition label or a separate study root",
                         p0=existing.condition,
-                        p1=existing.source,
-                        p2=source,
                     )
                 )
             continue
+        try:
+            _prepare_import_source(
+                source, segmented=segmented, segments=segments if segmented else None
+            )
+        except Exception as exc:  # noqa: BLE001 - preflight errors use the public API error
+            raise DatasetError(str(exc)) from exc
+        prepared.append((label, source, segments))
+    for label, source, segments in prepared:
         add_dataset(
             session,
-            source,
+            segments if segmented else source,
+            segmented=segmented,
             condition=label,
             title="",
         )
@@ -213,9 +252,10 @@ class ReferenceResult:
 
 def run_reference_study(
     root: Path | str,
-    dataset: Path | str | None = None,
+    dataset: Path | str | Sequence[Path | str] | None = None,
     *,
-    datasets: Mapping[str, str] | Sequence[Any] | None = None,
+    datasets: Mapping[str, Any] | Sequence[Any] | None = None,
+    segmented: bool = False,
     name: str = "",
     params: dict[str, Any] | None = None,
     carrier_ppm: Mapping[str, float] | None = None,
@@ -247,10 +287,15 @@ def run_reference_study(
     ----------
     root : Path | str
         the study root (created or reused).
-    dataset : Path | str, optional
-        a single dataset directory; use ``datasets={condition: directory}`` for more.
-    datasets : Mapping[str, str] | Sequence[Any], optional
-        condition -> directory (A/B...); exclusive with ``dataset``.
+    dataset : Path | str | Sequence[Path | str], optional
+        a single dataset directory; with segmented=True, pass the complete ordered segment list.
+    datasets : Mapping[str, Any] | Sequence[Any], optional
+        condition -> directory; segmented input uses ``{"A": [a1, a2], "B": [b1, b2]}``.
+        With segmented=True, an unlabelled top-level directory list is one condition; exclusive
+        with ``dataset``.
+    segmented : bool, default False
+        explicitly enable multi-segment import; segments are not auto-discovered or registered
+        as separate conditions.
     name : str, optional
         name recorded when creating a study.
     params : dict[str, Any], optional
@@ -303,9 +348,9 @@ def run_reference_study(
         result = run_reference_study("study/", "path/to/bruker", sigma_multiplier=35)
         reference = result.reference()
     """
+    conditions = _resolve_conditions(datasets, dataset, segmented=segmented)
     session = open_study(root, name=name, backend=backend)
-    conditions = _resolve_conditions(datasets, dataset)
-    _register_conditions(session, conditions)
+    _register_conditions(session, conditions, segmented=segmented)
     if not session.datasets:
         raise DatasetError(
             tr(
@@ -659,9 +704,10 @@ def run_combination_study(
 
 def run_parameter_study(
     root: Path | str,
-    dataset: Path | str | None = None,
+    dataset: Path | str | Sequence[Path | str] | None = None,
     *,
-    datasets: Mapping[str, str] | Sequence[Any] | None = None,
+    datasets: Mapping[str, Any] | Sequence[Any] | None = None,
+    segmented: bool = False,
     axes: Mapping[str, Sequence[Any]] | None = None,
     combos: Sequence[Mapping[str, Any]] | None = None,
     name: str = "",
@@ -700,8 +746,8 @@ def run_parameter_study(
 
     Parameters
     ----------
-    root, dataset, datasets, name, params, carrier_ppm, params_by_condition, phase_route, peaks,
-    sigma_multiplier, max_peaks, force
+    root, dataset, datasets, segmented, name, params, carrier_ppm, params_by_condition,
+    phase_route, peaks, sigma_multiplier, max_peaks, force
         the same as :func:`run_reference_study` (reference-mode part).
     axes, combos, max_runs
         the same as :func:`run_combination_study` (combination-mode part).
@@ -737,6 +783,7 @@ def run_parameter_study(
         root,
         dataset,
         datasets=datasets,
+        segmented=segmented,
         name=name,
         params=params,
         carrier_ppm=carrier_ppm,

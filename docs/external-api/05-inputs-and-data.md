@@ -7,8 +7,44 @@
 - Import only links the raw data, writes the metadata and registers the import run; it converts
   nothing;
 - Sampling method: uniform any dimension, **2D NUS**(SMILE reconstruction), 3D NUS currently only supports reference construction;
-- **Full sampling priority**: Marked NUS but actual full sampling (`nuslist` covers the entire grid, or 2D `ser` covers the entire grid
-  No zero lines) -> Processed as uniform, see `reference.sampling_evidence` for the reason;
+- Inputs labelled NUS use uniform processing only when a valid schedule covers the entire grid
+  in standard order. Full coverage in a different order still requires schedule-based placement.
+  Declared NUS without a schedule or recoverable coordinates is rejected; a `ser` without zero
+  traces is not sufficient evidence of uniform acquisition. See `reference.sampling_evidence`;
+- Multi-segment input is explicit: set `segmented=True` and pass the complete ordered list of at
+  least two Bruker raw directories. The default remains one directory; no segment auto-discovery is
+  performed, and one string is not a segment list. Paths must be unique; segments can be in different
+  parent directories. Kinetic layouts and NUS data missing a usable `nuslist` are rejected. Acquisition
+  parameters, dimensions, nuclei, effective TD, spectral width, sampling mode, axis layout, SFO frequency
+  and carrier must agree across segments. These checks do not establish that the segments share
+  the same sample or experimental conditions; callers must confirm they are suitable to merge;
+- Segments represent one condition, not independent experiments or spectra to average downstream.
+  Uniform repeats use the existing repeat-sum behavior. For NUS, repeated points are summed and
+  complementary schedules are merged by sampled point. Sampling rate is calculated from the unique
+  union of sampled points over total coverage. No cross-condition or cross-workflow peak relationship
+  is created by this input mode;
+
+Examples for one condition and multiple conditions:
+
+```python
+run_parameter_study(
+    root, dataset=["~/data/part1", "~/data/part2"], segmented=True,
+    combos=[{"zero_fill": 1}],
+)
+
+run_parameter_study(
+    root,
+    datasets={"A": ["~/data/a1", "~/data/a2"],
+              "B": ["~/data/b1", "~/data/b2"]},
+    segmented=True, combos=[{"zero_fill": 1}],
+)
+```
+
+At the API boundary, `segmented` must be a strict `bool`. A top-level `datasets=[s1, s2]` is one
+condition; use a mapping for multiple conditions. Replacing the source list or changing its order in
+an existing study requires a new condition or research root. `force=True` rebuilds reference
+processing only; it does not change the bound source segments. Reopening an existing segmented study
+for reference or combination processing requires no segmented flag when no new data is imported.
 
 ## 5.2 condition (A/B...)
 

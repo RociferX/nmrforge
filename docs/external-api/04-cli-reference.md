@@ -3,17 +3,31 @@
 Entry:`python -m nmrforge_api <Order> --study <Research roots>`.
 Public parameter:`--study`(required), `--name`(new research name), `--condition <A|B|…>`.
 (Default = all conditions).
+This source release is software 1.0.4 with API v1.1; the previously released AppImage remains 1.0.2.
 
 ## Init -- Create the study and import the dataset
 
 ```bash
 python -m nmrforge_api init --study ~/studies/s1 --dataset ~/data/apo --condition A
 python -m nmrforge_api init --study ~/studies/s1 --dataset ~/data/holo --condition B
+python -m nmrforge_api init --study ~/studies/segments --segmented \
+    --dataset ~/data/segment1 --dataset ~/data/segment2 --condition A
 python -m nmrforge_api init --study ~/studies/s1            # only lists the registered conditions
 ```
 
 Output: study root + condition + dataset summary (ndim/nuclear/sampling/source/raw_dir/number of files).
-The same condition label cannot be bound to two pieces of data (error reported, no overwriting).
+The same condition cannot be registered twice (error, no overwrite). `--segmented` is off by default.
+Without it, supply at most one `--dataset`; with it, repeat `--dataset` at least twice. The CLI order
+defines the complete, ordered segment list for one condition. Duplicate paths are rejected, and the
+CLI never discovers missing segments automatically. Each value must name a complete Bruker raw
+directory. Segments may have different parent directories. Reopening an existing segmented study for
+`reference` or `sweep` needs no segmented flag.
+
+Kinetic layouts and NUS data without a usable `nuslist` are rejected. Segment acquisition parameters,
+dimensions, nuclei, effective TD, spectral width, sampling mode, axis layout, SFO frequency and carrier
+must agree. The full source list and order are used when deciding whether an existing condition matches.
+To replace sources or change their order, create a new condition or research root; `reference --force`
+rebuilds the reference but does not change its bound source list.
 
 ## Reference -- reference workflow (one copy for each condition)
 
@@ -57,7 +71,10 @@ python -m nmrforge_api peaks --study ~/studies/s1 --sigma 25 --max-peaks 60
 python -m nmrforge_api peaks --study ~/studies/s1 --peak-table external.list
 ```
 
-The main condition automatically selects peaks (or registers an external peak table) to create `reference.list`; other conditions share that identity table. The command writes one `reference_peak_table_parabolic.csv` and reports its path, hash, source, peak count and localisation QC.
+Each condition automatically selects its own reference peaks and creates its own `reference.list`;
+an external peak table applies only to the main condition and is never copied to other conditions.
+The command writes one `reference_peak_table_parabolic.csv` per condition and reports its path,
+hash, source, peak count and localisation QC. Peak IDs are local to each table, not cross-condition links.
 
 `--sigma N` is the **peak selection threshold** (noise σ multiple, default 35σ): when the reference peak table** has not been generated**.
 Specify = Select a threshold when generating a reference; specifying a different threshold after the reference has been frozen will be rejected (exit code 2.

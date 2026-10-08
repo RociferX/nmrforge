@@ -1,7 +1,7 @@
 # Python API
 
 The public scripting contract is `API_VERSION = "1.1"`; this source release uses software version
-1.0.3. The previously released AppImage remains at 1.0.2 and does not gain newer API functionality
+1.0.4. The previously released AppImage remains at 1.0.2 and does not gain newer API functionality
 automatically. Install from source containing this contract and check `compat_manifest()` before
 reusing results.
 
@@ -75,6 +75,36 @@ For 2D, F2 is direct and F1 indirect; for 3D, F3 is direct, with F2 and F1 indir
 Overrides are applied to actual conversion commands, recorded in provenance and
 bound to the reference input fingerprint. See [API reference](external-api/03-api-reference.md)
 for per-condition overrides and the full default-resolution rules.
+
+## Explicit multi-segment input
+
+Single-directory import remains the default (`segmented=False`). To register multiple source
+segments as one condition, pass the complete ordered list and set `segmented=True`:
+
+```python
+run_reference_study(
+    root,
+    dataset=["~/data/segment1", "~/data/segment2"],
+    segmented=True,
+)
+```
+
+For multiple conditions, use a mapping whose values are each condition's ordered segment list, such
+as `datasets={"A": ["~/data/a1", "~/data/a2"], "B": ["~/data/b1", "~/data/b2"]}`.
+A top-level `datasets=[s1, s2]` represents one condition. Segments must be complete Bruker raw
+directories; there must be at least two, with no duplicate paths. The API checks their acquisition
+parameters, dimensions, nuclei, effective TD, spectral width, sampling mode, axis layout, SFO frequency
+and carrier. Kinetic layouts and NUS data without a usable schedule are rejected. Segments may be in
+different parent directories, and their order is part of input identity.
+
+Reference mode performs import, conversion and segment merging. Combination mode processes only the
+existing reference FID, including a single-file FID, a 3D uniform slice directory or a merged
+multi-segment FID. If the FID is missing/damaged, source or conversion evidence does not match, or the
+requested parameters require conversion/merging, the combination call fails and requires rebuilding
+the reference with `force=True`. It never reconverts automatically, deletes source data, or modifies
+the reference FID or sampling schedule. Older references without a frozen-FID record require one
+explicit rebuild with `force=True`. The GUI's default conversion behavior is unchanged. Strict reuse
+passed Linux engineering regression, but has not been verified against a real NMRPipe/SMILE engine.
 
 ## Qt-free import and errors
 

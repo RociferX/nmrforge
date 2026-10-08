@@ -5,6 +5,15 @@ generates candidate spectra and tables from user-specified parameter combination
 analysis. It does not match peaks across spectra or compute relationships between tables.
 It can be imported without pulling in Qt or touching GUI state.
 
+Import defaults to a single directory. Explicit `segmented=True` accepts the complete ordered
+list of at least two original Bruker data directories as one condition; multiple conditions use
+a label-to-list mapping, for example `run_reference_study(root, dataset=[s1, s2], segmented=True)`.
+Incompatible acquisition/calibration, duplicate paths, kinetics and NUS without a required schedule
+are rejected. The API does not discover containers automatically.
+
+References generate the FID; combinations reuse it read-only. Invalid inputs or missing frozen
+evidence require an explicit `force=True` reference rebuild, never automatic reconversion or repair.
+
 ## Modules
 
 | Module | Role |

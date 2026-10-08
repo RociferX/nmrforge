@@ -7,6 +7,7 @@
 | `DatasetError: not recognisable as a raw Bruker dataset` | an archive or an already-processed format was passed | unpack a directory holding `acqus` (and `acqu2s` for 2D) and `ser` |
 | `DatasetError: condition label 'A' is taken by ...` | two datasets were bound to one label | use another label (B/C/...) or a second study root |
 | `ReferenceError: reference artefacts are missing; rebuild with force=True` | `study/reference/<key>/` was moved or deleted | remove that directory, or call `build_reference(..., force=True)` |
+| A combination run reports that the reference FID is missing, damaged, or inconsistent | the frozen FID, source fingerprint, conversion evidence or requested settings no longer match | rebuild the reference with `force=True` / `reference --force`; combination runs do not reconvert or merge automatically |
 | `ReferenceError: a non-primary condition needs the primary condition picked first` | peaks were picked for B while the primary condition A had none | call `ensure_reference_peaks` on A first |
 | `MeasurementError` or `SweepError` mentions a removed localisation method | a caller requested Gaussian or another removed peak-fitting method | use the supported three-point parabolic method; the API does not silently substitute a method |
 | `SweepError: ... exceeds the max_runs limit` | too many combinations | shrink the grid, raise `max_runs` explicitly, or run in batches |

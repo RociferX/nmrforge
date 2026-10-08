@@ -1,6 +1,6 @@
 # Python API
 
-当前公开脚本契约为 `API_VERSION = "1.1"`；本轮源码软件版本为 1.0.3。
+当前公开脚本契约为 `API_VERSION = "1.1"`；当前源码软件版本为 1.0.4。
 已发布的 AppImage 仍为 1.0.2，不随源码更新；请用包含 API v1.1 的源码安装。
 
 项目里有两套 Python 接口,稳定性承诺不同。
@@ -41,7 +41,30 @@ with peak_table.open(encoding="utf-8") as fh:
 print(rows[:3])
 ```
 
+如果一个条件由多个 Bruker 原始目录组成，可显式传完整有序段列表：
+
+```python
+run_reference_study(
+    root,
+    dataset=["~/data/segment1", "~/data/segment2"],
+    segmented=True,
+)
+```
+
+多条件时使用 `datasets={"A": ["~/data/a1", "~/data/a2"],
+"B": ["~/data/b1", "~/data/b2"]}`；顶层
+开启时 `datasets=[s1, s2]` 是一个条件。默认仍为单目录输入。分段导入必须至少两个目录，
+严格检查参数、采集布局、频率与载频兼容；段源顺序参与复用比较。详见[完整 API 参考](external-api/03-api-reference.md)
+和[输入与数据](external-api/05-inputs-and-data.md)。
+
 API 的范围是这两步处理和产物交接：生成参考谱/参考峰表，再按参数生成新谱/新峰表。
+参考阶段负责原始数据导入、转换和多段合并；组合模式只处理参考工作目录里已有的 FID，
+再进行独立选峰。组合复用支持单文件 FID、3D uniform 切片目录和多段合并 FID。
+若 FID 缺失/损坏、输入或转换证据与参考不一致，或请求参数需要重新转换/合并，组合会报错，
+要求以 `force=True`（CLI `reference --force`）重建参考。组合不会自动重转、清理源数据，
+也不会修改参考 FID 或采样表。GUI 默认转换逻辑不受此 API 契约影响。Linux 工程回归已通过，
+不代表真实 NMRPipe/SMILE 引擎已完成验证。运行前请保留参考工作目录和原始输入；旧参考
+缺冻结 FID 留档时，需要显式 `force=True` 重建一次。
 API 不建立不同谱或峰表之间的峰对应关系；组合峰表中的 `peak_id` 是该谱自己的序号，
 `reference_peak_id` 留空，跨谱匹配应在下游分析中完成。每个组合会留下自己的脚本、
 候选谱(不替换当前生效的谱)、峰位与告警，以及 `manifest.json`、`runs.json` 和

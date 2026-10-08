@@ -72,6 +72,25 @@ The peak table of the combination mode is the peak table of the spectrum of the 
 `reference_peak_id`/`assignment` stay blank -- matching peaks back to reference peak identities, and
 the statistics, are done by the downstream analysis program that reads these tables.
 
+## 2.1 Explicit multi-segment input
+
+Segmented input is opt-in. `segmented=False` (the default) keeps the existing single-directory input.
+With `segmented=True`, provide at least two complete Bruker directories in acquisition order; the
+list is one condition, not a list of conditions:
+
+```python
+run_reference_study(
+    "~/studies/segmented",
+    dataset=["~/data/segment1", "~/data/segment2"],
+    segmented=True,
+)
+```
+
+For multiple conditions, use a mapping whose values are ordered segment lists, for example
+`datasets={"A": ["~/data/a1", "~/data/a2"], "B": ["~/data/b1", "~/data/b2"]}`.
+Top-level `datasets=[s1, s2]` means one condition. Segments may be in different parent directories;
+duplicates are rejected and the source order is saved. See [input boundaries](05-inputs-and-data.md).
+
 ## 3. Step-by-step usage (when fine control is required)
 
 ```python
@@ -97,6 +116,8 @@ print(records)
 ```bash
 python -m nmrforge_api init      --study ~/studies/s1 --dataset ~/data/a --condition A
 python -m nmrforge_api init      --study ~/studies/s1 --dataset ~/data/b --condition B
+python -m nmrforge_api init      --study ~/studies/segmented --segmented \
+    --dataset ~/data/segment1 --dataset ~/data/segment2 --condition A
 python -m nmrforge_api reference --study ~/studies/s1
 python -m nmrforge_api peaks     --study ~/studies/s1
 python -m nmrforge_api sweep     --study ~/studies/s1 --reference ~/studies/s1 \

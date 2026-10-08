@@ -29,11 +29,15 @@
 - Phase is locked at the reference value by default (direct dimension skips phase search, indirect dimension follows reference optimisation phase);
   Manual deviation is represented by `phase_delta.<axis>.p0|p1` (relative reference) or `phase.<axis>.p0|p1` (absolute value).
   The actual value is written into `phase.<axis>.actual_p0/actual_p1`;
-- Within the same condition, fid is only converted once (reference run), candidate spectrum is written
-  `study/workflows/<id>/<condition>/`, do not replace the activity spectrum;
+- Reference mode imports, converts and merges the source segments. Combination mode processes only
+  the existing reference FID; it does not reconvert automatically. A missing/damaged FID, mismatched
+  source or conversion evidence, or parameters requiring conversion/merge raises an error and requires
+  rebuilding the reference. Single-file FIDs, 3D uniform slice directories and merged multi-segment
+  FIDs are supported. Candidate spectra are written to `study/workflows/<id>/<condition>/` and do not
+  replace the active spectrum; see [FID reuse boundary](09-limitations-and-roadmap.md#99-fid-reuse-boundary);
 - Phase/window function/zero filling/baseline/NUS parameters are all executed according to the table, and all parameters that affect the results are dropped in three layers
 
-## 7.2b sampling route (full sampling -> uniform)
+## 7.2b Sampling route: coverage and schedule order
 
 Sampling is classified from supported metadata, the valid data grid and schedule order. Only a
 standard `nuslist` or a file explicitly named by `acqus.NUSLIST` is used. A full grid in standard

@@ -22,6 +22,11 @@
 
 支持的处理路径与验证边界见[限制与路线图](09-limitations-and-roadmap.md)。
 
+当前源码1.0.4/API v1.1，旧 AppImage 仍1.0.2。API 多段导入默认关闭；开启
+`segmented=True` 后传完整有序原始目录列表，同一列表组成一个条件。参考阶段生成 FID，
+组合只读复用参考 FID；失效或旧参考缺冻结证据时要求 `force=True` 重建参考，不自动转换兜底。
+详见[输入规则](05-inputs-and-data.md)与[FID 复用边界](09-limitations-and-roadmap.md#99-fid-复用边界)。
+
 ## 阅读顺序
 
 | 文档 | 内容 |

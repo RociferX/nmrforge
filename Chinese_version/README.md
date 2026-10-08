@@ -18,15 +18,15 @@ nmrForge 读取一个 Bruker 数据集,判定它是什么实验、用了哪种�
 > 目标不是做一个套在 NMRPipe 外面的图形界面。nmrForge 先*理解*实验与采样方式,
 > 再生成可解释的处理方案,并把证据(质量指标、解析后的参数、运行记录)与谱图放在一起。
 
-源码版本:**1.0.3** · 发布通道:**稳定版（Stable）**
+源码版本:**1.0.4** · 发布通道:**稳定版（Stable）**
 作者:**李宣锋(Xuanfeng Li),中国科学技术大学** · 源码许可:Apache-2.0(见 [LICENSE](../LICENSE) 与 [NOTICE](../NOTICE))
 随包第三方库的许可与再分发说明：[LICENSE_OPTIONS.md](../LICENSE_OPTIONS.md)。
-分发方式:当前 1.0.3 为源码发布；Linux AppImage 仍为 1.0.2（一份产物，界面语言运行时切换）
+分发方式:当前 1.0.4 为源码发布；Linux AppImage 仍为 1.0.2（一份产物，界面语言运行时切换）
 发布页:<https://github.com/RociferX/nmrforge/releases>
 仓库:<https://github.com/RociferX/nmrforge>
 Zenodo 概念 DOI（全部归档版本）：[10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415)。版本专用 DOI 只对应其归档快照。
 
-> 本页说明 **1.0.3 源码**与桌面/Python/CLI 接口（`nmrforge_api`，当前源码契约版本 1.1，2026-10-03）。
+> 本页说明 **1.0.4 源码**与桌面/Python/CLI 接口（`nmrforge_api`，当前源码契约版本 1.1）。
 > 已发布的二进制以 GitHub Releases 为准。回归覆盖见测试套件，行为变化按 compat 流程声明
 > (`same/additive/behavior_changed/contract_changed` 四级)。
 
@@ -37,6 +37,10 @@ Zenodo 概念 DOI（全部归档版本）：[10.5281/zenodo.22909415](https://do
 > AppImage 对应特定版本和源码提交；更新源码不会自动更新已发布的二进制。
 >
 > 跨版本比较数值前，请查看兼容清单和发布说明，并结合自己的数据与实验验证结果。
+
+1.0.4 的 API 支持显式多段导入：默认 `segmented=False`，开启后传完整有序原始目录列表。
+参考阶段负责生成 FID；组合只读复用参考 FID，失效时直接要求 `force=True` 重建参考，
+不再自动转换兜底。旧参考缺少冻结 FID 证据也需重建一次，详见[API 文档](docs/external-api/README.md)。
 
 > ### 支持边界
 >

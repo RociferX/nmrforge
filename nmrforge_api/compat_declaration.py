@@ -23,13 +23,12 @@ from typing import Any
 
 #: declared behaviour level (see the module doc; meaning matches nmrforge_api.compat)
 DECLARATION: dict[str, Any] = {'schema': 'nmrforge_api.compat.declaration.v1',
- 'digest': 'e763d6c294f114e3ff819da9e998aefa1e2c66d39da85f53516d7b8a593c8fe2',
- 'token_digest': '1949ba9ee2948936edb687f0297d4b09d018f69391130072e81789898724d297',
- 'compat_level': 'additive',
- 'affected': [],
- 'updated': '2026-10-04',
- 'note': 'Source-only software release 1.0.3; API remains v1.1, processing algorithms '
-         'unchanged.',
+ 'digest': 'b69189907959923a8a1620d6daa8939893ed8d310691e39bb4adf6f388255677',
+ 'token_digest': 'cb473afd58747383fd997a12c5ba10a2d890be0a736dc36b01e50619800ff712',
+ 'compat_level': 'behavior_changed',
+ 'affected': ['reference', 'processing', 'api_surface', 'cli', 'records'],
+ 'updated': '2026-10-08',
+ 'note': 'Explicit segment import and strict reference FID reuse.',
  'golden': {'name': 'conformance_v1',
             'spectrum_sha256': '382b330926da93d856feef40ca33c2df1eec21b61e50db471bdf7aa4bb2fb311',
             'peak_table_sha256': 'e9ef45f2cae32bc580fc1bdeea1928ceb8406154848f8aca3c4558285e532242',

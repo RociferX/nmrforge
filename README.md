@@ -23,15 +23,15 @@ warning and output it produced so that the result can be reproduced and audited.
 > and keep the evidence (quality metrics, resolved parameters, run records) alongside the
 > spectrum.
 
-Source version: **1.0.3** · Release channel: **stable**
+Source version: **1.0.4** · Release channel: **stable**
 Author: **Xuanfeng Li**, University of Science and Technology of China · Source licence: Apache-2.0 (see [LICENSE](LICENSE) and [NOTICE](NOTICE))
 Bundled-library licensing and redistribution: [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md).
-Distribution: 1.0.3 is source-only; the Linux AppImage remains 1.0.2 (one artefact with runtime language switching)
+Distribution: 1.0.4 is source-only; the Linux AppImage remains 1.0.2 (one artefact with runtime language switching)
 Releases: <https://github.com/RociferX/nmrforge/releases>
 Repository: <https://github.com/RociferX/nmrforge>
 Zenodo concept DOI (all archived versions): [10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415). A version-specific DOI applies only to its archived snapshot.
 
-> This page describes the **1.0.3 source** and its desktop/Python/CLI interfaces
+> This page describes the **1.0.4 source** and its desktop/Python/CLI interfaces
 > (`nmrforge_api`, current contract version 1.1 as of 2026-10-03). Published binaries are listed in GitHub Releases.
 > Regression coverage is in the test suite; behaviour changes are declared through the compat process
 > (`nmrforge_api/compat_declaration.py`: behaviour digests plus the
@@ -48,6 +48,12 @@ Zenodo concept DOI (all archived versions): [10.5281/zenodo.22909415](https://do
 >
 > Check the manifest and release notes when comparing numerical results across software versions,
 > and validate results against the data and experiment at hand.
+
+The 1.0.4 API supports explicit multi-segment import: `segmented=False` by default; when enabled,
+provide the complete ordered list of original data directories. References generate the FID;
+combinations reuse it read-only. Invalid inputs require an explicit `force=True` reference rebuild,
+with no automatic conversion fallback. Older references without frozen FID evidence also require
+a rebuild. See the [API guide](docs/external-api/README.md).
 
 > ### Support boundary
 >

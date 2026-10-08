@@ -35,6 +35,26 @@
 
 ## 6.2 Unified peak table fields (**38 columns**)
 
+Multi-segment source provenance is recorded separately from the peak table. In `study.json` and the
+`datasets` entries in reference/combination records, a segmented condition adds `segmented: true`
+and `segments: [source_dir_1, source_dir_2, ...]` in input order; single-directory entries omit
+these optional fields. Each condition's `run.json.dataset` also retains the source segment list.
+`DataEntry.segments` and `metadata.json.segments` hold the segment directories actually used during
+processing, while the original list is preserved as `metadata.json.source_segments`. Import-run input
+records include each segment's source path and SHA-256. The full ordered list is bound to the
+condition and included in combination resume fingerprints; comparing only the first segment is not
+sufficient. This adds no peak-table columns and creates no cross-spectrum or cross-condition peak links.
+
+`conversion_provenance.reference_fid` freezes fast fingerprints for the reference FID files and the
+working `nuslist`. Combination `parameters_resolved.input` records
+`policy="reference_fid_only"` and `reference_run_id`. These inputs are checked before the combination
+starts and rechecked before each processing run. If they no longer match the frozen evidence, the
+reference must be rebuilt; combination mode does not reconvert in place. Fingerprints use content
+SHA-256 for files up to 8 MiB and `size + mtime_ns` for larger files; they are not content-level
+authentication. Legacy references without this evidence require an explicit `force=True` rebuild;
+calling reference mode again with its default cache policy is not enough. Resume fingerprints include
+the frozen FID evidence and strict input policy, so older permissive runs are not silently reused.
+
 The v1.1 unified table has currently **38 columns**, in the order below. Older 29-, 27-, and
 36-column tables are historical formats, not a current compatibility promise; rebuild old reference
 peak tables from the frozen reference spectrum before reuse.

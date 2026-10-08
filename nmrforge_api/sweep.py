@@ -47,7 +47,7 @@ from core.planning.method_selector import select_method
 from core.project.manager import atomic_write_text, sha256_file
 from core.version import software_commit, software_version, tool_versions
 from nmrforge_api.compat import record_stamp
-from nmrforge_api.errors import SweepError
+from nmrforge_api.errors import ReferenceError, SweepError
 from nmrforge_api.localization_targets import (
     ConditionalTargets,
     LocalizationTargets,
@@ -1491,7 +1491,9 @@ def _resume_fingerprint(
             "dataset_key": reference.dataset_key,
             "script_sha256": reference.script_sha256,
             "spectrum_sha256": reference.spectrum_sha256,
+            "fid_input": _reference_fid_context(reference),
         },
+        "input_policy": "reference_fid_only",
         "detection": {
             "sigma_multiplier": sigma_locked,
             "sigma_origin": sigma_origin,
@@ -1722,6 +1724,21 @@ def write_workflow_record(
     return record
 
 
+def _reference_fid_context(reference: ReferenceSpectrum) -> dict[str, Any]:
+    return {
+        "provenance": copy.deepcopy(reference.conversion_provenance),
+        "segment_shift_hz": reference.params.get("segment_shift_hz", []),
+    }
+
+
+def _reference_work_dir(
+    session: StudySession, target: DatasetRef, reference: ReferenceSpectrum
+) -> Path:
+    return Path(reference.work_dir) if reference.work_dir else (
+        session.root / target.exp_id / target.data_id / f"{target.data_id}.nmrpipe"
+    )
+
+
 def run_sweep(
     session: StudySession,
     plan: SweepPlan,
@@ -1761,7 +1778,9 @@ def run_sweep(
     - ``sign`` is legacy: combination mode always uses the dominant sign.
     - each workflow's **full processing script** is copied to ``<run_dir>/process.com``
         (with SHA-256); it shares the condition working directory, so the reference's
-        converted fid is reused. A missing script raises the
+        converted fid is reused (conversion, source cleanup and sampling-list rewriting are
+        forbidden). Invalid input requires rebuilding the reference with force=True; single-file,
+        sliced and merged multi-segment outputs are supported. A missing script raises the
         ``processing_script_not_found`` warning rather than passing silently.
 
     Parameters
@@ -1854,10 +1873,33 @@ def run_sweep(
                 )
             )
 
-    experiments = {
-        target.key: read_experiment(session.manager, target.exp_id, target.data_id)
-        for target in targets
-    }
+    experiments = {}
+    for target in targets:
+        try:
+            experiments[target.key] = read_experiment(
+                session.manager, target.exp_id, target.data_id
+            )
+        except Exception as exc:  # noqa: BLE001 - an unreadable input cannot validate the frozen reference
+            from backend.reference_fid import reference_fid_error
+
+            raise ReferenceError(str(reference_fid_error(str(exc)))) from exc
+    validator = getattr(backend, "validate_reference_fid", None)
+    if callable(validator):
+        for target in targets:
+            ref = references[target.key]
+            from core.data.sweep_width import apply_sweep_width_overrides
+
+            condition_base = _condition_base_params(plan, ref)
+            converted_experiment = apply_sweep_width_overrides(
+                experiments[target.key], condition_base
+            )
+            try:
+                validator(
+                    converted_experiment, _reference_work_dir(session, target, ref),
+                    _reference_fid_context(ref), condition_base,
+                )
+            except (ValueError, OSError) as exc:
+                raise ReferenceError(str(exc)) from exc
     results: list[SweepRun] = []
 
     def _emit(message: str) -> None:
@@ -1877,12 +1919,7 @@ def run_sweep(
             # share the condition working directory with the reference: its converted fid is reused,
             # candidate scripts sit beside the reference script, candidates go to _intermediate/.
             # an older reference without one falls back to the data directory.
-            if ref.work_dir:
-                work_dir = Path(ref.work_dir)
-            else:
-                work_dir = (
-                    session.root / target.exp_id / target.data_id / f"{target.data_id}.nmrpipe"
-                )
+            work_dir = _reference_work_dir(session, target, ref)
             work_dir.mkdir(parents=True, exist_ok=True)
             if hasattr(session.backend, "work_dir"):
                 session.backend.work_dir = str(work_dir)
@@ -2052,9 +2089,13 @@ def _run_condition(
             "nuclei": list(target.nuclei),
             "sampling": target.sampling,
             "source": target.source,
+            **({"segmented": True, "segments": list(target.segments)}
+               if target.segmented else {}),
         },
         parameters_requested={str(k): v for k, v in combo.items()},
         parameters_used=params,
+        parameters_resolved={"input": {"policy": "reference_fid_only",
+                                       "reference_run_id": reference.run_id}},
         phase=_phase_entries(effective_phase, phase_part, reference),
         run_dir=str(run_dir),
         phase_locked=override is not None,
@@ -2072,11 +2113,12 @@ def _run_condition(
     run.timing_started = started
     _log(tr("start {p0}: {p1}", p0=workflow_id, p1=dict(combo)))
     try:
+        backend_params = dict(params, _reference_fid_only=_reference_fid_context(reference))
         if is_nus:
             ok, reason = _supports_nus_candidates(session.backend)
             if not ok:
                 raise SweepError(reason)
-            nus_params = normalize_nus_params(params)
+            nus_params = normalize_nus_params(backend_params)
             if override:
                 pair = effective_phase.get(f"F{experiment.ndim}")
                 if pair is not None:
@@ -2098,7 +2140,7 @@ def _run_condition(
             response = session.backend.process(
                 experiment,
                 method_plan,
-                params=params,
+                params=backend_params,
                 direct_phase_override=override,
                 script_name=f"{workflow_id}_{target.token}.com",
                 out_file=f"{workflow_id}_{target.token}.ft2",
@@ -2467,6 +2509,7 @@ def _run_condition(
         else {}
     )
     run.parameters_resolved = {
+        "input": run.parameters_resolved["input"],
         "phase": run.phase,
 
         "detection": {

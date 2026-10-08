@@ -9,11 +9,22 @@
 ```bash
 python -m nmrforge_api init --study ~/studies/s1 --dataset ~/data/apo --condition A
 python -m nmrforge_api init --study ~/studies/s1 --dataset ~/data/holo --condition B
+python -m nmrforge_api init --study ~/studies/segments --segmented \
+    --dataset ~/data/segment1 --dataset ~/data/segment2 --condition A
 python -m nmrforge_api init --study ~/studies/s1            # 只看已登记条件
 ```
 
 输出:研究根 + 条件 + 数据集摘要(ndim/核/采样/来源/raw_dir/文件数)。
-同一条件标签不能绑定两份数据(报错,不覆盖)。
+同一条件标签不能重复登记(报错,不覆盖)。默认关闭 `--segmented`，此时至多传一个
+`--dataset`；开启时必须重复给出至少两个 `--dataset`，它们按命令行顺序组成同一条件
+的一份完整源段列表。路径不能重复，不会自动搜索或补齐段。reference/sweep 对已登记的
+分段数据无需再次传 `--segmented`。
+
+每个段必须是完整 Bruker 原始数据目录。逐段动力学实验、缺少 `nuslist` 的 NUS 数据会拒绝；
+段的维数、核、有效 TD、谱宽、采样模式、采集轴布局、SFO 频率及载频必须一致。段可位于不同父目录。复用
+现有条件时，所有源段及其顺序都必须一致；要换段或改顺序请使用新条件或新研究根，
+`reference --force` 只重建参数参考，不更改源段绑定。版本号为 API v1.1 / 软件 1.0.4；
+此处描述的多段工程行为尚无真实 NMRPipe/SMILE 引擎验证。
 
 ## reference — 参考工作流(每个条件一份)
 

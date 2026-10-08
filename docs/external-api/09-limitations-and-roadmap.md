@@ -8,9 +8,9 @@
 | NUS **2D** data | yes, combinations run | goes through `reconstruct_nus()` (SMILE); candidates are isolated; SMILE parameters can be swept |
 | NUS 3D data | reference spectrum only | running combinations raises `SweepError` (see 9.2) |
 | reference workflow (script + parabolic peak table) | yes | the reference is a baseline, not a claimed optimum |
-| batch execution by `workflow_id` | yes | `W0001...`; two conditions A/B share parameters and peak identity |
+| batch execution by `workflow_id` | yes | `W0001...`; each condition uses its own reference defaults and independently detects peaks |
 | peak localisation | yes | three-point parabolic method only |
-| multiple conditions (A/B) | yes | one reference per condition; peak identity and user parameters shared |
+| multiple conditions (A/B) | yes | independent reference and peak table per condition; common parameters may be overridden per condition; no cross-condition peak matching |
 | full sampling labelled as NUS | schedule-dependent | a valid full grid in standard order may use uniform processing; full coverage in a different order still requires schedule-based placement |
 | peak overlap / deconvolution | no | localisation uses a detected extremum and three-point parabola only |
 | Lorentzian / Voigt / multi-peak fitting | no | on the roadmap |
@@ -155,3 +155,24 @@ three things above separately when you cite a product.
 - "The conversion record matched" is not "the input was not touched": above 8 MiB the recorded
   fingerprint degrades to `size + mtime_ns` (see `core/data/raw_fingerprint.py`), so it proves
   that the raw input is the one the converter saw - it is not content attestation.
+
+## 9.9 FID reuse boundary
+
+Reference mode imports sources when needed, converts each segment and merges them, then freezes the
+FID, conversion evidence and sampling schedule for combination runs. Combination mode processes only
+these existing reference artefacts and performs independent peak selection. It supports a single-file
+FID, a 3D uniform slice directory and a merged multi-segment FID. It must not automatically reconvert
+or re-merge, delete raw sources, modify the reference FID or rewrite the sampling schedule.
+
+If the reference FID is missing or damaged, the source or conversion evidence differs from the
+reference, or the requested parameters would require conversion or merging, combination mode raises
+an error and asks the user to rebuild the reference with `force=True` (CLI: `reference --force`).
+`force` rebuilds at the reference stage; it does not cause combination mode to convert on demand.
+Conversion-time settings such as an explicit segment shift must be set when rebuilding the reference.
+The GUI's default conversion behavior is unchanged by this API boundary.
+
+Strict reuse for single-file FIDs, 3D uniform slices and merged segments passed Linux engineering
+regression. Older references without a frozen-FID record require one explicit rebuild with
+`force=True`. Fingerprints use content SHA-256 up to 8 MiB and `size + mtime_ns` for larger files;
+they are not content-level authentication. This does not establish real NMRPipe/SMILE engine
+validation; engineering regression is not a substitute for real-engine acceptance.

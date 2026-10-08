@@ -1,13 +1,13 @@
 # 03 · API reference (v1.1)
 
-See `nmrforge_api/__init__.py`(`API_VERSION = "1.1"`) for top-level exports; v1.1 is the current source contract as of 2026-10-03, with the version defined once in `nmrforge_api.session`. The existing AppImage 1.0.2 is a separate older build and does not include this API contract.
+See `nmrforge_api/__init__.py`(`API_VERSION = "1.1"`) for top-level exports; v1.1 is the current source contract, with the version defined once in `nmrforge_api.session`. This source release is software 1.0.4. The existing AppImage 1.0.2 is a separate older build and does not include this API contract.
 
 ## 3.1 Sessions and Datasets
 
 ```python
 open_study(root, *, name="", backend=None, config=None, create=True) -> StudySession
 add_dataset(session, source, *, condition="", exp_id="", title="",
-            make_default=True) -> DatasetRef
+            make_default=True, segmented=False) -> DatasetRef
 dataset_info(session, dataset=None) -> dict
 ```
 
@@ -15,6 +15,12 @@ dataset_info(session, dataset=None) -> dict
   (`study/study.json`)Restore condition dataset list;
 - `condition` automatically assigns the next unused letter (A/B/C...) by default; the label must be unique;
 - Import links raw data, writes metadata, and registers an import run; it does not convert or process raw data.
+- `segmented=False` (strict `bool`, the default) expects one complete Bruker raw directory. With
+  `segmented=True`, `source` must be an ordered list of at least two complete raw directories to
+  register as one condition. Paths must be unique; segments need not share a parent directory, and
+  the supplied order is saved. The API does not auto-discover segments. Kinetic layouts and NUS
+  data without a usable `nuslist` are rejected. Acquisition parameters, dimensions, nuclei, effective
+  TD, spectral width, sampling mode, axis layout, SFO frequency and carrier must agree across segments.
 
 `StudySession` Key attributes: `root`, `datasets`, `dataset` (main condition), `conditions`.
 `dataset_by_condition(label)`, `study_dir`, `work_dir`, `reference_dir`,
@@ -70,7 +76,8 @@ build_reference_peak_tables(session, reference, *, window_pts=None,
 `ReferenceSpectrum` Key fields: `dataset_key`, `condition`, `ndim`, `sampling`.
 `frozen_spectrum`, `script_path`, `script_sha256`, `spectrum_sha256`, `params`,
 `sweep_params`, `direct_phase`, `peak_table_path`(identity table), `peak_count`.
-`peak_source`(`auto|external|shared:<condition>`), `peak_params`, `peak_tables`.
+`peak_source` (`auto|external`), `peak_params`, `peak_tables`. Legacy `shared:<condition>`
+references are rejected and must be rebuilt; identities are never propagated between conditions.
 (parabolic table path/hash/row count/detected count), `peak_localization`(position QC).
 `tool_versions`;Method:`direct_phase_override()`, `phase_record()`.
 `peak_table_parabolic_path`.
@@ -208,7 +215,7 @@ The interface splits "generate reference" and "run processing based on parameter
 ### Reference mode
 
 ```python
-run_reference_study(root, dataset=None, *, datasets=None, name="", params=None,
+run_reference_study(root, dataset=None, *, datasets=None, segmented=False, name="", params=None,
                     params_by_condition=None,
                     phase_route=None, peaks=None, direct_range=None,
                     carrier_ppm=None,
@@ -216,7 +223,7 @@ run_reference_study(root, dataset=None, *, datasets=None, name="", params=None,
                     max_peaks=0,
                     force=False, backend=None, write=True, progress=None) -> ReferenceResult
 
-run_parameter_study(root, dataset=None, *, datasets=None, combos=None, axes=None,
+run_parameter_study(root, dataset=None, *, datasets=None, segmented=False, combos=None, axes=None,
                     name="", params=None, params_by_condition=None,
                     phase_route=None, peaks=None, carrier_ppm=None,
                     direct_range=None, sigma_multiplier=None, max_peaks=0,
@@ -224,8 +231,18 @@ run_parameter_study(root, dataset=None, *, datasets=None, combos=None, axes=None
                     backend=None, write=True, progress=None) -> StudyResult
 ```
 
+`segmented` must be a strict `bool` and defaults to `False`, preserving single-directory input.
+When enabled, a single condition accepts `dataset=[s1, s2]` or `datasets=[s1, s2]`; a top-level
+`datasets` list always represents one condition. For multiple conditions, use a mapping such as
+`datasets={"A": [a1, a2], "B": [b1, b2]}`. Do not pass both `dataset` and `datasets` for one condition.
+
 - Import condition data (optional) -> an independent reference spectrum, script, and parabolic
   peak table for each condition; no parameter combinations are run.
+- The reference stage imports, converts and merges the selected source segments. The ordered source
+  list is part of input identity; changing a source or its order requires a new condition/research
+  root. `force=True` rebuilds reference processing but does not change the bound source list. Reopening
+  an existing segmented study for reference or combination runs needs no segmented flag when no new
+  dataset is being imported.
 - The peak selection threshold, reference peak table (external peak table), and localization are all determined at this stage, and then locked;
 - Reference phase window/baseline **Automatic optimisation **On by default; `params["reference_optimize"]` can be turned off or
   Limited candidate (Test only/Recurrence/audit; real experiments are not available, and must be stated in the record after use);

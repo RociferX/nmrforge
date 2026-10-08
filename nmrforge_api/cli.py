@@ -35,7 +35,7 @@ from typing import Any
 from core.user_errors import describe_exception
 from nmrforge_api.compat import compat_manifest, write_compat_manifest
 from nmrforge_api.direct_range import parse_direct_range
-from nmrforge_api.errors import SensitivityError
+from nmrforge_api.errors import DatasetError, SensitivityError
 from nmrforge_api.records import (
     refresh_reference_records,
     write_records,
@@ -170,13 +170,23 @@ def _parse_carrier_ppm(values: list[str] | None) -> dict[str, float]:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
+    datasets = args.dataset or []
+    segmented = bool(getattr(args, "segmented", False))
+    if segmented and len(datasets) < 2:
+        raise DatasetError(tr("segmented import requires at least two dataset directories"))
+    if not segmented and len(datasets) > 1:
+        raise DatasetError(
+            tr("multiple dataset directories require --segmented")
+        )
+
     session = open_study(args.study, name=args.name)
-    if args.dataset:
+    if datasets:
         dataset = add_dataset(
             session,
-            args.dataset,
+            datasets if segmented else datasets[0],
             condition=args.condition,
             title=args.name or args.title,
+            **({"segmented": True} if segmented else {}),
         )
         _print(
             {
@@ -566,9 +576,17 @@ def build_parser() -> argparse.ArgumentParser:
     _common(init)
     init.add_argument(
         "--dataset",
+        action="append",
+        default=[],
         help=tr(
-            "Bruker directory downloaded and unpacked from the public archive",
+            "Bruker directory downloaded and unpacked from the public "
+            "archive (repeatable)",
         ),
+    )
+    init.add_argument(
+        "--segmented",
+        action="store_true",
+        help=tr("import the ordered dataset directories as one segmented acquisition"),
     )
     init.add_argument("--title", default="", help=tr("experiment title"))
     init.set_defaults(func=cmd_init)
