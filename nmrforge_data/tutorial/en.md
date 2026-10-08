@@ -5,7 +5,7 @@ typical session from importing data all the way to a peak table. Menu and button
 text the program shows (the interface language can be changed under `Settings → Software settings`,
 and this document follows it).
 
-This guide follows the current source tree. Version 1.0.3 is source-only; the existing 1.0.2
+This guide follows the current source tree. Version 1.0.4 is source-only; the existing 1.0.2
 AppImage is unchanged and does not include the later API v1.1 updates.
 
 ## 1. What the program does

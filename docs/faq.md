@@ -13,7 +13,7 @@ editable repository checkout.
 ### Can I run it on Windows or macOS?
 
 Linux is the target runtime; Windows is an editing environment. macOS has not been validated.
-Install the current 1.0.3 from source. The existing Linux AppImage remains 1.0.2 (with runtime
+Install the current 1.0.4 from source. The existing Linux AppImage remains 1.0.2 (with runtime
 language switching) and does not include the later API updates.
 
 ### Does nmrForge send my data anywhere?

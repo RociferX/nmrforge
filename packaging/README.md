@@ -2,7 +2,7 @@
 
 Distribution packaging assets.
 
-> v1.0.3 is source-only; the existing v1.0.2 Linux AppImage is unchanged (one artefact with runtime
+> v1.0.4 is source-only; the existing v1.0.2 Linux AppImage is unchanged (one artefact with runtime
 > language switching). This directory holds the build assets; the release gate and its record are
 > in the release checklist kept in the maintainer's private repository.
 
