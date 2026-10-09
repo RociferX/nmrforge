@@ -438,7 +438,11 @@ def test_packaging_policy_declares_source_and_appimage_release() -> None:
     )
     assert "AppImage" in text
     assert "wheel" in text
-    assert "APPIMAGE_RELEASE_CHECKLIST.md" in text
+    if Path("docs/manager").is_dir():
+        assert "APPIMAGE_RELEASE_CHECKLIST.md" in text
+    else:
+        assert "THIRD_PARTY_LICENSES/PROVENANCE.txt" in text
+        assert "THIRD_PARTY_LICENSES/NOTICE.md" in text
     if f"{released} 仅源码发布" in text or f"source-only {released} release" in text:
         assert "1.0.2" in text and "77b535f" in text
         assert "不重建 AppImage" in text or "No AppImage is rebuilt" in text

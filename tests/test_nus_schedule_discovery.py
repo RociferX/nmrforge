@@ -14,8 +14,75 @@ from core.data.nus_reader import (
     parse_auto_sampling,
     probe_auto_sampling,
     scan_whole_trace_zeros,
+    schedule_grid_shape,
 )
 from core.experiment.sampling_detector import detect
+
+
+@pytest.mark.parametrize("fnmode,mult", [(1, 1), (2, 1), (3, 1), (4, 2), (5, 2), (6, 2)])
+def test_compact_2d_nus_grid_uses_declared_nustd(
+    bruker_dir: Path, fnmode: int, mult: int,
+) -> None:
+    from backend.bruker_workflow import _effective_td
+    from backend.nmrpipe_backend import _validate_nus_points
+    from backend.script_generator import effective_td
+    from core.data.bruker_reader import read_dataset
+
+    exp = read_dataset(bruker_dir / "nus_2d")
+    exp.dimensions[1].td = 31 * mult
+    exp.acquisition_parameters["acqu2s"].update(TD=31 * mult, NusTD=62 * mult, FnMODE=fnmode)
+    assert schedule_grid_shape(exp) == (62,)
+    assert effective_td(exp)[1] == 62
+    assert _effective_td(exp)[1] == 62 * mult
+    valid, bad, _reasons = _validate_nus_points([(0,), (33,), (60,), (61,), (62,)], exp)
+    assert valid == [(0,), (33,), (60,), (61,)]
+    assert bad == [(62,)]
+
+
+def test_traditional_2d_ignores_stale_nustd(bruker_dir: Path) -> None:
+    from core.data.bruker_reader import read_dataset
+
+    exp = read_dataset(bruker_dir / "hsqc_2d")
+    exp.acquisition_parameters["acqus"]["FnTYPE"] = 0
+    exp.acquisition_parameters["acqu2s"].update(NusTD=8192, FnMODE=6)
+    assert schedule_grid_shape(exp) == (exp.dimensions[1].td // 2,)
+
+
+def test_full_2d_schedule_keeps_grid_after_uniform_downgrade(bruker_dir: Path) -> None:
+    from core.data.bruker_reader import read_dataset
+    from core.data.internal_data_model import SamplingMode
+
+    exp = read_dataset(bruker_dir / "nus_2d")
+    exp.dimensions[1].td = 62
+    exp.acquisition_parameters["acqus"]["FnTYPE"] = 2
+    exp.acquisition_parameters["acqu2s"].update(TD=62, NusTD=124, FnMODE=6)
+    exp.sampling.mode = SamplingMode.UNIFORM
+    exp.sampling.nus_list = [(i,) for i in range(62)]
+    assert schedule_grid_shape(exp) == (62,)
+
+
+@pytest.mark.parametrize("fntype", [None, 0, 2])
+def test_schedule_identification_does_not_mistake_compact_grid_for_full_sampling(
+    bruker_dir: Path, fntype: int | None,
+) -> None:
+    from core.data.bruker_reader import read_dataset
+    from core.data.internal_data_model import Sampling
+
+    exp = read_dataset(bruker_dir / "nus_2d")
+    exp.dimensions[1].td = 62
+    exp.acquisition_parameters["acqu2s"].update(TD=62, NusTD=124, FnMODE=6)
+    acqus = exp.acquisition_parameters["acqus"]
+    acqus.pop("FnTYPE", None)
+    if fntype is not None:
+        acqus["FnTYPE"] = fntype
+    acqus["NusAMOUNT"] = 50
+    exp.sampling = Sampling()
+    (exp.source_path / "nuslist").write_text(
+        "".join(f"{i}\n" for i in range(31)), encoding="utf-8",
+    )
+    result = detect(exp, allow_auto_probe=False)
+    assert result.mode.value == "nus"
+    assert result.sampling_fraction == pytest.approx(0.5)
 
 
 def _write_acqus(

@@ -1,0 +1,39 @@
+{
+  "kind": "author_candidate_threshold_inspection_not_new_benchmark",
+  "author_2rr_sha256": "3d4e1041c085b05e14cdf1bfb889670daa5d5caacaeeda5c1f58ce35dccb15d5",
+  "threshold": {
+    "requested_sigma_floor": 0.0,
+    "resolved_sigma_multiplier": 17.68353318145241,
+    "requested_sign_mode": "dominant",
+    "sign_mode": "dominant",
+    "positive_candidates": 126,
+    "negative_candidates": 0,
+    "detected_before_height_filter": 126,
+    "noise_estimate": 1474.6194421875,
+    "baseline": 369.9140625,
+    "max_abs_centered_voxel": 260764.818359375,
+    "height_cutoff": 26076.481835937502,
+    "count": 126,
+    "shape": [
+      255,
+      513
+    ]
+  },
+  "positive_candidates": 126,
+  "negative_candidates": 0,
+  "matched_without_offset": 3,
+  "height_fraction": 0.1,
+  "automatic_height_fraction": 0.1,
+  "automatic_candidates_at_same_threshold": 127,
+  "unmatched_not_automatically_noise": 123,
+  "contours_baseline_centered": true,
+  "contour_fractions": [
+    0.05,
+    0.1,
+    0.2,
+    0.35,
+    0.5,
+    0.7,
+    0.9
+  ]
+}

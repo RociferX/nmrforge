@@ -1,0 +1,316 @@
+{
+  "date": "2026-10-09",
+  "software_version": "1.0.4",
+  "api_version": "1.1",
+  "kind": "controlled_downsampling_of_uniform_raw_data",
+  "bmrb_id": 27493,
+  "source_url": "https://bmrb.io/data_library/summary/?bmrbId=27493",
+  "source_experiment": "Apo_CBL_0.4mM/2",
+  "construction": {
+    "actual_fraction": 0.7555555555555555,
+    "complex_grid": [
+      90
+    ],
+    "kind": "controlled_downsampling_of_uniform_raw_data",
+    "ndim": 2,
+    "nuslist_sha256": "38c50d3c83cf89082f91b81908488f58bb92696cba842ca7084b3da2448ab46e",
+    "raw_row_bytes": 8192,
+    "requested_fraction": 0.75,
+    "retained_rows": 136,
+    "row_order": "AQSEQ=0; y-fast; z-phase outer, y-phase inner",
+    "sample_count": 68,
+    "seed": 20261008,
+    "ser_sha256": "3024d049c1b4d472c0b4ee8f7c2bb1ec6812b9b573460e0b98c9ab36b381e6de",
+    "source": {
+      "files": {
+        "acqu2s": "61740de8bfc09baa1ad9c21e5467cdbd635dd3237470e18a189a97d98dca78ab",
+        "acqus": "c422d7ab064a4c7a2aaa841390f8ebdd90909b21c3fcb81b26a5db4566928dfc",
+        "pulseprogram": "9280d045d0a4d127e4d5866f230b63fd3e5102cf3d938720f0b57041b9ec0560",
+        "ser": "81564f263cb8d13f176adb2cc044cbdc79f672fb7147b45c5bd37b344ae2775e"
+      },
+      "sha256": "3b08975171cf6009ee1ee74cf9daf0b6b7e9b6060119a9f2dca7157b2a4ab487"
+    }
+  },
+  "processing": {
+    "tag": "controlled-2d-nus75",
+    "software_version": "1.0.4",
+    "api_version": "1.1",
+    "behavior_digest": "84bf0abc17c2ac573efcef8ab84c1a4a0f18a29ab17a2f16bd99c22f28fe38dd",
+    "source_sha256": {
+      "ser": "3024d049c1b4d472c0b4ee8f7c2bb1ec6812b9b573460e0b98c9ab36b381e6de",
+      "nuslist": "38c50d3c83cf89082f91b81908488f58bb92696cba842ca7084b3da2448ab46e"
+    },
+    "sampling": "nus",
+    "complex_grid": [
+      90
+    ],
+    "manual_phase_override": false,
+    "requested_processing": {
+      "ext_lo": "10.5",
+      "ext_hi": "6.5",
+      "final_ext_lo": "10.5",
+      "final_ext_hi": "6.5",
+      "apply_ext_to_opt": true
+    },
+    "success": true,
+    "shape": [
+      256,
+      1028
+    ],
+    "spectrum_sha256": "693baf6ec768412f07ea2e5fc380f1c3f06900453ca6818b3a9b849b82bac36d",
+    "ppm_limits": [
+      [
+        136.077682809758,
+        100.21694710327205
+      ],
+      [
+        10.501202506196154,
+        6.49513161791633
+      ]
+    ],
+    "phase_header": {
+      "FDF1P0": 85.0,
+      "FDF1P1": 0.0,
+      "FDF2P0": 173.5590057373047,
+      "FDF2P1": 0.0,
+      "FDF3P0": 0.0,
+      "FDF3P1": 0.0
+    },
+    "imported_raw_sha256": {
+      "ser": "3024d049c1b4d472c0b4ee8f7c2bb1ec6812b9b573460e0b98c9ab36b381e6de",
+      "nuslist": "38c50d3c83cf89082f91b81908488f58bb92696cba842ca7084b3da2448ab46e"
+    },
+    "imported_raw_unchanged": true,
+    "script_sha256": {
+      "d_001_before_optimize.com": "124adcffaa38e75547c191c7a6cd283c5e9050ea5ed4d799da9c607814e18870",
+      "d_001_nus.com": "8bcc93a9b00a7424f419c289bc1527a10cae5ef90d08ab40591da7afa21b52b5",
+      "d_001_phase_seed.com": "0618d9b2bee79c98b42ae7708c50d81a01535b923bcbb51bdcae4cc889a5ca3a",
+      "fid.com": "176c0dfb22b93e74e33ab554af8209bfa5008f9223920f7fce3f4e7544955452"
+    },
+    "smile_commands": [
+      "nmrPipe -in d_001.fid  | nmrPipe -fn POLY -time  | nmrPipe -fn SP -off 0.45 -end 0.98 -pow 1 -c 0.5  | nmrPipe -fn ZF -zf -size 4096  | nmrPipe -fn FT  | nmrPipe -fn EXT -x1 10.5ppm -xn 6.5ppm -sw -round 2  | nmrPipe -fn PS -p0 173.559 -p1 -0 -di  | nmrPipe -fn POLY -ord 3 -auto  | nmrPipe -fn TP  | nmrPipe -fn SMILE -nDim 2             -sample nuslist -nThread 2             -sampleCount 68 -nSigma 5 -off 0 0 -report 1             -maxMem 11.3829             -scaling 1             -maxIter 300             -xT 90             -xP0 85 -xP1 0             -thresh 0.95  | pipe2xyz -out nus2d/recon.ft1 -x -ov"
+    ],
+    "total_s": 21.458,
+    "source_unchanged": true,
+    "reader_reported_fraction": 0.75,
+    "actual_fraction_from_schedule": 0.7555555555555555,
+    "fraction_note": "read_dataset reports a rounded fraction; actual sampling is schedule count / declared complex grid",
+    "phase_seed": {
+      "accepted": true,
+      "method": "zero_increment_quadrature",
+      "reason": "",
+      "phases": {
+        "F1": [
+          87.12538675314092,
+          0.0
+        ]
+      },
+      "direct_phase": [
+        173.7219662652111,
+        0.0
+      ],
+      "rank_fraction": 0.9993839505775459,
+      "phase_concentration": 0.5471109232915446,
+      "direct_peak_count": 16,
+      "first_order_inferred": false,
+      "backend_runs": 1,
+      "version": 1
+    }
+  },
+  "comparison_target": "NMRForge corresponding uniform spectrum, not the author Bruker spectrum",
+  "comparison": {
+    "kind": "display_projection_comparison_not_independent_truth",
+    "matching": "same polarity; joint normalized distance <=1; greedy one-to-one",
+    "min_height_fraction": 0.1,
+    "offset_fitted": false,
+    "offset_source": "none",
+    "planes": {
+      "HN": {
+        "automatic": {
+          "baseline": 4934.477783203125,
+          "count": 127,
+          "detected_before_height_filter": 127,
+          "height_cutoff": 1134045.2522216798,
+          "max_abs_centered_voxel": 11340452.522216797,
+          "negative_candidates": 0,
+          "noise_estimate": 107850.51103168944,
+          "positive_candidates": 127,
+          "requested_sigma_floor": 0,
+          "requested_sign_mode": "dominant",
+          "resolved_sigma_multiplier": 10.5149733772561,
+          "shape": [
+            255,
+            1028
+          ],
+          "sign_mode": "dominant"
+        },
+        "automatic_matched_fraction": 0.968503937007874,
+        "automatic_unmatched_candidates": [
+          {
+            "candidate_index_1based": 22,
+            "intensity": 7218859.522216797,
+            "ppm": {
+              "H": 8.595197382527079,
+              "N": 120.23024454786986
+            },
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 125,
+            "intensity": 1333001.0222167969,
+            "ppm": {
+              "H": 8.52121583596077,
+              "N": 120.2080183130985
+            },
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 126,
+            "intensity": 1290337.6472167969,
+            "ppm": {
+              "H": 9.01443610002205,
+              "N": 115.62714379502563
+            },
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 127,
+            "intensity": 1195601.1472167969,
+            "ppm": {
+              "H": 8.502094981385257,
+              "N": 120.21926174739701
+            },
+            "sign": 1
+          }
+        ],
+        "comparison": {
+          "baseline": 8084.8427734375,
+          "count": 127,
+          "detected_before_height_filter": 127,
+          "height_cutoff": 1367358.4157226563,
+          "max_abs_centered_voxel": 13673584.157226562,
+          "negative_candidates": 0,
+          "noise_estimate": 94201.68927832031,
+          "positive_candidates": 127,
+          "requested_sigma_floor": 0,
+          "requested_sign_mode": "dominant",
+          "resolved_sigma_multiplier": 14.515221820309138,
+          "shape": [
+            510,
+            1028
+          ],
+          "sign_mode": "dominant"
+        },
+        "comparison_matched_fraction": 0.968503937007874,
+        "intensity_pearson": 0.9877806913305934,
+        "matched": 123,
+        "median_abs_delta_ppm": {
+          "H": 0.0013188265111523378,
+          "N": 0.003662135844876957
+        },
+        "median_fwhm_ratio_by_nucleus": {
+          "H": 0.8959243813521605,
+          "N": 1.221431222493381
+        },
+        "reference_candidate_coverage": 0.968503937007874,
+        "reference_unmatched_candidates": [
+          {
+            "candidate_index_1based": 93,
+            "intensity": 5243886.1572265625,
+            "ppm": {
+              "H": 9.27592571242218,
+              "N": 118.09324855886256
+            },
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 125,
+            "intensity": 1808917.0322265625,
+            "ppm": {
+              "H": 8.134404806642927,
+              "N": 118.59938695077638
+            },
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 126,
+            "intensity": 1435321.4072265625,
+            "ppm": {
+              "H": 7.948959028147177,
+              "N": 127.53371553575104
+            },
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 127,
+            "intensity": 1383818.0322265625,
+            "ppm": {
+              "H": 6.901879417598897,
+              "N": 112.12931421451421
+            },
+            "sign": 1
+          }
+        ],
+        "windows_ppm": {
+          "H": [
+            6.49513161791633,
+            10.501202506196154
+          ],
+          "N": [
+            100.28726153355045,
+            135.93705247365412
+          ]
+        }
+      }
+    },
+    "primary_metric": "reference_candidate_coverage; not true-peak recovery",
+    "projection": "signed_max_absolute_voxel; all-axis common crop before projection",
+    "reference_offset_ppm": {},
+    "requested_sigma_floor": 0,
+    "requested_sign_mode": "dominant",
+    "source_ndim": 2,
+    "spectrum_sha256": {
+      "automatic": "693baf6ec768412f07ea2e5fc380f1c3f06900453ca6818b3a9b849b82bac36d",
+      "comparison": "52bb674cee7c2ddac63d25325ae7f603111a88cfae3812a44b585cbd164fd35d"
+    },
+    "tolerance_ppm": {
+      "C": 0.15,
+      "H": 0.02,
+      "N": 0.2
+    }
+  },
+  "processing_source": {
+    "snapshot_commit": "9013391d6053a303e3f61ad613d8eeb3e4a4b3cb",
+    "post_snapshot_changes": [
+      "scripts/vm_four_path_figure.py",
+      "tests/test_four_path_figure.py"
+    ],
+    "note": "marker-only changes; full regression applies to the earlier snapshot, not a new full-suite run"
+  },
+  "scientific_acceptance": "not_claimed",
+  "figure_style": {
+    "contour_fractions": [
+      0.075,
+      0.1,
+      0.2,
+      0.35,
+      0.5,
+      0.7,
+      0.9
+    ],
+    "linewidths_pt_by_absolute_level": [
+      0.25,
+      0.25,
+      0.4,
+      0.4,
+      0.4,
+      0.4,
+      0.4
+    ],
+    "candidate_marker": ".",
+    "candidate_marker_area": 4,
+    "candidate_edge": "none",
+    "unmatched_reference_only": "purple x",
+    "spectra_and_statistics_changed_by_style": false
+  }
+}

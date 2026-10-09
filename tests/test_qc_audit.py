@@ -159,8 +159,7 @@ def test_bad_point_repair_truncates_huge_lists(tmp_path: Path) -> None:
 
 
 def test_nus_grid_adjustment_is_recorded(tmp_path: Path, bruker_dir: Path) -> None:
-    """NusTD shrink after bad-point cleaning: records the axis name and the before/after grid
-    values."""
+    """An unsampled final coordinate is not grid damage and creates no shrink audit."""
     from backend.nmrpipe_backend import _apply_nus_grid_after_clean
     from core.data.bruker_reader import read_dataset
 
@@ -170,26 +169,23 @@ def test_nus_grid_adjustment_is_recorded(tmp_path: Path, bruker_dir: Path) -> No
 
     logs = _apply_nus_grid_after_clean(experiment, [(0,), (145,)], audit=log)
 
-    assert logs and "网格调整" in logs[0]
-    action = read_audit(tmp_path)[0]
-    assert action.action_taken == "nus_td_shrunk"
-    assert action.location == "acqu2s.NusTD"
-    assert action.before_state == {"NusTD": 292}
-    assert action.after_state == {"NusTD": 146}
-    assert action.extra["dataset_id"] == experiment.dataset_id
+    assert logs == []
+    assert experiment.acquisition_parameters["acqu2s"]["NusTD"] == 292
+    assert read_audit(tmp_path) == []
 
 
-def test_nus_grid_adjustment_without_audit_still_returns_logs(
+def test_nus_grid_adjustment_without_audit_preserves_grid(
     tmp_path: Path, bruker_dir: Path
 ) -> None:
-    """Behaviour is unchanged when no audit object is passed (the wiring is additive)."""
+    """Grid cleanup does not shrink NusTD when no audit object is passed either."""
     from backend.nmrpipe_backend import _apply_nus_grid_after_clean
     from core.data.bruker_reader import read_dataset
 
     experiment = read_dataset(bruker_dir / "nus_2d")
     experiment.acquisition_parameters.setdefault("acqu2s", {})["NusTD"] = 292
     logs = _apply_nus_grid_after_clean(experiment, [(0,), (145,)])
-    assert logs
+    assert logs == []
+    assert experiment.acquisition_parameters["acqu2s"]["NusTD"] == 292
     assert read_audit(tmp_path) == []
 
 

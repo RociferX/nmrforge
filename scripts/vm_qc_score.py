@@ -1,14 +1,11 @@
-"""Score one spectrum's QC (real machine), with exactly the product pipeline's convention.
+"""Score evidence spectra with the product QC function and the explicit auto sign strategy.
 
-Section 3 of the evidence page relies on this: the automatic final spectrum and the **processed
-spectrum
-shipped with the data** are each scored once, through the same
-``core.qc.spectrum_quality.evaluate`` and
-the same ``sign_mode="auto"`` (judge "single-sign positive / single-sign negative / both signs"
-first,
-then score).
+Both spectra use core.qc.spectrum_quality.evaluate and sign_mode=auto.
+This is not the GUI experiment-template strategy: reconstruction artefacts may be classified by
+auto as mixed-sign, while the GUI's HSQC/HNCO templates use uniform. Scores cannot replace GUI
+decisions or scientific validation.
 
-Usage::
+Usage:
 
     nmrforge/bin/python scripts/vm_qc_score.py \
         --spectrum <automatic final spectrum.ft2> --label "automatic processing" --h-window 6.5,10.5
@@ -16,10 +13,11 @@ Usage::
         --spectrum <pdata/1 directory> --label "processed spectrum shipped with the data" \
         --h-window 6.5,10.5
 
-``--h-window`` crops the 1H axis to the given window before scoring: without it the automatic
-spectrum
-covers only a few ppm of 1H while the shipped spectrum spans the whole 1H range (including the water
-region), so the two scores are not comparable. The window **crops 1H only; 15N is untouched**.
+--reference crops each identified nucleus axis to the common window of both spectra and scores
+each with the other as its reference. --h-window can further limit the proton window. Signs are
+preserved, so phase errors are not hidden by taking absolute values. A shared window is not
+independent accuracy validation; resolution, processing history, and sample conditions can still
+affect the scores.
 """
 
 from __future__ import annotations
@@ -37,63 +35,49 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-def _read_pdata(path: Path) -> tuple[np.ndarray, list[np.ndarray]]:
-    """Read Bruker ``pdata/1``: return (data, ppm axis per dimension)."""
-    import nmrglue as ng
+def _load(
+    path: Path, h_window: tuple[float, float] | None, reference: Path | None = None,
+) -> tuple[np.ndarray, dict]:
+    """Crop all axes to their common windows using nucleus labels; do not infer ambiguous labels."""
+    from scripts.vm_four_path_figure import _load as read
+    from scripts.vm_four_path_figure import _window
 
-    _dic, data = ng.bruker.read_pdata(str(path))
-    udic = ng.bruker.guess_udic(_dic, data)
-    axes = []
-    for index in range(np.ndim(data)):
-        try:
-            converter = ng.fileiobase.uc_from_udic(udic, dim=index)
-        except TypeError:  # older nmrglue versions return a list per dimension
-            converter = ng.fileiobase.uc_from_udic(udic)[index]
-        axes.append(np.asarray(converter.ppm_scale(), dtype=float))
-    return np.asarray(data, dtype=float).real, axes
-
-
-def _h_index(axes: list[np.ndarray]) -> int:
-    """Which dimension is 1H: proton ppm values all sit within 20 ppm (15N is 90-140)."""
-    scores = [float(np.median(np.abs(axis))) for axis in axes]
-    return int(np.argmin(scores))
-
-
-def _load(path: Path, h_window: tuple[float, float] | None) -> tuple[np.ndarray, dict]:
-    """Read a spectrum and optionally crop the 1H axis; files use the product reader, directories
-    ``pdata/1``."""
-    meta: dict = {"input": path.name, "kind": "file"}
-    if path.is_dir():
-        data, axes = _read_pdata(path)
-        meta["kind"] = "bruker-pdata"
-        index = _h_index(axes)
-        ppm = axes[index]
-    else:
-        from workflow.pick_peaks import read_spectrum_axes
-
-        loaded = read_spectrum_axes(path)
-        data = np.asarray(loaded.data, dtype=float)
-        index = loaded.storage_of("1H")
-        if index is None:
-            raise SystemExit("this spectrum has no 1H axis")
-        ppm = np.asarray(loaded.ppm[index], dtype=float)
-
-    meta["shape"] = [int(item) for item in data.shape]
-    meta["H_span_ppm"] = [round(float(np.min(ppm)), 4), round(float(np.max(ppm)), 4)]
-    if h_window is not None:
-        keep = np.where((ppm >= h_window[0]) & (ppm <= h_window[1]))[0]
+    loaded = read(path)
+    data, axes, nuclei = loaded["data"], loaded["ppm"], loaded["nuclei"]
+    if "H" not in nuclei or len(set(nuclei)) != len(nuclei):
+        raise SystemExit("unique explicit nuclei including 1H are required")
+    if not np.all(np.isfinite(data)):
+        raise SystemExit("non-finite spectrum cannot be used as evidence")
+    other = read(reference) if reference is not None else None
+    if other is not None and (
+        len(set(other["nuclei"])) != len(other["nuclei"])
+        or set(other["nuclei"]) != set(nuclei)
+    ):
+        raise SystemExit("reference must have the same unique nuclear axes")
+    meta: dict = {
+        "input": path.name, "kind": "bruker-pdata" if path.is_dir() else "file",
+        "original_shape": list(data.shape), "nuclei": nuclei, "windows_ppm": {},
+        "comparison_input": reference.name if reference is not None else None,
+    }
+    for index, (nucleus, ppm) in enumerate(zip(nuclei, axes, strict=True)):
+        lo, hi = float(np.min(ppm)), float(np.max(ppm))
+        if other is not None:
+            lo, hi = _window(ppm, other["ppm"][other["nuclei"].index(nucleus)])
+        if nucleus == "H" and h_window is not None:
+            lo, hi = max(lo, h_window[0]), min(hi, h_window[1])
+        keep = np.where((ppm >= lo) & (ppm <= hi))[0]
         if keep.size < 8:
-            raise SystemExit("too few points in that 1H window - wrong window?")
+            raise SystemExit(f"common {nucleus} window has fewer than eight points")
         data = np.take(data, keep, axis=index)
-        kept = ppm[keep]
-        meta["shape"] = [int(item) for item in data.shape]
-        meta["H_span_ppm"] = [round(float(np.min(kept)), 4), round(float(np.max(kept)), 4)]
+        meta["windows_ppm"][nucleus] = [lo, hi]
+        if nucleus == "H":
+            meta["H_span_ppm"] = [float(np.min(ppm[keep])), float(np.max(ppm[keep]))]
+    meta["shape"] = list(data.shape)
     return np.asarray(data, dtype=float), meta
 
 
 def _quality(data: np.ndarray) -> dict:
-    """Overall spectrum quality score, same convention as
-    ``scripts/vm_truth_benchmark.py::_quality``."""
+    """Calculate overall spectrum quality using the truth benchmark's quality-score convention."""
     from core.qc.spectrum_quality import evaluate as evaluate_quality
 
     result = evaluate_quality(np.asarray(data, dtype=float), sign_mode="auto")
@@ -104,27 +88,24 @@ def _quality(data: np.ndarray) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="score one spectrum's QC (same convention as the product)"
-    )
-    parser.add_argument(
-        "--spectrum", required=True, help="spectrum file, or a Bruker pdata/1 directory"
-    )
-    parser.add_argument("--label", default="", help="name used in the report")
-    parser.add_argument(
-        "--h-window", default="", help="optional 1H crop window lo,hi (ppm); crops 1H only"
-    )
-    parser.add_argument("--json", default="", help="optional JSON output path")
+    parser = argparse.ArgumentParser(description="给证据谱打 QC 分(显式 auto 符号策略)")
+    parser.add_argument("--spectrum", required=True, help="谱文件,或 Bruker pdata/1 目录")
+    parser.add_argument("--label", default="", help="报告里用的名字")
+    parser.add_argument("--reference", type=Path, help="比较谱;所有核轴裁到共同窗口")
+    parser.add_argument("--h-window", default="", help="可选的 1H 裁剪窗口 lo,hi(ppm);只裁 1H")
+    parser.add_argument("--json", default="", help="可选的 JSON 输出路径")
     args = parser.parse_args(argv)
 
     h_window = None
     if args.h_window:
         parts = [item.strip() for item in args.h_window.split(",")]
         if len(parts) != 2:
-            raise SystemExit("--h-window needs two parts, lo,hi")
+            raise SystemExit("--h-window 需要 lo,hi 两段")
         h_window = (float(parts[0]), float(parts[1]))
+        if not all(np.isfinite(h_window)) or not h_window[0] < h_window[1]:
+            parser.error("--h-window must contain finite increasing bounds")
 
-    data, meta = _load(Path(args.spectrum), h_window)
+    data, meta = _load(Path(args.spectrum), h_window, args.reference)
     report = {
         "label": args.label,
         **meta,

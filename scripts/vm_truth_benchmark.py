@@ -179,8 +179,7 @@ def _in_span(value: float, span: tuple[float, float] | None) -> bool:
 
 
 def _quality(data) -> dict:
-    """The product's overall spectrum quality score (same function and ``auto`` sign convention as
-    the GUI)."""
+    """Use the product score with auto strategy, not the GUI experiment-template sign policy."""
     import dataclasses
 
     from core.qc.spectrum_quality import evaluate as evaluate_quality
@@ -309,33 +308,25 @@ def main(argv: list[str] | None = None) -> int:
     from workflow.pick_peaks import read_spectrum_axes
     from workflow.truth_benchmark import load_expected_csv, write_matches_csv
 
-    parser = argparse.ArgumentParser(
-        description="nmrForge ground-truth benchmark evidence (real machine)"
-    )
-    parser.add_argument("--dataset", required=True, help="Bruker dataset directory")
-    parser.add_argument("--expected", required=True, help="expected peak CSV (peak_id,H_ppm,N_ppm)")
-    parser.add_argument(
-        "--tag", required=True, help="anonymous label (the only identifier in the output)"
-    )
-    parser.add_argument("--root", required=True, help="study root (scratch directory)")
-    parser.add_argument(
-        "--thresholds", default="35", help="detection thresholds (sigma multiples, comma separated)"
-    )
-    parser.add_argument("--json", default="", help="output JSON path")
+    parser = argparse.ArgumentParser(description="nmrForge 真值基准证据(真机)")
+    parser.add_argument("--dataset", required=True, help="Bruker 数据集目录")
+    parser.add_argument("--expected", required=True, help="期望峰表 CSV(peak_id,H_ppm,N_ppm)")
+    parser.add_argument("--tag", required=True, help="匿名标签(进输出的唯一标识)")
+    parser.add_argument("--root", required=True, help="研究根(临时目录)")
+    parser.add_argument("--thresholds", default="35", help="检出阈值(σ 倍数,逗号分隔)")
+    parser.add_argument("--json", default="", help="输出 JSON 路径")
     parser.add_argument(
         "--matches",
         default="",
-        help="CSV basename for the per-peak match detail (one file per threshold)",
+        help="逐峰匹配明细的 CSV 基名(每个阈值写一份,文件名里带 sigma)",
     )
-    parser.add_argument(
-        "--keep", action="store_true", help="keep the study root (deleted after the run by default)"
-    )
+    parser.add_argument("--keep", action="store_true", help="保留研究根(默认跑完删)")
     args = parser.parse_args(argv)
 
     dataset = Path(args.dataset).resolve()
     root = Path(args.root).resolve()
     if not dataset.is_dir():
-        print(f"dataset not found: {dataset}", file=sys.stderr)
+        print(f"数据集不存在: {dataset}", file=sys.stderr)
         return 2
     if root.exists():
         shutil.rmtree(root)
@@ -353,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
     run = _run_processing(dataset, root)
     spectrum = run["spectrum"]
     if not spectrum.is_file():
-        print("the final spectrum was not produced", file=sys.stderr)
+        print("终谱未生成", file=sys.stderr)
         return 3
     axes = read_spectrum_axes(spectrum)
     h_span = _axis_span(axes, "1H")

@@ -69,17 +69,21 @@ def schedule_columns_for_ndim(ndim: int) -> int | None:
     return value - 1 if value in (2, 3) else None
 
 
-def schedule_grid_shape(experiment: Any) -> tuple[int, ...]:
+def schedule_grid_shape(experiment: Any, *, has_schedule: bool = False) -> tuple[int, ...]:
     """Return the complex-point grid addressed by an NUS schedule (one axis in 2D, two in 3D).
 
     Bruker ``TD`` and ``NusTD`` count time-domain values. For complex indirect modes such as
     States, States-TPPI and echo/antiecho, two time-domain components correspond to one schedule
-    coordinate. Real modes such as QF, QSEQ and TPPI must not be halved. This uses the shared
-    ``hypercomplex_mult`` rule so that complex components are not mistaken for NUS sparsity.
+    coordinate. Real modes such as QF, QSEQ and TPPI must not be halved. In 2D, declared
+    ``NusTD`` is used when NUS metadata or a confirmed schedule supplies that context; ordinary
+    uniform data ignores stale ``NusTD`` values.
+
+    ``has_schedule`` is for callers that have found a valid schedule before it is installed on
+    the experiment's sampling record.
     """
     ndim = int(getattr(experiment, "ndim", 0) or 0)
     if ndim == 2:
-        grid, _mult, _direct = indirect_grid_2d(experiment)
+        grid, _mult, _direct = indirect_grid_2d(experiment, has_schedule=has_schedule)
         return (int(grid),) if grid > 0 else ()
     if ndim != 3:
         return ()
@@ -251,18 +255,21 @@ def _int_or_none(value: object) -> int | None:
         return None
 
 
-def indirect_grid_2d(experiment: Any) -> tuple[int, int, int]:
+def indirect_grid_2d(
+    experiment: Any, *, has_schedule: bool = False,
+) -> tuple[int, int, int]:
     """2D -> (indirect complex grid, hypercomplex components, direct points); 0 when not 2D.
 
-    Matches the 2D rule of ``backend.script_generator.effective_td`` (indirect complex points
-    = TD // hypercomplex components) but **does not depend on sampling.mode** -- after a
-    full-sampling downgrade the mode is already uniform and the decision still has to use the
-    complex grid (user 2026-09-14: full sampling goes the uniform route).
+    For NUS, prefer the declared ``acqu2s.NusTD`` grid and convert it using ``FnMODE``; ``TD``
+    may describe only a compact acquisition. Traditional data ignores stale ``NusTD``. NUS
+    semantics also survive a full-schedule downgrade to uniform or pre-detection schedule lookup.
 
     Parameters
     ----------
     experiment : Any
         An already loaded 2D dataset (reads TD and FnMODE from ``acqus``/``acqu2s``).
+    has_schedule : bool
+        The caller has confirmed a valid schedule, even if sampling has not yet been assigned.
 
     Returns
     -------
@@ -306,9 +313,24 @@ def indirect_grid_2d(experiment: Any) -> tuple[int, int, int]:
     )
     if indirect is None or direct is None:
         return 0, 0, 0
-    fnmode = _int_or_none(getattr(indirect, "acquisition_mode", ""))
+    params = getattr(experiment, "acquisition_parameters", {}) or {}
+    block = params.get("acqu2s") or {}
+    sampling = getattr(experiment, "sampling", None)
+    mode = getattr(sampling, "mode", "")
+    is_nus = (
+        has_schedule
+        or str(getattr(mode, "value", mode)) == "nus"
+        or _int_or_none((params.get("acqus") or {}).get("FnTYPE")) == 2
+        or bool(getattr(sampling, "nus_list", None))
+    )
+    declared = _int_or_none(block.get("NusTD")) if is_nus else None
+    if declared is None or declared <= 0:
+        declared = int(getattr(indirect, "td", 0) or 0)
+    fnmode = _int_or_none(block.get("FnMODE"))
+    if fnmode is None:
+        fnmode = _int_or_none(getattr(indirect, "acquisition_mode", ""))
     mult = hypercomplex_mult(fnmode if fnmode is not None else 0)
-    grid = int(getattr(indirect, "td", 0) or 0) // mult
+    grid = declared // mult if declared > 0 and declared % mult == 0 else 0
     return max(grid, 0), mult, max(int(getattr(direct, "td", 0) or 0), 0)
 
 

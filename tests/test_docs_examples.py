@@ -1,6 +1,6 @@
 """Documentation example executability guard (2026-09-20).
 
-Background (user report): the README Python API example writes
+Background (user report): the Python API example writes
 ``result.summary["delta_std_ppm"]``, while ``StudyResult.summary`` only aggregates
 **execution results** (status / counts) and does not return that field -- copying the
 example raises ``KeyError`` on lookup. The old documentation test only checked "is the
@@ -9,13 +9,13 @@ error was never caught.
 
 This file turns "the documentation examples really run" into a regression fact:
 
-1. the README Python API code block is **executed verbatim** (only the study root / data
-   directory in the example are swapped for temporary paths, and a deterministic
+1. the external API quickstart Python block is **executed verbatim** (only the study
+   root and data directory are swapped for temporary paths, and a deterministic
    stand-in backend is injected -- the example itself does not write ``backend=``,
    because real usage is driven by the default backend running NMRPipe);
 2. every ``*.summary["field"]`` appearing in the documentation must be a field that is
    **really returned** (static scan + real run);
-3. the two commands of the README "Example workflow" are executed verbatim;
+3. the synthetic dataset and quickstart commands in one Getting started bash block are executed;
 4. the example scripts under ``docs/external-api/examples/`` are really run with the
    documented parameters (the measurement-layer examples do not need NMRPipe; the study
    examples get a stand-in backend injected).
@@ -26,6 +26,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -38,7 +39,8 @@ from scipy.ndimage import gaussian_filter
 from nmrforge_api import uncertainty_summary
 
 ROOT = Path(__file__).resolve().parent.parent
-README = ROOT / "README.md"
+QUICKSTART = ROOT / "docs" / "external-api" / "02-quickstart.md"
+GETTING_STARTED = ROOT / "docs" / "getting-started.md"
 EXAMPLES = ROOT / "docs" / "external-api" / "examples"
 FENCE = re.compile(r"```python\n(.*?)```", re.S)
 SUMMARY_ACCESS = re.compile(r"\.summary\[\s*[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']\s*\]")
@@ -150,17 +152,9 @@ def _fenced_python_blocks(text: str) -> list[str]:
     return [block for block in FENCE.findall(text)]
 
 
-def _readme_section(title: str) -> str:
-    text = README.read_text(encoding="utf-8")
-    head = f"## {title}"
-    assert head in text, f"README 里找不到小节 {head!r}"
-    body = text.split(head, 1)[1]
-    return body.split("\n## ", 1)[0]
-
-
-def _readme_python_api_block() -> str:
-    blocks = _fenced_python_blocks(_readme_section("Python API"))
-    assert blocks, "README 的 Python API 小节里没有 ```python 代码块"
+def _quickstart_python_block() -> str:
+    blocks = _fenced_python_blocks(QUICKSTART.read_text(encoding="utf-8"))
+    assert blocks, "Quickstart guide has no ```python block"
     return blocks[0]
 
 
@@ -171,7 +165,7 @@ INTERNAL_DOC_DIRS = frozenset({"proposals", "tasks", "manager", "reviews"})
 def _documented_summary_keys() -> list[tuple[str, str, bool]]:
     """``[(file, field)]``: the places in the documentation that read ``.summary["field"]``."""
     found: list[tuple[str, str, bool]] = []
-    targets = [README]
+    targets = [QUICKSTART, ROOT / "README.md"]
     for candidate in sorted((ROOT / "docs").rglob("*.md")):
         if candidate.relative_to(ROOT / "docs").parts[0] in INTERNAL_DOC_DIRS:
             continue
@@ -202,11 +196,15 @@ def _run_documented_python_example(code: str, root: Path, dataset: Path) -> tupl
     def parameter_wrapper(doc_root, doc_dataset=None, **kwargs):
         kwargs.setdefault("backend", backend)
         kwargs.setdefault("params", {"phase_route": "none"})
+        kwargs.pop("datasets", None)
+        kwargs.pop("dataset", None)
         return real_parameter(root, dataset, **kwargs)
 
     def reference_wrapper(doc_root, doc_dataset=None, **kwargs):
         kwargs.setdefault("backend", backend)
         kwargs.setdefault("params", {"phase_route": "none"})
+        kwargs.pop("datasets", None)
+        kwargs.pop("dataset", None)
         return real_reference(root, dataset, **kwargs)
 
     def combination_wrapper(doc_reference, **kwargs):
@@ -222,21 +220,21 @@ def _run_documented_python_example(code: str, root: Path, dataset: Path) -> tupl
         monkeypatch.setattr(nmrforge_api, "run_parameter_study", parameter_wrapper)
         monkeypatch.setattr(nmrforge_api, "run_reference_study", reference_wrapper)
         monkeypatch.setattr(nmrforge_api, "run_combination_study", combination_wrapper)
-        exec(compile(code, str(README), "exec"), namespace)  # noqa: S102 - documentation example
+        exec(compile(code, str(QUICKSTART), "exec"), namespace)  # noqa: S102 - documentation example
     return namespace.get("result"), used
 
 
-def test_readme_python_api_example_runs(tmp_path: Path, bruker_dir: Path) -> None:
-    """The README Python API example runs verbatim, and the summary fields it reads really exist."""
-    code = _readme_python_api_block()
+def test_external_api_quickstart_example_runs(tmp_path: Path, bruker_dir: Path) -> None:
+    """The API quickstart reference and combination examples run verbatim."""
+    code = _quickstart_python_block()
     result, used = _run_documented_python_example(
         code, tmp_path / "readme_study", bruker_dir / "hsqc_2d"
     )
-    assert result is not None, "README 示例没有产出 result"
-    assert used, "README 示例里没有任何 .summary[...] 取值,示例可能已失真"
+    assert result is not None, "Quickstart example did not produce result"
+    assert used, "Quickstart example does not read any .summary[...] field"
     missing = sorted(used - set(result.summary))
     assert not missing, (
-        f"README 示例读取了 StudyResult.summary 里不存在的字段: {missing};"
+        f"Quickstart example reads fields missing from StudyResult.summary: {missing};"
         f"实际字段: {sorted(result.summary)}"
     )
 
@@ -245,7 +243,7 @@ def test_documented_summary_keys_come_from_the_real_api(tmp_path: Path, bruker_d
     """Every ``*.summary["field"]`` appearing in the documentation must be a really
     returned field."""
     result, _used = _run_documented_python_example(
-        _readme_python_api_block(), tmp_path / "keys_study", bruker_dir / "hsqc_2d"
+        _quickstart_python_block(), tmp_path / "keys_study", bruker_dir / "hsqc_2d"
     )
     study_keys = set(result.summary)
     uncertainty_keys = set(uncertainty_summary([]))
@@ -262,8 +260,8 @@ def test_documented_summary_keys_come_from_the_real_api(tmp_path: Path, bruker_d
     )
 
 
-def _run_example(script: str, tail: str) -> subprocess.CompletedProcess:
-    """Run an example script verbatim from the README, with the output always decoded as
+def _run_example(script: str, args: list[str]) -> subprocess.CompletedProcess:
+    """Run a documented example script with output always decoded as
     UTF-8.
 
     ``text=True`` decodes the subprocess output with the machine locale encoding (often GBK
@@ -274,7 +272,7 @@ def _run_example(script: str, tail: str) -> subprocess.CompletedProcess:
     """
     env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     return subprocess.run(
-        [sys.executable, str(ROOT / script), *tail.split()],
+        [sys.executable, str(ROOT / script), *args],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -286,18 +284,25 @@ def _run_example(script: str, tail: str) -> subprocess.CompletedProcess:
     )
 
 
-def test_readme_example_workflow_commands_run(tmp_path: Path) -> None:
-    """The two commands of the README "Example workflow" run verbatim."""
-    section = _readme_section("Example workflow")
+def test_getting_started_synthetic_workflow_runs(tmp_path: Path) -> None:
+    """Run the synthetic dataset and quickstart commands from one documented bash block."""
+    blocks = re.findall(r"```bash\n(.*?)```", GETTING_STARTED.read_text(encoding="utf-8"), re.S)
+    section = next((block for block in blocks if "make_synthetic_dataset.py" in block
+                    and "quickstart.py" in block), None)
+    assert section is not None, "Getting started has no bash block containing both example commands"
     commands = re.findall(r"^python (\S+)([^\n]*)", section, re.M)
-    assert len(commands) == 2, f"README 的示例命令数变了: {commands}"
+    assert len(commands) == 2, f"Getting started example command count changed: {commands}"
     out = tmp_path / "example_data" / "hsqc_2d"
     script, tail = commands[0]
-    done = _run_example(script, tail.replace("./example_data/hsqc_2d", str(out)))
+    args = shlex.split(tail)
+    args[args.index("--out") + 1] = str(out)
+    done = _run_example(script, args)
     assert done.returncode == 0, f"{script} 失败: {done.stdout[-800:]} {done.stderr[-800:]}"
     assert (out / "acqus").is_file(), "合成数据集没有写出 acqus"
     script, tail = commands[1]
-    done = _run_example(script, tail.replace("./example_data/hsqc_2d", str(out)))
+    args = shlex.split(tail)
+    args[-1] = str(out)
+    done = _run_example(script, args)
     assert done.returncode == 0, f"{script} 失败: {done.stdout[-800:]} {done.stderr[-800:]}"
 
 

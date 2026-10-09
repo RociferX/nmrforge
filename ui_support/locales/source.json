@@ -222,17 +222,17 @@
       "nmrforge_api/localization_targets.py:476"
     ],
     "), maintain existing baseline/zero filling/window configuration": [
-      "workflow/phase_routes.py:1252",
-      "workflow/phase_routes.py:1424"
+      "workflow/phase_routes.py:1255",
+      "workflow/phase_routes.py:1427"
     ],
     "), need to manually confirm the type": [
       "core/experiment/experiment_classifier.py:503"
     ],
     "), nus3d_rc_ph rotated copy not generated": [
-      "workflow/phase_routes.py:2165"
+      "workflow/phase_routes.py:2186"
     ],
     ", 1D weak signal uses estimated value)": [
-      "backend/nmrpipe_backend.py:4084"
+      "backend/nmrpipe_backend.py:4104"
     ],
     ", condition {p0}": [
       "nmrforge_api/localization_targets.py:178"
@@ -253,46 +253,55 @@
       "nmrforge_api/cli.py:417"
     ],
     "-{p0} is missing from fid.com (this dimension's acquisition mode comes from the conversion script only)": [
-      "backend/bruker_workflow.py:603"
+      "backend/bruker_workflow.py:604"
     ],
     "1D phase search: no results available, keep p0=p1=0": [
-      "backend/nmrpipe_backend.py:4006"
+      "backend/nmrpipe_backend.py:4026"
     ],
     "1D phase search: p0={p0:g} p1={p1:g} (score={p2:.3f})": [
-      "backend/nmrpipe_backend.py:4029"
+      "backend/nmrpipe_backend.py:4049"
     ],
     "1D spectrum does not generate UCSF file (skip)": [
       "workflow/stepwise.py:213"
     ],
     "2D NUS Determination: There is neither ser nor converted fid, so dense model cannot be determined": [
-      "backend/nmrpipe_backend.py:803"
+      "backend/nmrpipe_backend.py:725"
     ],
     "2D NUS Determination: dense model (full grid {p0}/{p1} rows, {p2}), recovering from the zero pattern {p3}/{p4} sampled complex points({p5:.1f}%)": [
-      "backend/nmrpipe_backend.py:855"
+      "backend/nmrpipe_backend.py:777"
     ],
     "2D NUS Judgment: The grid parameter (direct dimension TD/ indirect dimension grid) is illegal and the dense model cannot be determined": [
-      "backend/nmrpipe_backend.py:781"
+      "backend/nmrpipe_backend.py:703"
     ],
     "2D NUS Judgment: full grid data is all zero, sampling point cannot be restored": [
-      "backend/nmrpipe_backend.py:835"
+      "backend/nmrpipe_backend.py:757"
     ],
     "2D NUS Judgment:{p0}": [
-      "backend/nmrpipe_backend.py:799"
+      "backend/nmrpipe_backend.py:721"
     ],
     "2D NUS Judgment:{p0} only {p1} row < declare grid {p2} Row -> sparse file (sampling location agnostic), requires nuslist sampling schedule": [
-      "backend/nmrpipe_backend.py:811"
+      "backend/nmrpipe_backend.py:733"
+    ],
+    "2D NUS coarse phase seed not applied: {reason}": [
+      "backend/nmrpipe_backend.py:2116"
+    ],
+    "2D NUS coarse phase seed: F1={p0:.2f}°, F2={p1:.2f}°; P1 remains zero and will be refined after reconstruction": [
+      "backend/nmrpipe_backend.py:2110"
     ],
     "2D NUS judgment: the full grid has {p0} rows and no zero rows, but without the sampling schedule it is impossible to distinguish canonical dense order from a compact 100% NUS random order ({p1} complex points); recovery was refused": [
-      "backend/nmrpipe_backend.py:843"
+      "backend/nmrpipe_backend.py:765"
     ],
     "2D NUS judgment: {p0} {p1} rows != the declared grid of {p2} rows -> the metadata disagrees with the file, cannot decide": [
-      "backend/nmrpipe_backend.py:823"
+      "backend/nmrpipe_backend.py:745"
+    ],
+    "2D NUS: estimating a coarse phase before reconstruction": [
+      "backend/nmrpipe_backend.py:2062"
     ],
     "2D hold-out residual: cannot extract the direct-dimension block from the final script (not a TP row before SMILE); skipping the hold-out metric": [
-      "backend/nmrpipe_backend.py:2316"
+      "backend/nmrpipe_backend.py:2336"
     ],
     "2D single plane output {p0} → {p1}(Processed as a single file, 2D does not use slicing flow)": [
-      "backend/nmrpipe_backend.py:3215"
+      "backend/nmrpipe_backend.py:3235"
     ],
     "2D spectrum loading failed {p0}: {p1}": [
       "gui/spectrum_panel.py:903",
@@ -404,10 +413,6 @@
     "After opening, a cross line appears with the mouse. Move the mouse to display two one-dimensional spectra (TopSpin type)": [
       "viewer/spectrum_viewer.py:335"
     ],
-    "After the sampling bad point is removed, the declared NusTD is inconsistent with the actual sampling range": [
-      "backend/nmrpipe_backend.py:480",
-      "backend/nmrpipe_backend.py:518"
-    ],
     "Alignment check chart (PNG): {p0}": [
       "gui/spectrum_panel.py:2054"
     ],
@@ -452,13 +457,13 @@
       "gui/main_window.py:2200"
     ],
     "Apply direct dimension phase (recon plane rotation)": [
-      "backend/nmrpipe_backend.py:3730"
+      "backend/nmrpipe_backend.py:3750"
     ],
     "Apply this range to the optimisation process": [
       "gui/pipeline_panel.py:2074"
     ],
     "Applying direct dimension phase failed: {p0}": [
-      "backend/nmrpipe_backend.py:3789"
+      "backend/nmrpipe_backend.py:3809"
     ],
     "Artificial spectrum completed": [
       "workflow/manual.py:640"
@@ -502,18 +507,18 @@
       "viewer/spectrum.py:253"
     ],
     "Backend tools(nmrpipe/native)": [
-      "backend/script_generator.py:1720"
+      "backend/script_generator.py:1762"
     ],
     "Baseline optimisation (embedding) failed: {p0}": [
-      "workflow/phase_routes.py:1292",
-      "workflow/phase_routes.py:1464"
+      "workflow/phase_routes.py:1295",
+      "workflow/phase_routes.py:1467"
     ],
     "Baseline optimisation summary: ": [
       "workflow/baseline_optimize.py:343"
     ],
     "Baseline optimisation(memory score)": [
-      "workflow/phase_routes.py:1281",
-      "workflow/phase_routes.py:1453"
+      "workflow/phase_routes.py:1284",
+      "workflow/phase_routes.py:1456"
     ],
     "Baseline optimisation(memory score): axis {p0}({p1}/{p2}),scoring every candidate": [
       "workflow/baseline_optimize.py:217"
@@ -552,8 +557,8 @@
       "gui/dialogs.py:771"
     ],
     "Bruker -> NMRPipe conversion failed": [
-      "backend/nmrpipe_backend.py:1014",
-      "backend/nmrpipe_backend.py:1341"
+      "backend/nmrpipe_backend.py:936",
+      "backend/nmrpipe_backend.py:1261"
     ],
     "Bruker dataset directory (including acqus)": [
       "gui/dashboards.py:177"
@@ -568,10 +573,10 @@
       "gui/notes.py:34"
     ],
     "CAR currently uses {p0}. To use another reference, edit CAR manually in the Spectrum step": [
-      "backend/bruker_workflow.py:465"
+      "backend/bruker_workflow.py:466"
     ],
     "CAR: the parts do not use the same carrier convention (see the per-part records); merging keeps the first part's reference": [
-      "backend/nmrpipe_backend.py:3012"
+      "backend/nmrpipe_backend.py:3032"
     ],
     "Can be left blank": [
       "gui/dialogs.py:416"
@@ -654,10 +659,10 @@
       "gui/spectrum_panel.py:2327"
     ],
     "Complete 1D phase optimisation: p0={p0:g}° p1={p1:g}°": [
-      "backend/nmrpipe_backend.py:1085"
+      "backend/nmrpipe_backend.py:1007"
     ],
     "Complete phase optimisation (direct dimension {p0} p0={p1:g}° p1={p2:g}°)": [
-      "backend/nmrpipe_backend.py:1093"
+      "backend/nmrpipe_backend.py:1015"
     ],
     "Completed": [
       "gui/pipeline_panel.py:124",
@@ -670,7 +675,7 @@
       "nmrforge_api/cli.py:130"
     ],
     "Configured target CAR": [
-      "backend/bruker_workflow.py:271"
+      "backend/bruker_workflow.py:272"
     ],
     "Consistency first (small residuals)": [
       "gui/pipeline_panel.py:1017"
@@ -679,25 +684,25 @@
       "viewer/contour_layer.py:65"
     ],
     "Conversion completed": [
-      "backend/nmrpipe_backend.py:1380"
+      "backend/nmrpipe_backend.py:1300"
     ],
     "Conversion failed": [
       "workflow/stepwise.py:275"
     ],
     "Conversion record {p0} is unreadable; converting again": [
-      "backend/nmrpipe_backend.py:3120"
+      "backend/nmrpipe_backend.py:3140"
     ],
     "Convert the raw Bruker data and verify the conversion settings": [
       "gui/pipeline_panel.py:70"
     ],
     "Converted fid {p0} is empty; converting again": [
-      "backend/nmrpipe_backend.py:3087"
+      "backend/nmrpipe_backend.py:3107"
     ],
     "Converted fid {p0} is incomplete; converting again": [
-      "backend/nmrpipe_backend.py:3170"
+      "backend/nmrpipe_backend.py:3190"
     ],
     "Converted fid {p0} is missing or incomplete; converting again": [
-      "backend/nmrpipe_backend.py:3161"
+      "backend/nmrpipe_backend.py:3181"
     ],
     "Copy the P0/P1 value, which can be pasted into the manual phase parameter or script PS line": [
       "viewer/phase_panel.py:94"
@@ -706,7 +711,7 @@
       "workflow/direct_diagnostics.py:539"
     ],
     "Could not record the conversion provenance: {p0}": [
-      "backend/nmrpipe_backend.py:3058"
+      "backend/nmrpipe_backend.py:3078"
     ],
     "Create a new blank experiment...": [
       "gui/project_tree.py:1057",
@@ -788,7 +793,7 @@
       "workflow/direct_diagnostics.py:460"
     ],
     "Dimension-wise baseline correction (POLY, Contract §6)": [
-      "backend/script_generator.py:1695"
+      "backend/script_generator.py:1737"
     ],
     "Dimension-wise consensus phase: axis {p0} locked {p1} clean trace": [
       "core/optimization/phase_consensus.py:194"
@@ -798,35 +803,35 @@
       "gui/raw_quality.py:119"
     ],
     "Direct dimension phase search (NU-DFT) fails, fallback slice by slice: {p0}": [
-      "backend/nmrpipe_backend.py:3922"
+      "backend/nmrpipe_backend.py:3942"
     ],
     "Direct dimension phase search failed (fallback p0=p1=0): {p0}": [
-      "backend/nmrpipe_backend.py:4088"
+      "backend/nmrpipe_backend.py:4108"
     ],
     "Direct processing (automatic optimisation off)": [
       "workflow/optimization_report.py:23",
       "gui/processing.py:409"
     ],
     "Display layer phase p1={p0:g}° Abnormal amplitude (>170°), reset to zero": [
-      "backend/nmrpipe_backend.py:2036"
+      "backend/nmrpipe_backend.py:1964"
     ],
     "Display layer phase search failed: {p0}": [
-      "backend/nmrpipe_backend.py:3700"
+      "backend/nmrpipe_backend.py:3720"
     ],
     "Display layer phase search: F2=({p0:.1f}, {p1:.1f}) score={p2:.1f}": [
-      "backend/nmrpipe_backend.py:3691"
+      "backend/nmrpipe_backend.py:3711"
     ],
     "Display layer phase search: main reconstruction PS(0,0), symmetry score after reconstruction": [
-      "backend/nmrpipe_backend.py:1881"
+      "backend/nmrpipe_backend.py:1809"
     ],
     "Display layer phase search: no clean signal peak": [
-      "backend/nmrpipe_backend.py:3688"
+      "backend/nmrpipe_backend.py:3708"
     ],
     "Display layer phase: F2=({p0:g}, {p1:g}) score={p2:.2f}": [
-      "backend/nmrpipe_backend.py:2025"
+      "backend/nmrpipe_backend.py:1953"
     ],
     "Display-layer phase search: all {p0} 3D replica planes take part (direct dimension = plane index, axis=-1)": [
-      "backend/nmrpipe_backend.py:3666"
+      "backend/nmrpipe_backend.py:3686"
     ],
     "Do you want to continue running anyway?": [
       "gui/main_window.py:1682"
@@ -860,14 +865,14 @@
       "gui/raw_quality.py:110"
     ],
     "Every one of the {p0} scan candidates failed; no ranking is written and no rank-1 script is promoted": [
-      "backend/nmrpipe_backend.py:2582"
+      "backend/nmrpipe_backend.py:2602"
     ],
     "Experiment type": [
       "gui/notes.py:26"
     ],
     "Explicit SI={p0}": [
-      "backend/script_generator.py:407",
-      "backend/script_generator.py:396"
+      "backend/script_generator.py:401",
+      "backend/script_generator.py:390"
     ],
     "Exported peak table after alignment: ": [
       "gui/spectrum_panel.py:2061"
@@ -880,10 +885,10 @@
       "gui/pipeline_panel.py:1392"
     ],
     "F1 indirect dimension: directly decide whether FT -neg is applied (null=automatic rule, True=apply, False=do not apply); not a toggle of the automatic decision": [
-      "backend/script_generator.py:1638"
+      "backend/script_generator.py:1680"
     ],
     "F2 indirect dimension (3D): directly decide whether FT -neg is applied (null=automatic rule, True=apply, False=do not apply); not a toggle of the automatic decision": [
-      "backend/script_generator.py:1647"
+      "backend/script_generator.py:1689"
     ],
     "FFT point width {p0:.1f} Hz x {p1:g} = {p2:.2f} Hz": [
       "workflow/field_drift.py:1252"
@@ -922,7 +927,7 @@
       "workflow/direct_diagnostics.py:1885"
     ],
     "FT and then flip the axis (null=automatic according to acquisition mode, True/False=mandatory)": [
-      "backend/script_generator.py:1613"
+      "backend/script_generator.py:1655"
     ],
     "Failed": [
       "gui/main_window.py:906",
@@ -970,29 +975,29 @@
       "workflow/phase_routes.py:955"
     ],
     "Final run (complete script) failed: {p0}": [
-      "workflow/phase_routes.py:2149"
+      "workflow/phase_routes.py:2170"
     ],
     "Final run completed": [
       "workflow/phase_routes.py:995",
-      "workflow/phase_routes.py:2151"
+      "workflow/phase_routes.py:2172"
     ],
     "Final run failed: {p0}": [
       "workflow/phase_routes.py:993"
     ],
     "Final script baseline check: ": [
-      "workflow/phase_routes.py:2183"
+      "workflow/phase_routes.py:2204"
     ],
     "Find nmrPipe: {p0}": [
-      "backend/nmrpipe_backend.py:889"
+      "backend/nmrpipe_backend.py:811"
     ],
     "Finish": [
       "gui/dialogs.py:613"
     ],
     "Finish {p0} group scan": [
-      "backend/nmrpipe_backend.py:2591"
+      "backend/nmrpipe_backend.py:2611"
     ],
     "First pass SMILE completed": [
-      "workflow/phase_routes.py:1641"
+      "workflow/phase_routes.py:1655"
     ],
     "Flip the FT sign (FT -neg) of the chosen indirect dimension(s) and re-run the final script; choosing an already-flipped entry again removes the flip. Only the indirect-dimension FT line is changed.": [
       "gui/pipeline_panel.py:1133"
@@ -1007,7 +1012,7 @@
       "gui/dialogs.py:782"
     ],
     "For non-NUS data, please use process()": [
-      "backend/nmrpipe_backend.py:1430"
+      "backend/nmrpipe_backend.py:1350"
     ],
     "For one acquisition split into several segments (complementary NUS points completing the grid) or averaged repeat experiments (same parameters / sampling points, better SNR): pick the container directory (no acqus at the top level, at least 2 subdirectories each holding acqus). On import the segments are merged into a single sample data set.": [
       "gui/dashboards.py:195"
@@ -1025,7 +1030,7 @@
       "gui/pipeline_panel.py:69"
     ],
     "Generate only script (script_only)": [
-      "backend/nmrpipe_backend.py:1949"
+      "backend/nmrpipe_backend.py:1877"
     ],
     "Generate spectrum": [
       "gui/group_panel.py:40",
@@ -1045,18 +1050,12 @@
     "Good": [
       "workflow/optimization_report.py:178"
     ],
-    "Grid adjustment after sampling bad point removal: acqu2s NusTD {p0} → {p1}": [
-      "backend/nmrpipe_backend.py:470"
-    ],
-    "Grid adjustment after sampling bad point removal: {p0} NusTD {p1} → {p2}": [
-      "backend/nmrpipe_backend.py:507"
-    ],
     "Group {p0}(does not exist)": [
       "gui/group_panel.py:286"
     ],
     "Handling parameter optimisation: joint review spectrum generation failed (": [
-      "workflow/phase_routes.py:1250",
-      "workflow/phase_routes.py:1422"
+      "workflow/phase_routes.py:1253",
+      "workflow/phase_routes.py:1425"
     ],
     "High end": [
       "gui/pipeline_panel.py:190"
@@ -1068,7 +1067,7 @@
       "nmrforge_api/cli.py:95"
     ],
     "Hold-out residual: no plane was found under {p0}; the hold-out metric is skipped": [
-      "backend/nmrpipe_backend.py:2391"
+      "backend/nmrpipe_backend.py:2411"
     ],
     "If the project is not open, select experiment under project on the left, or click on the spectrum file to view the results": [
       "gui/spectrum_panel.py:388"
@@ -1084,17 +1083,17 @@
     ],
     "In phase optimisation: {p0} Replica preview completed": [
       "workflow/phase_routes.py:780",
-      "workflow/phase_routes.py:1724"
+      "workflow/phase_routes.py:1738"
     ],
     "In phase optimisation: {p0} Replica preview in progress": [
       "workflow/phase_routes.py:760",
-      "workflow/phase_routes.py:1700"
+      "workflow/phase_routes.py:1714"
     ],
     "In phase optimisation: {p0} Replicate preview (iteration) in progress": [
-      "workflow/phase_routes.py:1973"
+      "workflow/phase_routes.py:1994"
     ],
     "In the final run (complete script, including the final phase of each dimension)": [
-      "workflow/phase_routes.py:2141"
+      "workflow/phase_routes.py:2162"
     ],
     "In-group data annotation": [
       "gui/group_panel.py:88"
@@ -1118,7 +1117,7 @@
       "gui/pipeline_panel.py:3176"
     ],
     "Indirect dimension window function optimisation (FID memory score, do not rerun the process)": [
-      "workflow/phase_routes.py:1343"
+      "workflow/phase_routes.py:1346"
     ],
     "Indirect dimension window optimisation failed (reading reconstruction plane): {p0}": [
       "workflow/window_optimize.py:1014"
@@ -1127,11 +1126,11 @@
       "gui/pipeline_panel.py:1102"
     ],
     "Indirect-dimension target digital point spacing = max(linewidth, 1/AQ) / points_per_line (default 1/2, i.e. at least 2 digital points per linewidth; raise it for accurate peak positions / linewidths / fitting / CSP, lower it to save memory in 2D)": [
-      "backend/script_generator.py:1597"
+      "backend/script_generator.py:1639"
     ],
     "Initial script retention failed: {p0}": [
       "workflow/phase_routes.py:953",
-      "workflow/phase_routes.py:1656"
+      "workflow/phase_routes.py:1670"
     ],
     "Input does not match the expected structure ({p0}): {p1}": [
       "core/user_errors.py:45"
@@ -1169,13 +1168,13 @@
       "workflow/field_drift.py:1191"
     ],
     "Inter-part field drift: applying the per-part shifts you entered (the automatic check is gone; part 1 is the reference)": [
-      "backend/nmrpipe_backend.py:4366"
+      "backend/nmrpipe_backend.py:4386"
     ],
     "Inter-part field drift: no part gave a reliable measurement against part {p0} (see the per-part reasons below); no frequency shift was applied": [
       "workflow/field_drift.py:1206"
     ],
     "Inter-part field drift: no part was given a shift, so every fid.com was left untouched": [
-      "backend/nmrpipe_backend.py:4578"
+      "backend/nmrpipe_backend.py:4598"
     ],
     "Inter-part field drift: {p0} cleared - no part will be shifted": [
       "gui/pipeline_panel.py:2307"
@@ -1208,10 +1207,10 @@
       "core/qc/peak_detection.py:240"
     ],
     "Invalid points, SI=1": [
-      "backend/script_generator.py:243"
+      "backend/script_generator.py:237"
     ],
     "Is the direct dimension extraction window open?": [
-      "backend/script_generator.py:1691"
+      "backend/script_generator.py:1733"
     ],
     "JSON mapping condition labels to per-condition processing parameter objects": [
       "nmrforge_api/cli.py:609"
@@ -1226,10 +1225,10 @@
       "gui/group_panel.py:182"
     ],
     "Leave residual calculation failed: {p0}": [
-      "backend/nmrpipe_backend.py:2537"
+      "backend/nmrpipe_backend.py:2557"
     ],
     "Leave sampling point: train={p0} holdout={p1}": [
-      "backend/nmrpipe_backend.py:2268"
+      "backend/nmrpipe_backend.py:2288"
     ],
     "Left drag: box zoom\nMiddle drag: pan\nWheel: zoom\nHome / full-spectrum view: restore the full range\nView menu: lock the display aspect ratio\nPeak menu: switch the single-click behaviour (select / add / delete peaks)\n3D spectra (.ft3): pick the plane to view in the right-hand panel (F1-F2 / F1-F3 / F2-F3),\n  drag the slice slider to step through the planes, or switch to the MIP / summed projection\n.fid: one dimension shows the 1D trace; two dimensions show the whole time-domain block nmrDraw style\n  (rows = individual FIDs, columns = direct-dimension time points; turn on the 1D strip to inspect them one by one)\n2D spectra: right-click the spectrum to extract a 1D row/column slice; right-click a layer in the list to delete it": [
       "viewer/app.py:260"
@@ -1238,22 +1237,22 @@
       "gui/spectrum_panel.py:2182"
     ],
     "Lightweight SMILE phase search failed, fallback NU-DFT": [
-      "backend/nmrpipe_backend.py:1699"
+      "backend/nmrpipe_backend.py:1627"
     ],
     "Lightweight SMILE phase search: symbolic link failed, skipped": [
-      "backend/nmrpipe_backend.py:3508"
+      "backend/nmrpipe_backend.py:3528"
     ],
     "Lightweight SMILE phase search: {p0}/{p1} sampled points,window {p2}-{p3} ppm, PS(0,0) reconstruction": [
-      "backend/nmrpipe_backend.py:3554"
+      "backend/nmrpipe_backend.py:3574"
     ],
     "Lightweight SMILE phase: F2=({p0:g}, {p1:g}) score={p2:.2f}(Written phase.json, officially refactored and reused)": [
-      "backend/nmrpipe_backend.py:3600"
+      "backend/nmrpipe_backend.py:3620"
     ],
     "Lightweight spectrum scoring failed (fallback): {p0}": [
-      "backend/nmrpipe_backend.py:3579"
+      "backend/nmrpipe_backend.py:3599"
     ],
     "Lightweight spectrum without signal (fallback)": [
-      "backend/nmrpipe_backend.py:3582"
+      "backend/nmrpipe_backend.py:3602"
     ],
     "Link raw data to project (read only, copy if necessary)": [
       "gui/dashboards.py:165"
@@ -1262,7 +1261,7 @@
       "gui/dialogs.py:228"
     ],
     "List of processing stages (displayed line by line in the table editor)": [
-      "backend/script_generator.py:1711"
+      "backend/script_generator.py:1753"
     ],
     "Load 3D spectrum (lazy loading): %s (%s)": [
       "viewer/spectrum.py:698"
@@ -1338,26 +1337,26 @@
       "gui/spectrum_panel.py:352"
     ],
     "Memory guard: direct dimension zero filling reduced to 1 x TD": [
-      "backend/nmrpipe_backend.py:1820"
+      "backend/nmrpipe_backend.py:1748"
     ],
     "Memory guard: peak value approx. {p0:.0f}MB > Available {p1}MB×{p2:.2f}, direct dimension zero filling is reduced to 1 x TD({p3}→{p4})": [
-      "backend/nmrpipe_backend.py:1797"
+      "backend/nmrpipe_backend.py:1725"
     ],
     "Memory phase research({p0}) No trace available": [
       "workflow/phase_routes.py:879",
-      "workflow/phase_routes.py:2019"
+      "workflow/phase_routes.py:2040"
     ],
     "Memory tips: {p0} Replica preview {p1:.0f}MB,about {p2} MB free, memory may be insufficient (on failure, free memory or use a smaller data set)": [
       "workflow/phase_routes.py:251"
     ],
     "Merge nuslist:{p0} sampling point (another {p1} bad point(s) dropped in this merge)": [
-      "backend/nmrpipe_backend.py:4875"
+      "backend/nmrpipe_backend.py:4895"
     ],
     "Merge nuslist:{p0} sampling point (no new bad point in this step)": [
-      "backend/nmrpipe_backend.py:4884"
+      "backend/nmrpipe_backend.py:4904"
     ],
     "Missing 2D reconstruction plane: {p0}": [
-      "workflow/phase_routes.py:1166"
+      "workflow/phase_routes.py:1169"
     ],
     "Missing acqus parameter file": [
       "gui/raw_quality.py:116"
@@ -1369,20 +1368,20 @@
       "core/data/bruker_reader.py:166"
     ],
     "Missing input file: {p0}": [
-      "backend/nmrpipe_backend.py:1244",
-      "backend/nmrpipe_backend.py:1236"
+      "backend/nmrpipe_backend.py:1166",
+      "backend/nmrpipe_backend.py:1158"
     ],
     "Missing input file: {p0}/acqus": [
-      "backend/nmrpipe_backend.py:3267"
+      "backend/nmrpipe_backend.py:3287"
     ],
     "Missing processing script (editor content is empty)": [
       "workflow/manual.py:493"
     ],
     "Missing reconstruction plane nus2d/recon.ft1: {p0}": [
-      "backend/nmrpipe_backend.py:2655"
+      "backend/nmrpipe_backend.py:2675"
     ],
     "Missing reconstruction plane nus3d_rc: {p0}": [
-      "backend/nmrpipe_backend.py:2648"
+      "backend/nmrpipe_backend.py:2668"
     ],
     "Missing required field {p0} (does the input file or run record belong to this version?)": [
       "core/user_errors.py:39"
@@ -1401,20 +1400,20 @@
       "core/data/bruker_reader.py:477"
     ],
     "Multi-segment merge completed -> merged/{p0}.fid ({p1} parts)": [
-      "backend/nmrpipe_backend.py:4202"
+      "backend/nmrpipe_backend.py:4222"
     ],
     "Multi-segment type: {p0}": [
-      "backend/nmrpipe_backend.py:629",
+      "backend/nmrpipe_backend.py:551",
       "workflow/import_workflow.py:363"
     ],
     "Multi-slice merging completed -> merged/fid/ ({p0} parts)": [
-      "backend/nmrpipe_backend.py:4279"
+      "backend/nmrpipe_backend.py:4299"
     ],
     "Multiple single file merge failed": [
-      "backend/nmrpipe_backend.py:4403"
+      "backend/nmrpipe_backend.py:4423"
     ],
     "Multiple slice merging failed": [
-      "backend/nmrpipe_backend.py:4419"
+      "backend/nmrpipe_backend.py:4439"
     ],
     "NMRForge - welcome": [
       "gui/main_window.py:2375"
@@ -1423,7 +1422,7 @@
       "nmrforge_api/cli.py:547"
     ],
     "NMRForge processing parameter": [
-      "backend/script_generator.py:1562"
+      "backend/script_generator.py:1604"
     ],
     "NMRForge spectrum viewer": [
       "viewer/app.py:59",
@@ -1442,16 +1441,16 @@
       "gui/main_window.py:1340"
     ],
     "NMRPipe macro(SP/ZF/FT/PS)": [
-      "backend/script_generator.py:1726"
+      "backend/script_generator.py:1768"
     ],
     "NMRPipe path": [
       "gui/dialogs.py:758"
     ],
     "NMRPipe processed successfully": [
-      "backend/nmrpipe_backend.py:1147"
+      "backend/nmrpipe_backend.py:1069"
     ],
     "NMRPipe processing failed": [
-      "backend/nmrpipe_backend.py:1143",
+      "backend/nmrpipe_backend.py:1065",
       "workflow/stepwise.py:525"
     ],
     "NMRPipe spectrum (*.ft2 *.ft3 *.ft1 *.fid);; all files (*)": [
@@ -1459,25 +1458,25 @@
       "viewer/app.py:142"
     ],
     "NUS Conversion failed (bruker native recognition failed)": [
-      "backend/nmrpipe_backend.py:1594"
+      "backend/nmrpipe_backend.py:1513"
     ],
     "NUS Conversion requires bruker native recognition (without bruk2pipe fallback)": [
-      "backend/nmrpipe_backend.py:4114"
+      "backend/nmrpipe_backend.py:4134"
     ],
     "NUS Please call reconstruct_nus (SMILE) for data": [
-      "backend/nmrpipe_backend.py:918"
+      "backend/nmrpipe_backend.py:840"
     ],
     "NUS Replica preview ({p0}) failed: {p1}": [
-      "workflow/phase_routes.py:1717"
+      "workflow/phase_routes.py:1731"
     ],
     "NUS Replica preview search ({p0}) failed: {p1}": [
-      "workflow/phase_routes.py:2001"
+      "workflow/phase_routes.py:2022"
     ],
     "NUS data was detected, but no valid sampling schedule was found in {p0}. Import was stopped because the sampling order cannot be recovered; put the nuslist file (or the file explicitly named by acqus.NUSLIST) in the dataset directory and import again. Detection evidence: {p1}": [
       "workflow/import_workflow.py:263"
     ],
     "NUS data-expansion grid aligned with bruk2pipe: ": [
-      "backend/bruker_workflow.py:1483"
+      "backend/bruker_workflow.py:1494"
     ],
     "NUS data: starting SMILE reconstruction and phase optimisation": [
       "gui/processing.py:380"
@@ -1486,13 +1485,13 @@
       "core/experiment/sampling_detector.py:442"
     ],
     "NUS sampling schedule: {p0} ({p1})": [
-      "backend/nmrpipe_backend.py:692"
+      "backend/nmrpipe_backend.py:614"
     ],
     "NUS schedules are only supported for 2D and 3D datasets": [
       "core/experiment/sampling_detector.py:248"
     ],
     "NUS: No sampling schedule, restored from full grid zero mode {p0} sampling complex points": [
-      "backend/nmrpipe_backend.py:1612"
+      "backend/nmrpipe_backend.py:1531"
     ],
     "Needs attention": [
       "workflow/optimization_report.py:183"
@@ -1527,7 +1526,7 @@
       "gui/main_window.py:2162"
     ],
     "No conversion record for a multi-part dataset; converting again so the inter-part field drift is checked": [
-      "backend/nmrpipe_backend.py:3106"
+      "backend/nmrpipe_backend.py:3126"
     ],
     "No data found": [
       "gui/dashboards.py:334"
@@ -1590,7 +1589,7 @@
       "gui/processing.py:220"
     ],
     "None POLY": [
-      "workflow/phase_routes.py:2184"
+      "workflow/phase_routes.py:2205"
     ],
     "Not a Bruker dataset directory (acqus is missing): {p0}": [
       "workflow/import_workflow.py:135"
@@ -1613,7 +1612,7 @@
       "backend/memory_disk.py:212"
     ],
     "Not generated {p0}": [
-      "backend/nmrpipe_backend.py:5116"
+      "backend/nmrpipe_backend.py:5136"
     ],
     "Not optimisation ": [
       "workflow/baseline_optimize.py:347"
@@ -1636,13 +1635,13 @@
       "core/experiment/experiment_classifier.py:533"
     ],
     "Number of slices: {p0}": [
-      "backend/nmrpipe_backend.py:4158"
+      "backend/nmrpipe_backend.py:4178"
     ],
     "NusAMOUNT={p0} says full sampling but {p1} lists only {p2} of {p3} complex-grid point(s); the valid schedule is trusted over the parameter": [
       "core/experiment/sampling_detector.py:318"
     ],
     "Old version cache (algorithm has been updated), need to search again": [
-      "backend/nmrpipe_backend.py:3837"
+      "backend/nmrpipe_backend.py:3857"
     ],
     "On by default: the optimisation (first-pass reconstruction / phase search, plus baseline / zero-fill / window evaluation)\nuses the specified range, matching the final spectrum and reducing SMILE memory;\nif the optimisation comes out poorly you can turn this off and optimise over the default wide range.": [
       "gui/pipeline_panel.py:2078"
@@ -1724,7 +1723,7 @@
       "viewer/app.py:259"
     ],
     "Operations mapped to the nmrPipe macro are not supported: {p0}": [
-      "backend/script_generator.py:812"
+      "backend/script_generator.py:806"
     ],
     "Optimisation depth n×n: scans n×n combinations of nSigma × threshold.\n2×2 = 4, 3×3 = 9, 4×4 = 16, 5×5 = 25 combinations; the default is 4×4.\nA finer grid is slower (each combination does its own reconstruction and evaluation).": [
       "gui/pipeline_panel.py:996"
@@ -1745,7 +1744,7 @@
       "workflow/phase_routes.py:285"
     ],
     "Out of memory: direct dimension zero filling has been reduced to 1 x TD to reduce SMILE memory": [
-      "backend/nmrpipe_backend.py:1810"
+      "backend/nmrpipe_backend.py:1738"
     ],
     "Overview": [
       "gui/log_panel.py:183"
@@ -1819,7 +1818,7 @@
       "viewer/spectrum_viewer.py:1681"
     ],
     "Per-axis estimated linewidth (Hz); the target linewidth for automatic indirect zero-fill. Defaults by nucleus (1H 8 / 15N 15 / 13C 20 Hz and so on) and is bounded below by 1/AQ.Example: {\"F1\": 15.0}": [
-      "backend/script_generator.py:1584"
+      "backend/script_generator.py:1626"
     ],
     "Permission denied: {p0}": [
       "core/user_errors.py:37"
@@ -1939,10 +1938,10 @@
     ],
     "Processing parameter optimisation (baseline/zero filling/window function) is completed, time-consuming {p0:.1f} Second": [
       "workflow/phase_routes.py:931",
-      "workflow/phase_routes.py:2088"
+      "workflow/phase_routes.py:2109"
     ],
     "Processing plan parameter (table editor/script rendering shared data source)": [
-      "backend/script_generator.py:1563"
+      "backend/script_generator.py:1605"
     ],
     "Project is not loaded and cannot be processed in batches": [
       "workflow/batch.py:340"
@@ -1954,7 +1953,7 @@
       "gui/main_window.py:256"
     ],
     "Projection requires 3D spectrum: {p0} shape={p1}": [
-      "backend/nmrpipe_backend.py:2832"
+      "backend/nmrpipe_backend.py:2852"
     ],
     "Protein name": [
       "gui/notes.py:19"
@@ -2012,7 +2011,7 @@
       "gui/processing.py:835"
     ],
     "Raw data changed since the conversion; converting again": [
-      "backend/nmrpipe_backend.py:3151"
+      "backend/nmrpipe_backend.py:3171"
     ],
     "Raw data directory (raw/) not found": [
       "gui/raw_quality.py:96"
@@ -2042,7 +2041,7 @@
       "gui/pipeline_panel.py:122"
     ],
     "Refactoring failed (rc={p0})": [
-      "backend/nmrpipe_backend.py:2530"
+      "backend/nmrpipe_backend.py:2550"
     ],
     "Reference FID is unavailable or no longer matches the reference ({p0}). Rebuild this condition's reference with force=True (CLI: reference --force) before running combinations; automatic reconversion is disabled.": [
       "backend/reference_fid.py:19"
@@ -2095,7 +2094,7 @@
       "gui/notes.py:42"
     ],
     "Removed only the trailing nusExpand -mask generation stage from fid.com; the earlier nusExpand data-expansion stage is still required before bruk2pipe": [
-      "backend/bruker_workflow.py:1431"
+      "backend/bruker_workflow.py:1411"
     ],
     "Repeat number": [
       "gui/notes.py:33"
@@ -2123,19 +2122,19 @@
       "gui/pipeline_panel.py:2969"
     ],
     "Reuse converted fid (no conversion record; the raw data is not verified)": [
-      "backend/nmrpipe_backend.py:3113"
+      "backend/nmrpipe_backend.py:3133"
     ],
     "Reuse converted fid (skip conversion)": [
-      "backend/nmrpipe_backend.py:3172",
-      "backend/nmrpipe_backend.py:967",
-      "backend/nmrpipe_backend.py:988"
+      "backend/nmrpipe_backend.py:3192",
+      "backend/nmrpipe_backend.py:889",
+      "backend/nmrpipe_backend.py:910"
     ],
     "Reuse frozen reference FID (conversion disabled)": [
-      "backend/nmrpipe_backend.py:950",
-      "backend/nmrpipe_backend.py:1458"
+      "backend/nmrpipe_backend.py:872",
+      "backend/nmrpipe_backend.py:1378"
     ],
     "Reuse merged fid ({p0}; skipping conversion/merge)": [
-      "backend/nmrpipe_backend.py:1531"
+      "backend/nmrpipe_backend.py:1450"
     ],
     "Right click: open the directory / open in the terminal / rename / delete sample data": [
       "gui/project_tree.py:639"
@@ -2154,7 +2153,7 @@
       "gui/group_panel.py:146"
     ],
     "SMILE Memory limit (-maxMem): {p0:.1f} GB({p1} MB available)": [
-      "backend/nmrpipe_backend.py:1850"
+      "backend/nmrpipe_backend.py:1778"
     ],
     "SMILE Number of reconstruction threads (default 2); upper limit {p0} (machine cores minus 2, capped at 1 when the core count is 3 or less);too high may trip the high-load shutdown, so keeping it at 2 is recommended": [
       "gui/dialogs.py:833"
@@ -2163,13 +2162,13 @@
       "gui/dialogs.py:841"
     ],
     "SMILE Reconstruction failed (internal error: direct dimension needs to be windowed)": [
-      "backend/nmrpipe_backend.py:1996"
+      "backend/nmrpipe_backend.py:1924"
     ],
     "SMILE Reconstruction successful": [
-      "backend/nmrpipe_backend.py:2077"
+      "backend/nmrpipe_backend.py:2005"
     ],
     "SMILE Refactor ({p0} sampling points, {p1:.1f}%,1H {p2}-{p3}ppm, nSigma={p4:g} thresh={p5:g})": [
-      "backend/nmrpipe_backend.py:1956"
+      "backend/nmrpipe_backend.py:1884"
     ],
     "SMILE Scan failed": [
       "workflow/smile_optimize.py:379"
@@ -2178,7 +2177,7 @@
       "gui/processing.py:847"
     ],
     "SMILE internal error detected (direct dimension not windowed or bad input state), reconstruction failed": [
-      "backend/nmrpipe_backend.py:1987"
+      "backend/nmrpipe_backend.py:1915"
     ],
     "SMILE optimisation": [
       "gui/pipeline_panel.py:86",
@@ -2203,13 +2202,13 @@
       "gui/dialogs.py:767"
     ],
     "SMILE reconstruction failed / nothing written to {p0}": [
-      "backend/nmrpipe_backend.py:2007"
+      "backend/nmrpipe_backend.py:1935"
     ],
     "SMILE refactoring completed; final spectrum in place": [
-      "backend/nmrpipe_backend.py:2074"
+      "backend/nmrpipe_backend.py:2002"
     ],
     "SMILE scan failed: {p0} candidate(s), none succeeded": [
-      "backend/nmrpipe_backend.py:2593"
+      "backend/nmrpipe_backend.py:2613"
     ],
     "SMILE ships as an NMRPipe plugin (-fn SMILE) rather than a separate program, so there is no path to configure. It is detected through the csh environment at startup.": [
       "gui/dialogs.py:903"
@@ -2218,7 +2217,7 @@
       "gui/raw_quality.py:162"
     ],
     "SW/linewidth missing, falling back to 2x ({p0}->{p1})": [
-      "backend/script_generator.py:246"
+      "backend/script_generator.py:240"
     ],
     "Sample data has been imported: the next step can be run \"{p0}\"": [
       "gui/pipeline_panel.py:2445"
@@ -2245,7 +2244,7 @@
       "workflow/script_audit.py:150"
     ],
     "Searching for the direct-dimension phase (first run, usually tens of seconds), please wait": [
-      "workflow/phase_routes.py:1878"
+      "workflow/phase_routes.py:1892"
     ],
     "Segmented data only: set a frequency offset (Hz) for parts 2..N (part 1 is the reference); \"run\" writes PS -rs into each part's fid.com according to these values. There is no automatic detection any more.": [
       "gui/pipeline_panel.py:1069",
@@ -2321,8 +2320,8 @@
       "viewer/spectrum.py:992"
     ],
     "Sliced fid: direct dimension phase search {p0} slices": [
-      "backend/nmrpipe_backend.py:1715",
-      "backend/nmrpipe_backend.py:1063"
+      "backend/nmrpipe_backend.py:1643",
+      "backend/nmrpipe_backend.py:985"
     ],
     "Software settings": [
       "gui/dialogs.py:742"
@@ -2334,7 +2333,7 @@
       "workflow/baseline_optimize.py:319"
     ],
     "Source cleanup {p0}: {p1} {p2} → {p3} OK, ser {p4} → {p5} bytes (backup .bak)": [
-      "backend/nmrpipe_backend.py:4755"
+      "backend/nmrpipe_backend.py:4775"
     ],
     "Source path: {p0}": [
       "gui/center_panel.py:206"
@@ -2360,15 +2359,15 @@
       "workflow/manual.py:624"
     ],
     "Start SMILE refactoring": [
-      "backend/nmrpipe_backend.py:1971"
+      "backend/nmrpipe_backend.py:1899"
     ],
     "Start batch import: {p0} directory -> experiment {p1}": [
       "gui/main_window.py:624"
     ],
     "Start converting fid": [
-      "backend/nmrpipe_backend.py:1253",
-      "backend/nmrpipe_backend.py:969",
-      "backend/nmrpipe_backend.py:990"
+      "backend/nmrpipe_backend.py:1175",
+      "backend/nmrpipe_backend.py:891",
+      "backend/nmrpipe_backend.py:912"
     ],
     "Start data group {p0} Batch processing: {p1}{p2}": [
       "gui/main_window.py:883"
@@ -2377,10 +2376,10 @@
       "gui/main_window.py:1689"
     ],
     "Start phase optimisation (1D)": [
-      "backend/nmrpipe_backend.py:1050"
+      "backend/nmrpipe_backend.py:972"
     ],
     "Start phase optimisation (direct dimension)": [
-      "backend/nmrpipe_backend.py:1052"
+      "backend/nmrpipe_backend.py:974"
     ],
     "Start re-running the final script (only the direct dimension range / the indirect dimension flip is updated, the other parameters remain unchanged)": [
       "gui/pipeline_panel.py:3056"
@@ -2402,10 +2401,10 @@
       "gui/spectrum_panel.py:292"
     ],
     "TPPI / States-TPPI +/- alternation correction (True = automatic from the acquisition mode, False = forced off)": [
-      "backend/script_generator.py:1622"
+      "backend/script_generator.py:1664"
     ],
     "Target point distance {p0:.2f} Hz/pt(linewidth {p1:g} Hz, >= 1/AQ {p2:.2f}),Δν {p3:.2f}→{p4:.2f} Hz/pt, SI={p5}": [
-      "backend/script_generator.py:258"
+      "backend/script_generator.py:252"
     ],
     "Task cancelled: Baseline optimisation terminated by user": [
       "workflow/baseline_optimize.py:264"
@@ -2439,7 +2438,7 @@
       "workflow/batch.py:277"
     ],
     "The conversion record has no inter-part field drift check; converting again": [
-      "backend/nmrpipe_backend.py:3125"
+      "backend/nmrpipe_backend.py:3145"
     ],
     "The converted fid is missing, please generate FID first: {p0}/{p1}": [
       "workflow/manual.py:564"
@@ -2457,7 +2456,7 @@
       "gui/pipeline_panel.py:1446"
     ],
     "The current memory cannot process this spectrum (about {p0} MB available, SMILE peak about {p1:.0f} MB); please provide at least {p2} GB. You can also narrow the direct-dimension range and turn on \"apply this range to the optimisation\" (the narrower the direct-dimension window, the lower the SMILE peak memory)": [
-      "backend/nmrpipe_backend.py:1831"
+      "backend/nmrpipe_backend.py:1759"
     ],
     "The current peak table association was replaced with the Poky peak table ({p0} peak(s));\n(click \"Save peak table\" to write back to the .list file)": [
       "gui/spectrum_panel.py:1851"
@@ -2469,20 +2468,20 @@
       "gui/pipeline_panel.py:3129"
     ],
     "The display layer phase has insufficient confidence or the search failed. Keep the default phase": [
-      "backend/nmrpipe_backend.py:2067"
+      "backend/nmrpipe_backend.py:1995"
     ],
     "The experiment type does not yet have sample data": [
       "gui/pipeline_panel.py:3024"
     ],
     "The final run is completed and takes time {p0:.1f} Second": [
       "workflow/phase_routes.py:998",
-      "workflow/phase_routes.py:2169"
+      "workflow/phase_routes.py:2190"
     ],
     "The first pass SMILE reconstruction failed: {p0}": [
-      "workflow/phase_routes.py:1632"
+      "workflow/phase_routes.py:1638"
     ],
     "The first pass SMILE reconstruction is completed: {p0}": [
-      "workflow/phase_routes.py:1638"
+      "workflow/phase_routes.py:1652"
     ],
     "The high field end ppm must be greater than the low field end ppm (such as 8.5-7.5)": [
       "gui/pipeline_panel.py:200"
@@ -2501,7 +2500,7 @@
     ],
     "The phase search is completed and processing of parameter optimisation (baseline/zero filling/window function) begins": [
       "workflow/phase_routes.py:912",
-      "workflow/phase_routes.py:2070"
+      "workflow/phase_routes.py:2091"
     ],
     "The processing controller is not bound to a project yet": [
       "gui/processing.py:140",
@@ -2528,7 +2527,7 @@
       "gui/pipeline_panel.py:3041"
     ],
     "The scan produced no candidate; nothing to rank": [
-      "backend/nmrpipe_backend.py:2579"
+      "backend/nmrpipe_backend.py:2599"
     ],
     "The script content is empty and cannot be run": [
       "workflow/script_check.py:72"
@@ -2549,7 +2548,7 @@
       "workflow/import_workflow.py:399"
     ],
     "The source ser has been backed up -> {p0}/ser.bak ({p1} bytes)": [
-      "backend/nmrpipe_backend.py:4726"
+      "backend/nmrpipe_backend.py:4746"
     ],
     "The source spectrum does not exist, skip UCSF conversion: {p0}": [
       "workflow/ucsf_export.py:31"
@@ -2639,7 +2638,7 @@
       "workflow/ucsf_export.py:35"
     ],
     "Unable to generate scan script": [
-      "backend/nmrpipe_backend.py:2288"
+      "backend/nmrpipe_backend.py:2308"
     ],
     "Unable to get fid.com: {p0}": [
       "gui/main_window.py:1550"
@@ -2707,8 +2706,8 @@
       "gui/pipeline_panel.py:1044"
     ],
     "Use bruker sliced fid ({p0}, streaming processing)": [
-      "backend/nmrpipe_backend.py:1637",
-      "backend/nmrpipe_backend.py:1002"
+      "backend/nmrpipe_backend.py:1556",
+      "backend/nmrpipe_backend.py:924"
     ],
     "Use this for one acquisition split into several segments (segmented NUS / averaged repeat experiments); leave it unchecked for an ordinary single data set. The separate \"segmented data or repeated experiment overlay import\" entry does the same thing — this box is for when you already have the single-import dialog open.": [
       "gui/dialogs.py:251"
@@ -2741,7 +2740,7 @@
       "gui/dashboards.py:236"
     ],
     "Zero-fill: 0 = automatic (direct dimension 2xTD, indirect dimension driven by the target digital resolution, bounded by 1/AQ and not exceeding points_per_line x TD); k >= 1 = indirect dimension fixed at k x TD (the direct dimension stays 2xTD). Zero-fill does not change the true frequency resolution (set by AQ); it only reduces the digital point spacing.": [
-      "backend/script_generator.py:1571"
+      "backend/script_generator.py:1613"
     ],
     "Zoom: the plot area alone extends to the left (covering the project tree / pipeline / log) while the buttons stay on the right; click again to restore": [
       "gui/spectrum_panel.py:424"
@@ -2755,14 +2754,8 @@
     "_find_bad_points (single row amplitude distribution): peak determination compared with adjacent points": [
       "workflow/direct_diagnostics.py:485"
     ],
-    "_nus_grid_from_points(cleaned nuslist) = 2 x max+1 per dimension": [
-      "backend/nmrpipe_backend.py:526"
-    ],
-    "_nus_grid_from_points(nuslist after cleaning) = max+1 per dimension": [
-      "backend/nmrpipe_backend.py:488"
-    ],
     "_validate_nus_points(nuslist versus experiment sampling grid)": [
-      "backend/nmrpipe_backend.py:425"
+      "backend/nmrpipe_backend.py:429"
     ],
     "a condition mapping may only hold by_condition / default / on_missing,found {p0} as well (pass path or peak_ids for one shared list)": [
       "nmrforge_api/localization_targets.py:936"
@@ -2787,8 +2780,8 @@
       "gui/main_window.py:288"
     ],
     "absent": [
-      "backend/bruker_workflow.py:276",
-      "backend/bruker_workflow.py:297"
+      "backend/bruker_workflow.py:277",
+      "backend/bruker_workflow.py:298"
     ],
     "accepted {p0} peaks ({p1} duplicate grid cells)": [
       "workflow/pick_peaks.py:757"
@@ -2806,13 +2799,13 @@
       "core/experiment/sampling_detector.py:83"
     ],
     "addNMR seg_{p0:03d} slice merge: rc={p1}": [
-      "backend/nmrpipe_backend.py:4273"
+      "backend/nmrpipe_backend.py:4293"
     ],
     "alias of ft_neg_f1 (legacy name; same meaning, not a toggle)": [
-      "backend/script_generator.py:1660"
+      "backend/script_generator.py:1702"
     ],
     "alias of ft_neg_f2 (legacy name; same meaning, not a toggle)": [
-      "backend/script_generator.py:1667"
+      "backend/script_generator.py:1709"
     ],
     "allow this batch's --direct-range to disagree with the reference's frozen range (leaving the run-level warning code direct_range_override); by default a disagreement is an error rather than a silent window change": [
       "nmrforge_api/cli.py:704"
@@ -2879,14 +2872,14 @@
       "nmrforge_api/sweep.py:1038"
     ],
     "bad point in the NUS sampling table (out of range / duplicate coordinate)": [
-      "backend/nmrpipe_backend.py:421"
+      "backend/nmrpipe_backend.py:425"
     ],
     "baseline": [
       "workflow/optimization_report.py:240"
     ],
     "baseline optimisation: switched off externally (params.reference_optimize.baseline=off), reusing the baseline configuration supplied by the caller (tests / reproduction only)": [
-      "workflow/phase_routes.py:1269",
-      "workflow/phase_routes.py:1441"
+      "workflow/phase_routes.py:1272",
+      "workflow/phase_routes.py:1444"
     ],
     "baseline tilt/offset detected (worst storage axis): baseline correction recommended": [
       "core/qc/spectrum_quality.py:327"
@@ -2904,13 +2897,13 @@
       "core/experiment/sampling_detector.py:235"
     ],
     "bruker -AUTO failed ({p0})": [
-      "core/data/nus_reader.py:872"
+      "core/data/nus_reader.py:894"
     ],
     "bruker -AUTO is not available": [
-      "core/data/nus_reader.py:843"
+      "core/data/nus_reader.py:865"
     ],
     "bruker -AUTO returned rc={p0} and wrote no fid.com": [
-      "core/data/nus_reader.py:876"
+      "core/data/nus_reader.py:898"
     ],
     "bruker path": [
       "gui/dialogs.py:762"
@@ -2926,14 +2919,14 @@
       "core/optimization/phase_consensus.py:250"
     ],
     "cancelled by the user: direct-dimension HT trace-by-trace phase search": [
-      "core/optimization/phase_consensus.py:365",
-      "core/optimization/phase_consensus.py:453"
+      "core/optimization/phase_consensus.py:360",
+      "core/optimization/phase_consensus.py:458"
     ],
     "cancelled by the user: direct-dimension phase search": [
       "core/optimization/phase_search.py:637"
     ],
     "candidate output mode: skip the display-layer phase search and re-render (the phase must be locked by direct_phase, otherwise the candidate spectrum phase disagrees with the reference)": [
-      "backend/nmrpipe_backend.py:1909"
+      "backend/nmrpipe_backend.py:1837"
     ],
     "cannot normalise {p0}: {p1}": [
       "nmrforge_api/compat.py:208"
@@ -2965,7 +2958,7 @@
       "gui/tutorial.py:82"
     ],
     "column count {p0} does not match the expected {p1}": [
-      "core/data/nus_reader.py:134"
+      "core/data/nus_reader.py:138"
     ],
     "combination mode needs a built reference: {p0} (condition {p1}) has no reference spectrum yet; run reference mode first": [
       "nmrforge_api/reference.py:419"
@@ -3019,14 +3012,14 @@
       "core/qc/spectrum_quality.py:186"
     ],
     "contains a negative index": [
-      "core/data/nus_reader.py:144",
-      "backend/nmrpipe_backend.py:265"
+      "core/data/nus_reader.py:148",
+      "backend/nmrpipe_backend.py:269"
     ],
     "contains a non-integer token": [
-      "core/data/nus_reader.py:142"
+      "core/data/nus_reader.py:146"
     ],
     "coordinate column count {p0} does not match the expected {p1}": [
-      "backend/nmrpipe_backend.py:258"
+      "backend/nmrpipe_backend.py:262"
     ],
     "core.peaks(three-point parabola)": [
       "nmrforge_api/peaks.py:372",
@@ -3088,15 +3081,15 @@
       "gui/main_window.py:796"
     ],
     "data part {p0} ({p1}) conversion failed": [
-      "backend/nmrpipe_backend.py:4348"
+      "backend/nmrpipe_backend.py:4368"
     ],
     "data quality diagnosis failed: {p0}": [
-      "backend/nmrpipe_backend.py:1353",
+      "backend/nmrpipe_backend.py:1273",
       "workflow/phase_routes.py:695",
-      "workflow/phase_routes.py:1607"
+      "workflow/phase_routes.py:1610"
     ],
     "data segment {p0} Slicing failed": [
-      "backend/nmrpipe_backend.py:4417"
+      "backend/nmrpipe_backend.py:4437"
     ],
     "data {p0} It is a 3D spectrum. Batch only supports 2D for now and has not been added to the data group": [
       "gui/main_window.py:766"
@@ -3212,89 +3205,89 @@
       "workflow/window_optimize.py:721"
     ],
     "direct dimension 1H extraction window height ppm(EXT -x1)": [
-      "backend/script_generator.py:1681"
+      "backend/script_generator.py:1723"
     ],
     "direct dimension 1H extraction window low ppm(EXT -xn)": [
-      "backend/script_generator.py:1686"
+      "backend/script_generator.py:1728"
     ],
     "direct dimension HT item by item phase: locked {p0} projection trace": [
-      "core/optimization/phase_consensus.py:400"
+      "core/optimization/phase_consensus.py:395"
     ],
     "direct dimension TD": [
       "gui/raw_quality.py:142"
     ],
     "direct dimension TD=0(acqus/acqu does not provide valid TD), abort the conversion to avoid stuck": [
-      "backend/nmrpipe_backend.py:3382"
+      "backend/nmrpipe_backend.py:3402"
     ],
     "direct dimension memory phase: {p0}=({p1:g}°, {p2:g}°)": [
-      "workflow/phase_routes.py:1952"
+      "workflow/phase_routes.py:1973"
     ],
     "direct dimension p1 consensus automatic phase": [
-      "backend/script_generator.py:1674"
+      "backend/script_generator.py:1716"
     ],
     "direct dimension peak bad point": [
       "workflow/direct_diagnostics.py:483"
     ],
     "direct dimension phase (cache): p0={p0:g} p1={p1:g}": [
-      "backend/nmrpipe_backend.py:3842",
-      "backend/nmrpipe_backend.py:3475",
-      "backend/nmrpipe_backend.py:1869"
+      "backend/nmrpipe_backend.py:3862",
+      "backend/nmrpipe_backend.py:3495",
+      "backend/nmrpipe_backend.py:1797"
     ],
     "direct dimension phase coverage: p0={p0:g} p1={p1:g}": [
-      "backend/nmrpipe_backend.py:1661"
+      "backend/nmrpipe_backend.py:1589"
     ],
     "direct dimension phase coverage: {p0}": [
-      "backend/nmrpipe_backend.py:1047"
+      "backend/nmrpipe_backend.py:969"
     ],
     "direct dimension phase information is weak (coherence SNR={p0:.2f} < 2), keep p0=p1=0": [
-      "backend/nmrpipe_backend.py:3899"
+      "backend/nmrpipe_backend.py:3919"
     ],
     "direct dimension phase information is weak (gain={p0:.3f}, score={p1:.3f}),keeping p0=p1=0": [
-      "backend/nmrpipe_backend.py:4064"
+      "backend/nmrpipe_backend.py:4084"
     ],
     "direct dimension phase is searching (last appointment {p0:.0f} seconds), please wait": [
-      "workflow/phase_routes.py:1869"
+      "workflow/phase_routes.py:1883"
     ],
     "direct dimension phase renormalized by final run window: {p0} p1={p1:g}° → {p2:g}°": [
-      "workflow/phase_routes.py:2116",
+      "workflow/phase_routes.py:2137",
       "workflow/phase_routes.py:965"
     ],
     "direct dimension phase reuse cache phase.json: {p0}=({p1:g}°, {p2:g}°)": [
-      "workflow/phase_routes.py:1855"
+      "workflow/phase_routes.py:1869"
     ],
     "direct dimension phase search (NU-DFT): p0={p0:g} p1={p1:g} (correlation SNR={p2:.2f}, peak k*={p3}, {p4} slice)": [
-      "backend/nmrpipe_backend.py:3908"
+      "backend/nmrpipe_backend.py:3928"
     ],
     "direct dimension phase search basis: real data final spectrum {p0}(indirect dimension corrected, direct dimension = last axis, projection trace = sum of indirect dimension points)": [
-      "workflow/phase_routes.py:1837"
+      "workflow/phase_routes.py:1851"
     ],
     "direct dimension phase search completed, time consuming {p0:.1f} Second": [
-      "workflow/phase_routes.py:1901",
-      "workflow/phase_routes.py:1895"
+      "workflow/phase_routes.py:1915",
+      "workflow/phase_routes.py:1909"
     ],
     "direct dimension phase search: direct dimension spectrum has no signal, keep p0=p1=0": [
-      "backend/nmrpipe_backend.py:4040"
+      "backend/nmrpipe_backend.py:4060"
     ],
     "direct dimension phase search: no slices available, keep p0=p1=0": [
-      "backend/nmrpipe_backend.py:3959"
+      "backend/nmrpipe_backend.py:3979"
     ],
     "direct dimension phase search: p0={p0:g} p1={p1:g} (score={p2:.3f}, gain={p3:.3f}, {p4} trace": [
-      "backend/nmrpipe_backend.py:4074"
+      "backend/nmrpipe_backend.py:4094"
     ],
     "direct dimension phase search: shape=%s serial completion, takes %.1fs": [
       "core/optimization/phase_search.py:708"
     ],
     "direct dimension processing (generating slices)..": [
-      "backend/nmrpipe_backend.py:2336"
+      "backend/nmrpipe_backend.py:2356"
     ],
     "direct dimension processing failed (rc={p0})": [
-      "backend/nmrpipe_backend.py:2345"
+      "backend/nmrpipe_backend.py:2365"
     ],
     "direct dimension projection HT Search for: {p0}=({p1:g}°, {p2:g}°) score={p3:.2f}": [
-      "workflow/phase_routes.py:1924"
+      "workflow/phase_routes.py:1946"
     ],
-    "direct dimension projection HT searches for no clean signal peaks or insufficient confidence, keep (0,0)": [
-      "workflow/phase_routes.py:1945"
+    "direct dimension projection HT searches for no clean signal peaks or insufficient confidence, keep the initial phase": [
+      "workflow/phase_routes.py:1967"
     ],
     "direct dimension range": [
       "gui/pipeline_panel.py:929",
@@ -3312,7 +3305,7 @@
       "gui/pipeline_panel.py:2148"
     ],
     "direct dimension range: final run range has been used for optimisation/refactoring (": [
-      "backend/nmrpipe_backend.py:344"
+      "backend/nmrpipe_backend.py:348"
     ],
     "direct dimension range: {p0} Cleared, restore default window": [
       "gui/pipeline_panel.py:2110"
@@ -3321,27 +3314,27 @@
       "gui/pipeline_panel.py:2116"
     ],
     "direct dimension window function optimisation (FID memory score, no rerun SMILE)": [
-      "workflow/phase_routes.py:1493"
+      "workflow/phase_routes.py:1496"
     ],
     "direct dimension window function optimisation(FID memory score)": [
-      "workflow/phase_routes.py:1317"
+      "workflow/phase_routes.py:1320"
     ],
     "direct dimension window optimisation failed (read fid): {p0}": [
       "workflow/window_optimize.py:942"
     ],
     "direct dimension window optimisation failed: {p0}": [
-      "workflow/phase_routes.py:1328",
-      "workflow/phase_routes.py:1517"
+      "workflow/phase_routes.py:1331",
+      "workflow/phase_routes.py:1520"
     ],
     "direct dimension window optimisation skipped: converted.fid not found": [
       "workflow/window_optimize.py:948"
     ],
     "direct dimension {p0}×TD({p1}→{p2})": [
-      "backend/script_generator.py:387",
-      "backend/script_generator.py:400"
+      "backend/script_generator.py:381",
+      "backend/script_generator.py:394"
     ],
     "direct-dimension HT search p1={p0:g}° is out of range (>170°), reset to zero": [
-      "workflow/phase_routes.py:1916"
+      "workflow/phase_routes.py:1938"
     ],
     "direct-dimension frequency offset of each part vs part 1 over the effective criterion: {p0:.2f} Hz ({p1})": [
       "workflow/field_drift.py:1272"
@@ -3356,8 +3349,8 @@
       "core/optimization/phase_search.py:651"
     ],
     "direct-dimension phase search: no fid/slice found, keeping p0=p1=0": [
-      "backend/nmrpipe_backend.py:1721",
-      "backend/nmrpipe_backend.py:1069"
+      "backend/nmrpipe_backend.py:1649",
+      "backend/nmrpipe_backend.py:991"
     ],
     "direct-dimension range (ext_lo high, ext_hi low, ppm): overrides the batch base": [
       "nmrforge_api/cli.py:699"
@@ -3375,10 +3368,10 @@
       "nmrforge_api/direct_range.py:44"
     ],
     "direct-dimension real-data final spectrum preview failed: {p0}": [
-      "workflow/phase_routes.py:1829"
+      "workflow/phase_routes.py:1843"
     ],
     "direct-dimension window: NUS SMILE requires a direct-dimension window (SP) and the candidates do not cover the direct dimension, keeping the default SP": [
-      "workflow/phase_routes.py:1509"
+      "workflow/phase_routes.py:1512"
     ],
     "direct-dimension window: {p0}-{p1} ppm (EXT -x1/-xn, {p2})\n{p3}; peaks outside it do not enter the final spectrum,\np1 is renormalised to the window width; each data set shows its own settings": [
       "gui/pipeline_panel.py:2156"
@@ -3391,7 +3384,7 @@
     ],
     "directory does not exist: {p0}": [
       "core/data/bruker_reader.py:611",
-      "core/data/nus_reader.py:206",
+      "core/data/nus_reader.py:210",
       "gui/processing.py:63"
     ],
     "directory for the golden vector artefacts (default: a temporary directory, discarded afterwards)": [
@@ -3438,7 +3431,7 @@
       "core/qc/spectrum_quality.py:174"
     ],
     "empty file": [
-      "core/data/nus_reader.py:118"
+      "core/data/nus_reader.py:122"
     ],
     "enabled": [
       "workflow/script_audit.py:146"
@@ -3476,7 +3469,7 @@
       "workflow/phase_routes.py:730"
     ],
     "experiment type {p0}: magnitude spectra are not phase-optimised, the direct-dimension phase stays at (0,0) (the search is skipped)": [
-      "workflow/phase_routes.py:1795"
+      "workflow/phase_routes.py:1809"
     ],
     "experiment {p0}": [
       "gui/log_panel.py:184"
@@ -3534,19 +3527,19 @@
       "nmrforge_api/sweep.py:2182"
     ],
     "fallback: use the built-in bruk2pipe parameter conversion": [
-      "backend/nmrpipe_backend.py:3397"
+      "backend/nmrpipe_backend.py:3417"
     ],
     "fid layout cannot be parsed": [
-      "backend/nmrpipe_backend.py:2161"
+      "backend/nmrpipe_backend.py:2181"
     ],
     "fid noise injection (single file) failed: {p0}": [
-      "backend/nmrpipe_backend.py:2140"
+      "backend/nmrpipe_backend.py:2160"
     ],
     "fid noise injection (slicing) failed: {p0}": [
-      "backend/nmrpipe_backend.py:2129"
+      "backend/nmrpipe_backend.py:2149"
     ],
     "fid not found (neither a single file nor slices), the final run will fail": [
-      "backend/nmrpipe_backend.py:1641"
+      "backend/nmrpipe_backend.py:1560"
     ],
     "fid.com Conversion failed: {p0}": [
       "workflow/manual.py:356"
@@ -3565,32 +3558,32 @@
       "gui/pipeline_panel.py:2137"
     ],
     "final run: the final phase of every dimension is written into the full script (direct dimension {p0}=({p1:g}°, {p2:g}°)": [
-      "workflow/phase_routes.py:2153"
+      "workflow/phase_routes.py:2174"
     ],
     "final spectrum -> {p0}": [
-      "backend/nmrpipe_backend.py:2017"
+      "backend/nmrpipe_backend.py:1945"
     ],
     "final spectrum has been re-rendered according to the display layer phase (stage-2 re-run, no SMILE)": [
-      "backend/nmrpipe_backend.py:2059"
+      "backend/nmrpipe_backend.py:1987"
     ],
     "final spectrum is in place": [
-      "backend/nmrpipe_backend.py:1144"
+      "backend/nmrpipe_backend.py:1066"
     ],
     "finalize complete": [
-      "backend/nmrpipe_backend.py:2709"
+      "backend/nmrpipe_backend.py:2729"
     ],
     "finalize failed / nothing written to {p0}": [
-      "backend/nmrpipe_backend.py:2702"
+      "backend/nmrpipe_backend.py:2722"
     ],
     "finalize rerender failed: {p0}": [
-      "backend/nmrpipe_backend.py:3785"
+      "backend/nmrpipe_backend.py:3805"
     ],
     "first-pass reconstruction / phase search and the optimisation evaluation share the window": [
       "gui/pipeline_panel.py:2139"
     ],
     "first-run script kept as: {p0}": [
       "workflow/phase_routes.py:951",
-      "workflow/phase_routes.py:1654"
+      "workflow/phase_routes.py:1668"
     ],
     "floor {p0:g} Hz": [
       "workflow/field_drift.py:1258"
@@ -3605,10 +3598,10 @@
       "viewer/app.py:91"
     ],
     "generate 3D projections from the final spectrum": [
-      "workflow/stepwise.py:647"
+      "workflow/stepwise.py:648"
     ],
     "generate spectrum": [
-      "workflow/stepwise.py:577",
+      "workflow/stepwise.py:578",
       "workflow/stepwise.py:497"
     ],
     "give exactly one of axes (full factorial) or combos (explicit table)": [
@@ -3648,13 +3641,13 @@
       "gui/notes.py:69"
     ],
     "identified as {p0}: all parts share the same sampling points, so they are summed on one grid and reconstructed once (TopSpin fidadd semantics; addNMR does not normalise)": [
-      "backend/nmrpipe_backend.py:615"
+      "backend/nmrpipe_backend.py:537"
     ],
     "identified as {p0}: the sampling points of the parts are complementary, so the nuslists are merged to complete the grid and reconstructed in one pass": [
-      "backend/nmrpipe_backend.py:622"
+      "backend/nmrpipe_backend.py:544"
     ],
     "identified as {p0}: {p1} FID parts follow the TopSpin fidadd convention: point-by-point summation in the time domain (co-addition; addNMR does not normalise) to raise the SNR": [
-      "backend/nmrpipe_backend.py:606"
+      "backend/nmrpipe_backend.py:528"
     ],
     "illegal project name: {p0!r}": [
       "core/workspace.py:31"
@@ -3729,14 +3722,14 @@
       "gui/pipeline_panel.py:3145"
     ],
     "indirect dimension window function optimisation (reconstruct plane memory score, do not rerun SMILE)": [
-      "workflow/phase_routes.py:1531"
+      "workflow/phase_routes.py:1534"
     ],
     "indirect dimension window optimisation failed (reading fid): {p0}": [
       "workflow/window_optimize.py:979"
     ],
     "indirect dimension window optimisation failed: {p0}": [
-      "workflow/phase_routes.py:1359",
-      "workflow/phase_routes.py:1547"
+      "workflow/phase_routes.py:1362",
+      "workflow/phase_routes.py:1550"
     ],
     "indirect dimension window optimisation skip: no timeline available": [
       "workflow/window_optimize.py:778"
@@ -3748,10 +3741,10 @@
       "workflow/window_optimize.py:985"
     ],
     "indirect dimension {p0}×TD({p1}→{p2})": [
-      "backend/script_generator.py:390"
+      "backend/script_generator.py:384"
     ],
     "indirect dimension: the amplitude spectrum does not automatically adjust the phase, skip the finalize replica preview and search": [
-      "workflow/phase_routes.py:1671"
+      "workflow/phase_routes.py:1685"
     ],
     "input parameters for automatic processing (YAML/JSON)": [
       "nmrforge_api/cli.py:603"
@@ -3760,7 +3753,7 @@
       "core/qc/spectrum_quality.py:310"
     ],
     "inter-part direct-dimension field drift": [
-      "backend/nmrpipe_backend.py:4565"
+      "backend/nmrpipe_backend.py:4585"
     ],
     "inter-part field drift: corrected manually - {p0} (part 1 is the reference, not shifted); each part's fid.com was rewritten (PS -rs) and re-converted": [
       "workflow/direct_diagnostics.py:1350"
@@ -3844,7 +3837,7 @@
       "workflow/script_audit.py:167"
     ],
     "lightweight SMILE phase search failed (falling back to NU-DFT/default)": [
-      "backend/nmrpipe_backend.py:3568"
+      "backend/nmrpipe_backend.py:3588"
     ],
     "line width {p0:.1f} Hz x {p1:g} = {p2:.2f} Hz": [
       "workflow/field_drift.py:1245"
@@ -3877,7 +3870,7 @@
       "nmrforge_api/localization_targets.py:1103"
     ],
     "macro parameter": [
-      "backend/script_generator.py:1730"
+      "backend/script_generator.py:1772"
     ],
     "malformed phase axis: {p0} (axis F1/F2/F3, component p0/p1)": [
       "nmrforge_api/sweep.py:210"
@@ -3893,13 +3886,13 @@
     ],
     "memory phase search({p0}) No trace available": [
       "workflow/phase_routes.py:792",
-      "workflow/phase_routes.py:1736"
+      "workflow/phase_routes.py:1750"
     ],
     "more than {p0} columns per line": [
-      "core/data/nus_reader.py:132"
+      "core/data/nus_reader.py:136"
     ],
     "multi-segment NUS conversion/merge failed": [
-      "backend/nmrpipe_backend.py:1507"
+      "backend/nmrpipe_backend.py:1426"
     ],
     "multi-segment dataset ({p0} directories): the datasets and their sampling points were merged and produced by the backend": [
       "core/data/bruker_reader.py:589"
@@ -3911,22 +3904,22 @@
       "gui/dashboards.py:473"
     ],
     "named by the acqus NUSLIST parameter: {p0}": [
-      "core/data/nus_reader.py:237"
+      "core/data/nus_reader.py:241"
     ],
     "neither nuslist nor a file named by the acqus NUSLIST parameter exists": [
-      "core/data/nus_reader.py:242"
+      "core/data/nus_reader.py:246"
     ],
     "new experiment": [
       "gui/project_tree.py:1228"
     ],
     "nmrPipe not found (csh: source ~/.cshrc; which nmrPipe)": [
-      "backend/nmrpipe_backend.py:882"
+      "backend/nmrpipe_backend.py:804"
     ],
     "nmrPipe not found (csh: which nmrPipe)": [
-      "backend/nmrpipe_backend.py:925",
-      "backend/nmrpipe_backend.py:1189",
-      "backend/nmrpipe_backend.py:1440",
-      "backend/nmrpipe_backend.py:2638"
+      "backend/nmrpipe_backend.py:847",
+      "backend/nmrpipe_backend.py:1111",
+      "backend/nmrpipe_backend.py:1360",
+      "backend/nmrpipe_backend.py:2658"
     ],
     "no": [
       "gui/dialogs.py:174"
@@ -3956,11 +3949,11 @@
       "core/experiment/pulse_pathways.py:1037"
     ],
     "no sampling schedule found ({p0}); the sampling positions cannot be recovered from the data, so the reconstruction would be wrong - put the schedule file into {p1} and run again": [
-      "backend/nmrpipe_backend.py:1579",
-      "backend/nmrpipe_backend.py:1622"
+      "backend/nmrpipe_backend.py:1498",
+      "backend/nmrpipe_backend.py:1541"
     ],
     "no usable sampling schedule found ({p0})": [
-      "core/data/nus_reader.py:244"
+      "core/data/nus_reader.py:248"
     ],
     "no workflow plan found (records/sweep_plan.json)": [
       "nmrforge_api/cli.py:486"
@@ -4011,7 +4004,7 @@
       "core/experiment/experiment_classifier.py:410"
     ],
     "nuslist cleanup: {p0} → {p1} sampling point (bad point {p2})": [
-      "backend/nmrpipe_backend.py:5014"
+      "backend/nmrpipe_backend.py:5034"
     ],
     "object": [
       "gui/project_tree.py:242"
@@ -4026,7 +4019,7 @@
       "nmrforge_api/sweep.py:1861"
     ],
     "only {p0} index line(s)": [
-      "core/data/nus_reader.py:147"
+      "core/data/nus_reader.py:151"
     ],
     "optimal {p0} (FWHM {p1:.2f}point, SNR {p2:.1f}, shape {p3:.3f}, score {p4:.3f}); qualifying pool {p5}/{p6} candidate(s) (resolution >= {p7:.2f}point)": [
       "workflow/window_optimize.py:602"
@@ -4045,10 +4038,10 @@
       "nmrforge_api/cli.py:664"
     ],
     "out of bounds(grid {p0})": [
-      "backend/nmrpipe_backend.py:267"
+      "backend/nmrpipe_backend.py:271"
     ],
     "out: {p0} → {p1} (corrected)": [
-      "backend/bruker_workflow.py:1511"
+      "backend/bruker_workflow.py:1524"
     ],
     "overall quality {p0:.1f} did not reach the automatic accept threshold": [
       "core/qc/spectrum_quality.py:348"
@@ -4060,10 +4053,10 @@
       "nmrforge_api/sweep.py:652"
     ],
     "parameter correction: {p0}": [
-      "backend/nmrpipe_backend.py:3371"
+      "backend/nmrpipe_backend.py:3391"
     ],
     "parameter description": [
-      "backend/script_generator.py:1733"
+      "backend/script_generator.py:1775"
     ],
     "parameter group {p0}": [
       "workflow/param_optimize.py:117"
@@ -4084,31 +4077,31 @@
       "workflow/field_drift.py:1451"
     ],
     "part {p0} has {p1} slices, inconsistent with first part ({p2})": [
-      "backend/nmrpipe_backend.py:4241"
+      "backend/nmrpipe_backend.py:4261"
     ],
     "part {p0} re-conversion failed: {p1}": [
-      "backend/nmrpipe_backend.py:4538"
+      "backend/nmrpipe_backend.py:4558"
     ],
     "part {p0} re-converted with PS -rs {p1}Hz: rc={p2}": [
-      "backend/nmrpipe_backend.py:4547"
+      "backend/nmrpipe_backend.py:4567"
     ],
     "part {p0}: bruker outputs sliced fid (compatible with merging)": [
-      "backend/nmrpipe_backend.py:4358"
+      "backend/nmrpipe_backend.py:4378"
     ],
     "part {p0}: fid.com could not be read ({p1}); the shift was not applied": [
-      "backend/nmrpipe_backend.py:4487"
-    ],
-    "part {p0}: fid.com could not be written ({p1}); the shift was not applied": [
       "backend/nmrpipe_backend.py:4507"
     ],
+    "part {p0}: fid.com could not be written ({p1}); the shift was not applied": [
+      "backend/nmrpipe_backend.py:4527"
+    ],
     "part {p0}: fid.com not found, the shift was not applied": [
-      "backend/nmrpipe_backend.py:4477"
+      "backend/nmrpipe_backend.py:4497"
     ],
     "part {p0}: measured drift {p1:.4f} ppm ({p2:.1f} Hz) is beyond the plausible range ({p3:.2f} ppm); treated as a mistracked estimate and skipped": [
       "workflow/field_drift.py:1113"
     ],
     "part {p0}: no MULT line in fid.com, the shift could not be applied": [
-      "backend/nmrpipe_backend.py:4497"
+      "backend/nmrpipe_backend.py:4517"
     ],
     "part {p0}: only {p1} comparable trace(s) - too few to repeat the estimate and check that it is reproducible; the measured shift {p2:+.2f} Hz is applied anyway (its uncertainty is unknown)": [
       "workflow/field_drift.py:1125"
@@ -4138,13 +4131,13 @@
       "workflow/direct_diagnostics.py:1276"
     ],
     "part {p0}: the shift could not be rolled back ({p1})": [
-      "backend/nmrpipe_backend.py:4527"
+      "backend/nmrpipe_backend.py:4547"
     ],
     "part {p0}: the shift was rolled back ({p1})": [
-      "backend/nmrpipe_backend.py:4519"
+      "backend/nmrpipe_backend.py:4539"
     ],
     "part {p0}: the shift {p1} Hz is not a finite number; skipped": [
-      "backend/nmrpipe_backend.py:4465"
+      "backend/nmrpipe_backend.py:4485"
     ],
     "part {p0}: {p1} Hz": [
       "workflow/direct_diagnostics.py:1345",
@@ -4197,16 +4190,16 @@
       "workflow/optimization_report.py:239"
     ],
     "phase iteration: indirect dimension {p0} There is no change in the wheel, convergence": [
-      "workflow/phase_routes.py:2054"
+      "workflow/phase_routes.py:2075"
     ],
     "phase optimisation does not produce spectrum": [
       "workflow/stepwise.py:548"
     ],
     "phase optimisation: direct dimension real data final spectrum preview": [
-      "workflow/phase_routes.py:1810"
+      "workflow/phase_routes.py:1824"
     ],
     "phase optimisation: direct dimension real data final spectrum preview completed": [
-      "workflow/phase_routes.py:1847"
+      "workflow/phase_routes.py:1861"
     ],
     "picking produced no peak table: {p0}": [
       "nmrforge_api/peaks.py:842"
@@ -4261,13 +4254,13 @@
       "nmrforge_api/sweep.py:2201"
     ],
     "proj3D output parsing exception (expected 3 *.dat, actual {p0}): {p1}": [
-      "backend/nmrpipe_backend.py:2793"
+      "backend/nmrpipe_backend.py:2813"
     ],
     "proj3D.tcl path": [
       "gui/dialogs.py:765"
     ],
     "proj3D.tcl(NMRPipe projection tool) not found": [
-      "backend/nmrpipe_backend.py:2751"
+      "backend/nmrpipe_backend.py:2771"
     ],
     "project": [
       "gui/dashboards.py:74"
@@ -4429,13 +4422,13 @@
       "gui/project_tree.py:1162"
     ],
     "repeat({p0})": [
-      "backend/nmrpipe_backend.py:269"
+      "backend/nmrpipe_backend.py:273"
     ],
     "repeated experiment (NUS, identical sampling points)": [
-      "backend/nmrpipe_backend.py:602"
+      "backend/nmrpipe_backend.py:524"
     ],
     "repeated experiment (uniform, identical parameter)": [
-      "backend/nmrpipe_backend.py:601"
+      "backend/nmrpipe_backend.py:523"
     ],
     "reported_only": [
       "core/audit/qc_audit.py:73"
@@ -4509,10 +4502,10 @@
       "core/project/manager.py:941"
     ],
     "sampleCount: fid.com={p0} → nuslist={p1} (corrected)": [
-      "backend/bruker_workflow.py:1067"
+      "backend/bruker_workflow.py:1047"
     ],
     "sampling / acquisition related flags": [
-      "backend/script_generator.py:1608"
+      "backend/script_generator.py:1650"
     ],
     "sampling schedule: {p0} ({p1})": [
       "core/experiment/sampling_detector.py:259"
@@ -4541,13 +4534,13 @@
       "gui/main_window.py:2113"
     ],
     "scan run mode: full-sampling reconstruction (net true-peak wording; peak count and quality score come from the final spectrum)": [
-      "backend/nmrpipe_backend.py:2571"
+      "backend/nmrpipe_backend.py:2591"
     ],
     "scan run mode: hold-out reconstruction (consistency wording; peak count and quality score come from the hold-out reconstruction)": [
-      "backend/nmrpipe_backend.py:2562"
+      "backend/nmrpipe_backend.py:2582"
     ],
     "scanning {p0}/{p1}: {p2}": [
-      "backend/nmrpipe_backend.py:2467"
+      "backend/nmrpipe_backend.py:2487"
     ],
     "script check found warning": [
       "gui/main_window.py:1675"
@@ -4568,7 +4561,7 @@
       "workflow/import_workflow.py:361"
     ],
     "segmented (NUS, complementary sampling points)": [
-      "backend/nmrpipe_backend.py:603"
+      "backend/nmrpipe_backend.py:525"
     ],
     "segmented collection import": [
       "gui/dashboards.py:430"
@@ -4605,10 +4598,10 @@
       "core/data/bruker_reader.py:214"
     ],
     "ser size {p0} is not \"direct dimension {p1} x {p2} bytes\"({p3}); layout unclear, so the dense model cannot be decided": [
-      "core/data/nus_reader.py:429"
+      "core/data/nus_reader.py:451"
     ],
     "ser size {p0} is smaller than one row ({p1} bytes); the zero pattern cannot be scanned": [
-      "core/data/nus_reader.py:601"
+      "core/data/nus_reader.py:623"
     ],
     "set for this run": [
       "workflow/pick_peaks.py:668"
@@ -4641,13 +4634,13 @@
       "core/qc/spectrum_quality.py:258"
     ],
     "slice {p0}: already has slice-form output ({p1}), skip splitting": [
-      "backend/nmrpipe_backend.py:4142"
+      "backend/nmrpipe_backend.py:4162"
     ],
     "slice {p0}: rc={p1}": [
-      "backend/nmrpipe_backend.py:4155"
+      "backend/nmrpipe_backend.py:4175"
     ],
     "sliced fid -> {p0}/ ({p1} slices)": [
-      "backend/nmrpipe_backend.py:3234"
+      "backend/nmrpipe_backend.py:3254"
     ],
     "solid-state": [
       "core/experiment/experiment_classifier.py:417"
@@ -4674,8 +4667,8 @@
       "gui/spectrum_panel.py:229"
     ],
     "spectrum -> {p0}": [
-      "backend/nmrpipe_backend.py:2705",
-      "backend/nmrpipe_backend.py:5117"
+      "backend/nmrpipe_backend.py:2725",
+      "backend/nmrpipe_backend.py:5137"
     ],
     "spectrum cleared": [
       "viewer/app.py:216"
@@ -4697,10 +4690,10 @@
       "gui/main_window.py:280"
     ],
     "stage unique id": [
-      "backend/script_generator.py:1717"
+      "backend/script_generator.py:1759"
     ],
     "standard filename nuslist": [
-      "core/data/nus_reader.py:223"
+      "core/data/nus_reader.py:227"
     ],
     "start": [
       "gui/dialogs.py:613"
@@ -4719,13 +4712,13 @@
       "gui/pipeline_panel.py:1271"
     ],
     "status": [
-      "backend/bruker_workflow.py:273"
+      "backend/bruker_workflow.py:274"
     ],
     "step1 2D direct dimension: rc={p0}": [
-      "backend/nmrpipe_backend.py:2326"
+      "backend/nmrpipe_backend.py:2346"
     ],
     "step1 direct dimension: rc={p0}": [
-      "backend/nmrpipe_backend.py:2341"
+      "backend/nmrpipe_backend.py:2361"
     ],
     "study root directory": [
       "nmrforge_api/cli.py:560"
@@ -4805,7 +4798,7 @@
       "core/experiment/pulse_pathways.py:1047"
     ],
     "the acqus NUSLIST value is not a local filename: {p0}": [
-      "core/data/nus_reader.py:231"
+      "core/data/nus_reader.py:235"
     ],
     "the backend has no process(); workflows cannot run": [
       "nmrforge_api/sweep.py:1855"
@@ -4826,19 +4819,19 @@
       "nmrforge_api/sweep.py:922"
     ],
     "the converted fid has {p0} points per row but {p1} were expected": [
-      "core/data/nus_reader.py:624"
+      "core/data/nus_reader.py:646"
     ],
     "the converted fid is not two-dimensional; the dense model cannot be judged": [
-      "core/data/nus_reader.py:453"
+      "core/data/nus_reader.py:475"
     ],
     "the converted fid is not two-dimensional; the zero pattern cannot be scanned": [
-      "core/data/nus_reader.py:617"
+      "core/data/nus_reader.py:639"
     ],
     "the dataset has no files that bruker -AUTO can read": [
-      "core/data/nus_reader.py:860"
+      "core/data/nus_reader.py:882"
     ],
     "the direct-dimension point count is illegal ({p0}); the zero pattern cannot be scanned": [
-      "core/data/nus_reader.py:565"
+      "core/data/nus_reader.py:587"
     ],
     "the direct-dimension range is **explicitly overridden** by the combination mode and disagrees with the reference: ext_lo={p0:g} ext_hi={p1:g} ppm(the reference is not rebuilt; run-level warning direct_range_override)": [
       "nmrforge_api/study.py:617"
@@ -4874,7 +4867,7 @@
       "nmrforge_api/sweep.py:2218"
     ],
     "the indirect grid / hypercomplex components / direct points are inconsistent; the dense model cannot be judged": [
-      "core/data/nus_reader.py:395"
+      "core/data/nus_reader.py:417"
     ],
     "the legacy SweepPlan(base_params) form is gone; re-plan with this version": [
       "nmrforge_api/sweep.py:467"
@@ -4883,10 +4876,10 @@
       "core/experiment/experiment_classifier.py:445"
     ],
     "the parts are complementary NUS sampling but their grid NusTD differs ({p0}); complementary subsets cannot complete one grid, so merging was refused - check that every part belongs to the same NUS schedule": [
-      "backend/nmrpipe_backend.py:4317"
+      "backend/nmrpipe_backend.py:4337"
     ],
     "the parts are not the same experiment ({p0} differs between parts); merging was refused - re-import them with matching acquisition parameters": [
-      "backend/nmrpipe_backend.py:4324"
+      "backend/nmrpipe_backend.py:4344"
     ],
     "the path leaves the project directory; refusing the operation: {p0}": [
       "core/project/manager.py:371"
@@ -4940,7 +4933,7 @@
       "nmrforge_api/reference.py:1108"
     ],
     "the row byte length is illegal; the zero pattern cannot be scanned": [
-      "core/data/nus_reader.py:580"
+      "core/data/nus_reader.py:602"
     ],
     "the sampling positions are not recoverable from the data (a schedule file is needed to reconstruct)": [
       "core/experiment/sampling_detector.py:392"
@@ -4961,7 +4954,7 @@
       "core/data/bruker_reader.py:681"
     ],
     "the shift was entered by the user (part 1 is the reference)": [
-      "backend/nmrpipe_backend.py:4567"
+      "backend/nmrpipe_backend.py:4587"
     ],
     "the spectrum contains NaN/Inf: fix the data first; the quality score takes no part in the decision": [
       "core/qc/spectrum_quality.py:178"
@@ -5039,7 +5032,7 @@
       "gui/raw_quality.py:152"
     ],
     "too large to be a sampling schedule ({p0} bytes)": [
-      "core/data/nus_reader.py:120"
+      "core/data/nus_reader.py:124"
     ],
     "trace no valid signal": [
       "workflow/window_optimize.py:584"
@@ -5051,9 +5044,9 @@
       "core/planning/method_selector.py:130"
     ],
     "unknown": [
-      "backend/bruker_workflow.py:275",
-      "backend/bruker_workflow.py:280",
-      "backend/nmrpipe_backend.py:4779",
+      "backend/bruker_workflow.py:276",
+      "backend/bruker_workflow.py:281",
+      "backend/nmrpipe_backend.py:4799",
       "workflow/field_drift.py:1401",
       "workflow/field_drift.py:1395"
     ],
@@ -5106,8 +5099,8 @@
       "gui/pipeline_panel.py:1447"
     ],
     "window optimisation: switched off externally (params.reference_optimize.window=off), reusing the window configuration supplied by the caller (tests / reproduction only)": [
-      "workflow/phase_routes.py:1305",
-      "workflow/phase_routes.py:1478"
+      "workflow/phase_routes.py:1308",
+      "workflow/phase_routes.py:1481"
     ],
     "window_pts cannot be negative": [
       "nmrforge_api/peaks.py:501"
@@ -5122,31 +5115,31 @@
       "nmrforge_api/cli.py:762"
     ],
     "xN: {p0} is smaller than the direct TD {p1} - the row length must be at least TD; check this script": [
-      "backend/bruker_workflow.py:924"
+      "backend/bruker_workflow.py:904"
     ],
     "xN: {p0} kept as-is; for NUS the row length is set by nusExpand (serPadSize), so no geometry check was done": [
-      "backend/bruker_workflow.py:909"
+      "backend/bruker_workflow.py:889"
     ],
     "xN: {p0} leaves {p1} trailing byte(s) in {p2}, nearly a whole {p3}-byte row - the row length may be one row short; check this script": [
-      "backend/bruker_workflow.py:947"
+      "backend/bruker_workflow.py:927"
     ],
     "xT: fid.com={p0} vs {p1} expected from TD={p2} (MODE {p3}); check this script": [
-      "backend/bruker_workflow.py:970"
+      "backend/bruker_workflow.py:950"
     ],
     "xT: {p0} is not positive; check this script": [
-      "backend/bruker_workflow.py:963"
+      "backend/bruker_workflow.py:943"
     ],
     "yes": [
       "gui/dialogs.py:173"
     ],
     "zero filling close": [
-      "backend/script_generator.py:381"
+      "backend/script_generator.py:375"
     ],
     "zero filling {p0}: closure": [
-      "backend/script_generator.py:419"
+      "backend/script_generator.py:413"
     ],
     "zero filling {p0}: {p1}": [
-      "backend/script_generator.py:421"
+      "backend/script_generator.py:415"
     ],
     "{p0!r} in a combination table is a **picking threshold**: it is chosen when the reference is built (CLI `peaks --sigma N`, or ensure_reference_peaks(...)). Once frozen, every workflow must match it, so it cannot be perturbed. To change it, rebuild the reference (force=True, or delete that condition's study/reference/<key>/ and run again).": [
       "nmrforge_api/sweep.py:273"
@@ -5190,17 +5183,17 @@
     ],
     "{p0} Phase re-search is completed, time-consuming {p1:.1f} Second": [
       "workflow/phase_routes.py:898",
-      "workflow/phase_routes.py:2046"
+      "workflow/phase_routes.py:2067"
     ],
     "{p0} Phase search is completed, time-consuming {p1:.1f} Second": [
       "workflow/phase_routes.py:821",
-      "workflow/phase_routes.py:1764"
+      "workflow/phase_routes.py:1778"
     ],
     "{p0} Status: {p1}": [
       "gui/pipeline_panel.py:2594"
     ],
     "{p0} acquisition center": [
-      "backend/bruker_workflow.py:270"
+      "backend/bruker_workflow.py:271"
     ],
     "{p0} alignment tolerance (ppm)": [
       "gui/dialogs.py:820"
@@ -5282,20 +5275,20 @@
       "workflow/window_optimize.py:767"
     ],
     "{p0}.fid is in place ({p1})": [
-      "backend/nmrpipe_backend.py:3198"
+      "backend/nmrpipe_backend.py:3218"
     ],
     "{p0}: +/-180° chemical shift partitioning disambiguation {p1} → {p2}": [
       "workflow/phase_routes.py:797",
-      "workflow/phase_routes.py:1741"
+      "workflow/phase_routes.py:1755"
     ],
     "{p0}: Baseline has been optimised {p1} → {p2} (score={p3:.1f} → {p4:.1f}, +{p5:.1f})": [
       "workflow/baseline_optimize.py:329"
     ],
     "{p0}: CAR is missing from the conversion script": [
-      "backend/bruker_workflow.py:452"
+      "backend/bruker_workflow.py:453"
     ],
     "{p0}: Memory phase re-search (iteration {p1}) = ({p2:g}°, {p3:g}°) score={p4:.2f}": [
-      "workflow/phase_routes.py:2033"
+      "workflow/phase_routes.py:2054"
     ],
     "{p0}: The backend interface needs to be implemented and cannot be run yet": [
       "gui/pipeline_panel.py:2849"
@@ -5304,61 +5297,62 @@
       "workflow/baseline_optimize.py:252"
     ],
     "{p0}: The corresponding parameter was not found in fid.com and has been skipped": [
-      "backend/bruker_workflow.py:1565"
+      "backend/bruker_workflow.py:1578"
     ],
     "{p0}: Window: The optimal configuration is consistent with the existing configuration and remains": [
       "workflow/window_optimize.py:676"
     ],
     "{p0}: acquisition centre (acqus O1/BF1)": [
-      "backend/bruker_workflow.py:443"
+      "backend/bruker_workflow.py:444"
     ],
     "{p0}: conversion script value": [
-      "backend/bruker_workflow.py:449"
+      "backend/bruker_workflow.py:450"
     ],
     "{p0}: conversion script value (acquisition centre unavailable)": [
-      "backend/bruker_workflow.py:459"
+      "backend/bruker_workflow.py:460"
     ],
     "{p0}: conversion script's water-peak + gamma-ratio value": [
-      "backend/bruker_workflow.py:436"
+      "backend/bruker_workflow.py:437"
     ],
     "{p0}: fid.com={p1} -> Echo-AntiEcho (corrected: acquNs FnMODE=6 is Echo-Antiecho; the conversion script did not detect it)": [
-      "backend/bruker_workflow.py:627"
+      "backend/bruker_workflow.py:628"
     ],
     "{p0}: fid.com={p1} -> acqus O1/BF1={p2:.3f} (CAR reference = the computed acquisition centre; status: {p3})": [
-      "backend/bruker_workflow.py:293"
+      "backend/bruker_workflow.py:294"
     ],
     "{p0}: fid.com={p1} -> acqus={p2} (corrected)": [
-      "backend/bruker_workflow.py:698"
+      "backend/bruker_workflow.py:699"
     ],
     "{p0}: fid.com={p1} -> manual={p2} (applied)": [
-      "backend/bruker_workflow.py:1551"
+      "backend/bruker_workflow.py:1564"
     ],
     "{p0}: fid.com={p1} -> {p2} (corrected: the direct dimension of a Bruker dataset is always DQD)": [
-      "backend/bruker_workflow.py:615"
+      "backend/bruker_workflow.py:616"
     ],
     "{p0}: fid.com={p1} -> {p2} (same bruk2pipe mode code, but the specific keyword records the acquisition mode; the sign adjustment is applied by the FT flags, not at conversion)": [
-      "backend/bruker_workflow.py:685"
+      "backend/bruker_workflow.py:686"
     ],
     "{p0}: fid.com={p1} kept (acquNs FnMODE is undefined and there is no pulse program: the acquisition mode is not metadata-confirmed)": [
-      "backend/bruker_workflow.py:709"
+      "backend/bruker_workflow.py:710"
     ],
     "{p0}: fid.com={p1} kept (acquNs FnMODE is undefined: low confidence, not metadata-confirmed)": [
-      "backend/bruker_workflow.py:729"
+      "backend/bruker_workflow.py:730"
     ],
     "{p0}: fid.com={p1} kept (acquNs FnMODE is undefined; inferred from the pulse program, not metadata-confirmed)": [
-      "backend/bruker_workflow.py:719"
+      "backend/bruker_workflow.py:720"
     ],
     "{p0}: fid.com={p1} kept as written (canonical -N mode: the imaginaries are negated; the sign adjustment is applied by the FT flags)": [
-      "backend/bruker_workflow.py:669"
+      "backend/bruker_workflow.py:670"
     ],
     "{p0}: fid.com={p1} says the imaginaries are negated (-N), while the coherence-pathway criterion gives {p2} for this dimension - kept the conversion script value, confirm the sign": [
-      "backend/bruker_workflow.py:658"
+      "backend/bruker_workflow.py:659"
     ],
     "{p0}: fid.com={p1} vs acquNs FnMODE={p2} - the conversion script and the acquisition metadata disagree; kept the conversion script value, confirm the acquisition mode": [
-      "backend/bruker_workflow.py:638"
+      "backend/bruker_workflow.py:639"
     ],
     "{p0}: fid.com={p1} → acqus={p2} (corrected)": [
-      "backend/bruker_workflow.py:1373"
+      "backend/bruker_workflow.py:1353",
+      "backend/bruker_workflow.py:1428"
     ],
     "{p0}: in-memory phase re-search (direct dimension fixed) = ({p1:g}°, {p2:g}°) score={p3:.2f}": [
       "workflow/phase_routes.py:888"
@@ -5370,11 +5364,11 @@
       "workflow/batch.py:418"
     ],
     "{p0}: manually set value": [
-      "backend/bruker_workflow.py:433"
+      "backend/bruker_workflow.py:434"
     ],
     "{p0}: memory phase = ({p1:g}°, {p2:g}°) score={p3:.2f}": [
       "workflow/phase_routes.py:812",
-      "workflow/phase_routes.py:1755"
+      "workflow/phase_routes.py:1769"
     ],
     "{p0}: peak_id is empty (delete the blank row)": [
       "nmrforge_api/localization_targets.py:74"
@@ -5387,7 +5381,7 @@
       "nmrforge_api/localization_targets.py:79"
     ],
     "{p0}: rc={p1} ({p2}) indicator={p3}": [
-      "backend/nmrpipe_backend.py:2541"
+      "backend/nmrpipe_backend.py:2561"
     ],
     "{p0}: refines nothing ({p1})": [
       "nmrforge_api/localization_targets.py:461"
@@ -5429,7 +5423,7 @@
       "core/experiment/sampling_detector.py:379"
     ],
     "{p0}: {p1} row(s), {p2} whole-trace zero row(s), {p3} sampled row(s) in {p4} contiguous block(s) - compact sampling, but the positions cannot be recovered without a schedule": [
-      "backend/nmrpipe_backend.py:739"
+      "backend/nmrpipe_backend.py:661"
     ],
     "{p0}: {p1} rows share a coordinate with another row (duplicate localization); the table flags them with duplicate_localization=true": [
       "nmrforge_api/sweep.py:2448"
@@ -5478,7 +5472,7 @@
       "gui/pipeline_panel.py:2975"
     ],
     "Δ": [
-      "backend/bruker_workflow.py:272"
+      "backend/bruker_workflow.py:273"
     ],
     "── {p0} run log (most recent)──": [
       "gui/main_window.py:1292"
@@ -5549,53 +5543,53 @@
       "workflow/direct_diagnostics.py:1840"
     ],
     "⚠ Multi-segment type recognition failed ({p0}), merged according to segmented": [
-      "backend/nmrpipe_backend.py:594"
+      "backend/nmrpipe_backend.py:516"
     ],
     "⚠ Sampling bad point detected {p0}: {p1},deleted from the source ser/nuslist (backup .bak)": [
-      "backend/nmrpipe_backend.py:4782"
+      "backend/nmrpipe_backend.py:4802"
     ],
     "⚠ Sampling bad point detected {p0}: {p1},not deleted from the source (ser missing / layout undecidable / write failed), fell back to zeroing while the FID is generated; the original ser/nuslist is untouched": [
-      "backend/nmrpipe_backend.py:4792"
+      "backend/nmrpipe_backend.py:4812"
     ],
     "⚠ Sampling bad point detected {p0}:{p1},dropped from the merged nuslist": [
-      "backend/nmrpipe_backend.py:4862"
+      "backend/nmrpipe_backend.py:4882"
     ],
     "⚠ Sampling bad point detected {p0}:{p1},dropped from the nuslist and the corresponding FID cleaned up": [
-      "backend/nmrpipe_backend.py:5005"
+      "backend/nmrpipe_backend.py:5025"
     ],
     "⚠ Warning": [
       "workflow/optimization_report.py:226"
     ],
     "⚠ bad point must be deleted from the source ser, but {p0}/ser is missing; falling back to cleaning the generated FID": [
-      "backend/nmrpipe_backend.py:4677"
+      "backend/nmrpipe_backend.py:4697"
     ],
     "⚠ bad point {p0}: Out of bounds, no corresponding slice, merge FID No need to clean up": [
-      "backend/nmrpipe_backend.py:4940"
+      "backend/nmrpipe_backend.py:4960"
     ],
     "⚠ bad point {p0}: the corresponding FID increment has been zeroed({p1} OK {p2})": [
-      "backend/nmrpipe_backend.py:4976"
+      "backend/nmrpipe_backend.py:4996"
     ],
     "⚠ bad point {p0}:FID Cleanup failed {p1}": [
-      "backend/nmrpipe_backend.py:4986"
+      "backend/nmrpipe_backend.py:5006"
     ],
     "⚠ bad point {p0}:No corresponding FID file, no need to clean": [
-      "backend/nmrpipe_backend.py:4952"
+      "backend/nmrpipe_backend.py:4972"
     ],
     "⚠ bad point {p0}:The line is out of bounds, no need to clean up": [
-      "backend/nmrpipe_backend.py:4967"
+      "backend/nmrpipe_backend.py:4987"
     ],
     "⚠ script check: {p0}": [
       "gui/main_window.py:1672",
       "gui/pipeline_panel.py:3189"
     ],
     "⚠ the {p0}/ser layout cannot be determined from the sampling parameters (direct-dimension TD={p1}, {p2} bytes per point; redundancy count inconsistent or word size unknown); falling back to cleaning the generated FID, not handled automatically": [
-      "backend/nmrpipe_backend.py:4708"
+      "backend/nmrpipe_backend.py:4728"
     ],
     "⚠ {p0} source cleanup failed ({p1}), falling back to cleaning the generated FID": [
-      "backend/nmrpipe_backend.py:4769"
+      "backend/nmrpipe_backend.py:4789"
     ],
     "⚠ {p0}/ser size {p1} Cannot press nuslist {p2} rows divide evenly (the ser row count may not match the nuslist point count); falling back to cleaning the generated FID, not handled automatically": [
-      "backend/nmrpipe_backend.py:4689"
+      "backend/nmrpipe_backend.py:4709"
     ],
     "✓ Accept": [
       "workflow/optimization_report.py:225"
@@ -5702,5 +5696,5 @@
     "workflow/ucsf_export.py",
     "workflow/window_optimize.py"
   ],
-  "coverage_floor_zh": 1769
+  "coverage_floor_zh": 1767
 }

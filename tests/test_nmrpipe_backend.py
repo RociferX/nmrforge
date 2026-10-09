@@ -725,9 +725,7 @@ def test_zero_bad_point_fid_states_slices(
 
 
 def test_nus_grid_from_points_and_apply(tmp_path: Path) -> None:
-    """0.2.197: after bad points are removed, derive the NusTD from the actual
-    sampling range and shrink it.
-    """
+    """Bad-point cleanup must not shrink NusTD to the sampled coordinate range."""
     from backend.nmrpipe_backend import (
         _apply_nus_grid_after_clean,
         _nus_grid_from_points,
@@ -759,10 +757,10 @@ def test_nus_grid_from_points_and_apply(tmp_path: Path) -> None:
         acquisition_parameters={"acqu2s": {"NusTD": 170}, "acqu3s": {"NusTD": 52}},
     )
     logs = _apply_nus_grid_after_clean(exp3, [(5, 3), (82, 25)])
-    assert exp3.acquisition_parameters["acqu2s"]["NusTD"] == 166
+    assert exp3.acquisition_parameters["acqu2s"]["NusTD"] == 170
 
     assert exp3.acquisition_parameters["acqu3s"]["NusTD"] == 52
-    assert any("170→166" in line for line in logs)
+    assert logs == []
 
     exp2 = Experiment(
         dataset_id="y",
@@ -776,8 +774,8 @@ def test_nus_grid_from_points_and_apply(tmp_path: Path) -> None:
         acquisition_parameters={"acqu2s": {"NusTD": 64}},
     )
     logs2 = _apply_nus_grid_after_clean(exp2, [(10,), (20,)])
-    assert exp2.acquisition_parameters["acqu2s"]["NusTD"] == 21
-    assert any("64→21" in line for line in logs2)
+    assert exp2.acquisition_parameters["acqu2s"]["NusTD"] == 64
+    assert logs2 == []
 
 
 def test_validate_nus_points_rejects_wrong_arity_negative_and_oob(

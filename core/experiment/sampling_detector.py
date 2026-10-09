@@ -48,7 +48,7 @@ def full_sampling_evidence(
     2026-09-14: full sampling should take the uniform route).
     """
     if has_nuslist:
-        shape = schedule_grid_shape(experiment)
+        shape = schedule_grid_shape(experiment, has_schedule=True)
         if shape and _schedule_is_canonical_full_grid(experiment, nus_list):
             return tr(
                 "actual full sampling: the sampling schedule covers the whole indirect "
@@ -471,7 +471,7 @@ def detect(
 
 def _schedule_full_grid(experiment: Experiment) -> int:
     """Return the full indirect-dimension complex-point grid size, or zero if unavailable."""
-    sizes = schedule_grid_shape(experiment)
+    sizes = schedule_grid_shape(experiment, has_schedule=True)
     if not sizes:
         return 0
     product = 1
@@ -482,7 +482,7 @@ def _schedule_full_grid(experiment: Experiment) -> int:
 
 def _schedule_covers_full_grid(experiment: Experiment, nus_list: list[tuple[int, ...]]) -> bool:
     """Return whether a schedule covers the entire grid and is therefore redundant for sampling."""
-    shape = schedule_grid_shape(experiment)
+    shape = schedule_grid_shape(experiment, has_schedule=True)
     grid = _schedule_full_grid(experiment)
     if grid <= 0 or not nus_list or any(len(point) != len(shape) for point in nus_list):
         return False
@@ -504,7 +504,7 @@ def _schedule_is_canonical_full_grid(
     experiment: Experiment, nus_list: list[tuple[int, ...]]
 ) -> bool:
     """Return whether a full schedule is already in ordinary grid order and can use uniform FT."""
-    shape = schedule_grid_shape(experiment)
+    shape = schedule_grid_shape(experiment, has_schedule=True)
     if not shape or not _schedule_covers_full_grid(experiment, nus_list):
         return False
     expected_zero = list(product(*(range(size) for size in shape)))

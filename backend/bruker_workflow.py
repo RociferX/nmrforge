@@ -15,6 +15,7 @@ from typing import Any
 
 from core.data.bruker_dtype import UnknownBrukerDtype, sample_itemsize
 from core.data.internal_data_model import AxisRole, Experiment, SamplingMode
+from core.data.nus_reader import indirect_grid_2d, schedule_grid_shape
 from core.data.ser_layout import solve_row_points
 from core.experiment.acquisition_mode_detector import (
     DIRECT_BRUK2PIPE_MODE,
@@ -804,12 +805,9 @@ def _effective_td(experiment: Experiment) -> list[int]:
     """Points per dimension used for conversion/verification: NUS data takes NusTD (the sampling
     grid) on indirect dimensions, otherwise TD.
 
-    Review A7 2026-09-24: in ``script_generator.effective_td`` the 2D NUS grid is
-    ``acqu2s TD // hypercomplex components`` (the docs state "NusTD is not trusted"), while
-    this function takes ``NusTD`` -- the two may give different grids. This function **does not
-    change behaviour** (``-yN/-yT`` in fid.com and the forced nusExpand grid have always
-    followed NusTD and were verified end to end on real 2D NUS data), but it logs an
-    inconsistency instead of staying silent.
+    Conversion uses N values including encoding components; the 2D processing layer uses
+    complex-point T values. Both share ``indirect_grid_2d`` and its full declared grid rather
+    than treating compact acquisition TD as the complete NUS extent.
     """
     td = [dim.td for dim in experiment.dimensions]
     if experiment.sampling.mode is SamplingMode.NUS:
@@ -824,27 +822,9 @@ def _effective_td(experiment: Experiment) -> list[int]:
             if nus_td:
                 td[index] = nus_td
     if experiment.sampling.mode is SamplingMode.NUS and experiment.ndim == 2 and len(td) > 1:
-        grid = _two_d_nus_grid(experiment)
-        if grid and td[1] and grid != td[1]:
-            logger.debug(
-                "2D NUS grid: fid.com/nusExpand use NusTD=%s while the fallback script would "
-                "use acqu2s TD//mult=%s (%s)",
-                td[1],
-                grid,
-                experiment.dataset_id,
-            )
+        grid, mult, _direct = indirect_grid_2d(experiment)
+        td[1] = grid * mult
     return td
-
-
-def _two_d_nus_grid(experiment: Experiment) -> int:
-    """Complex-point grid of the indirect dimension of a 2D NUS dataset (the
-    ``script_generator.effective_td`` convention, for comparison only).
-    """
-    dim = _dim(experiment, "F1")
-    if dim is None or not dim.td:
-        return 0
-    mult = 2 if int(_fnmode(experiment, "F1") or 0) in (0, 4, 5, 6) else 1
-    return int(dim.td) // mult
 
 
 #: ser rows are padded to 1024 bytes (single source ``core.data.ser_layout``); no candidate
@@ -1434,7 +1414,27 @@ def patch_fid_com(
             )
         )
     if experiment.sampling.mode is SamplingMode.NUS:
-        patched, grid_warnings = _force_nus_expand_grid(patched, experiment)
+        if experiment.ndim == 2 and not {"yN", "yT"}.intersection(manual_keys):
+            grid, mult, _direct = indirect_grid_2d(experiment)
+            if grid <= 0:
+                raise ValueError("Cannot resolve the declared 2D NUS grid")
+            targets = {"yN": str(grid * mult), "yT": str(grid)}
+
+            def align_nus_geometry(match: re.Match) -> str:
+                key, current = match.group(1), match.group(2)
+                desired = targets.get(key)
+                if desired is None or current == desired:
+                    return match.group(0)
+                warnings.append(tr(
+                    "{p0}: fid.com={p1} → acqus={p2} (corrected)",
+                    p0=key, p1=current, p2=desired,
+                ))
+                return f"-{key} {desired}"
+
+            patched = _KEY_RE.sub(align_nus_geometry, patched)
+        patched, grid_warnings = _force_nus_expand_grid(
+            patched, experiment, manual_keys=manual_keys,
+        )
         warnings += grid_warnings
         # 0.2.199-patch27: do not force a single file -- bruker decides the output shape itself
         # (single file for TD=1, slices for TD>1) and the program accepts both inputs (see the
@@ -1455,10 +1455,13 @@ _MASK_STAGE_RE = re.compile(
     r"(?:\n[ \t][^\n]*)*"
 )
 
-_NUS_EXPAND_RE = re.compile(r"(nusExpand\.tcl[^\n]*?)\\\n")
+_NUS_EXPAND_RE = re.compile(r"nusExpand\.tcl[^\n]*(?:\n[ \t]+[^\n]*)*")
 
 
-def _force_nus_expand_grid(text: str, experiment: Experiment) -> tuple[str, list[str]]:
+def _force_nus_expand_grid(
+    text: str, experiment: Experiment,
+    *, manual_keys: set[str] | frozenset[str] = frozenset(),
+) -> tuple[str, list[str]]:
     """Force nusExpand and bruk2pipe onto the same NusTD grid (0.2.195).
 
     By default nusExpand derives the grid from nuslist (yTNUS/zTNUS); when that disagrees with
@@ -1466,22 +1469,32 @@ def _force_nus_expand_grid(text: str, experiment: Experiment) -> tuple[str, list
     the reconstruction is wrong. Passing -yT/-zT explicitly puts both on the same grid. Only the
     first (expansion) call is changed; the mask call is left alone.
     """
-    td = _effective_td(experiment)
-    grid: list[str] = []
-    if len(td) > 1:
-        grid.append(f"-yT {int(td[1] // 2)}")
-    if len(td) > 2:
-        grid.append(f"-zT {int(td[2] // 2)}")
-    if not grid:
+    shape = schedule_grid_shape(experiment)
+    targets = dict(zip(("yT", "zT"), shape))
+    if experiment.ndim == 2 and {"yN", "yT"}.intersection(manual_keys):
+        manual_t = _num(parse_fid_com(text).get("yT"))
+        if manual_t is not None and manual_t > 0:
+            targets["yT"] = int(manual_t)
+    if not targets:
         return text, []
     warnings: list[str] = []
 
     def replace(match: re.Match) -> str:
-        line = match.group(1)
-        if "-yT" in line or "-zT" in line:
-            return match.group(0)
-        warnings.append(tr("NUS data-expansion grid aligned with bruk2pipe: ") + " ".join(grid))
-        return line[:-1] + " " + " ".join(grid) + " \\\n"
+        line = match.group(0)
+        original = line
+        for key, value in targets.items():
+            option = re.compile(rf"-{key}\s+\S+")
+            if option.search(line):
+                line = option.sub(f"-{key} {value}", line)
+            else:
+                line = line.replace("nusExpand.tcl", f"nusExpand.tcl -{key} {value}", 1)
+        if line == original:
+            return line
+        warnings.append(
+            tr("NUS data-expansion grid aligned with bruk2pipe: ")
+            + " ".join(f"-{key} {value}" for key, value in targets.items())
+        )
+        return line
 
     patched, _count = _NUS_EXPAND_RE.subn(replace, text, count=1)
     return patched, warnings

@@ -64,62 +64,21 @@ and finalises with independent names).
 When filing a request, attach `records/manifest.json` and the `status` output so it can be
 reproduced.
 
-## 9.5 Validation boundary: engineering regression vs scientific validation
+## 9.5 Validation and evidence
 
-The question a user asks most often is "what was this batch of numbers validated against?".
-This software keeps the two things apart:
+The ordinary pytest suite checks processing orchestration and records through mocked engine
+boundaries. It does not run NMRPipe or SMILE. Real-engine verification separately records the
+input, software revision, engine versions, parameters, and resulting spectra/QC.
 
-### Engineering regression (shows the pipeline and the records are self-consistent and
-reproducible)
+[Four-route real-data evidence](../evidence/real-data-comparison.md) compares 2D/3D uniform/NUS
+results with identified references. The artificial 2D example is controlled downsampling of
+uniform data (75% requested, 68/90 retained), while the 3D NUS example was acquired at 25%.
+The main signals agree well in these cases. Candidate coverage is a detection-and-matching
+measure, not assigned-peak recovery or a guarantee for every experiment.
 
-| Evidence | How to run it | Product / log |
-| --- | --- | --- |
-| Full test suite | `python -m pytest` (no NMRPipe needed: the engine boundary is stubbed) | terminal output, nothing written to the repository |
-| Full suite on a machine that has NMRPipe | `bash scripts/vm_test.sh` (the same suite as above: the engine boundary stays stubbed) | a test log; bytecode and ruff caches are redirected to a temporary directory so the working copy stays clean |
-| CI | `.github/workflows/ci.yml` jobs `static` (ruff) / `tests` (3.12, 3.13) / `release-readiness` | GitHub Actions logs |
-| CI job on a machine that has NMRPipe | `external-engine`: re-runs the same stubbed suite on a self-hosted runner that has NMRPipe and uploads the log. It does **not** invoke the engine | **skipped unless** a self-hosted runner is registered and the repository variable `NMRFORGE_SELF_HOSTED_CI` is `true`; a licensed dependency must not become a PR gate, and a GitHub-hosted runner cannot install NMRPipe |
-| Real-engine acceptance | Run a documented workflow on a system where NMRPipe and, for NUS, SMILE are installed | Record inputs, software revision, engine versions, parameters and resulting QC; this page makes no current benchmark claim |
-
-Run real-engine acceptances **serially**: concurrent runs compete for CPU and overwrite each
-other's logs, which produces failures unrelated to the code.
-
-### Scientific validation (outside the scope of this software)
-
-- engineering regression and real-engine smoke runs only show that the pipeline runs, that the
-  products are self-consistent and that the same input gives the same result; they **cannot**
-  show that the processing result is scientifically correct on a real system;
-- answering the latter needs a ground-truth benchmark (a synthetic benchmark or a system with a
-  known answer) plus criteria of your own, and it has to accept the conclusion "on which systems
-  the algorithm is biased" - that is done by **downstream analysis** (this software makes no
-  statistical judgement and draws no scientific conclusion; see the software boundary in
-  01-overview);
-- so when you cite a product, write three things separately: (1) which engine behaviour was used
-  (`compat` / `behavior_digest`), (2) whether the processing flow is covered by the engineering
-  regression (the table above), (3) whether the scientific conclusion holds (downstream analysis).
-
-### Historical external truth check (not a current-source validation)
-
-This is a **2026-09-22 historical snapshot**; its recorded values are retained and have not been
-recalculated against the current source revision. "Outside the scope of this software" means the
-software **does not draw the conclusion for you**. The conventions and values from that dated
-check on **public data** are in
-[Real-data evidence](../evidence/real-data-comparison.md) section 2:
-
-| Element | How it is done |
-| --- | --- |
-| Data | the original Bruker data of real 15N-1H HSQC / HNCO data sets (**public BMRB timedomain entries, downloadable**) |
-| Expected positions | the **published deposited chemical shifts** of the same sample and condition (never given to peak picking; used only as an external criterion) |
-| Matching | one-to-one greedy nearest first over a tolerance ladder; the global reference shift is calibrated **once** and then frozen |
-| Control | the expected table shifted per peak independently under the same tolerance (fixed seed, 200 draws) gives the chance background |
-
-Result (2026-09-22 2D uniform run): at a tight tolerance (1H 0.01 / 15N 0.05 ppm) **84.1% (90 of 107) of
-the expected peaks are matched one-to-one** (93.5% at 0.02 / 0.10 ppm) with median position residuals of
-0.0012 / 0.0164 ppm, against a 2.0% chance background. On the 15N axis that tolerance is smaller than one
-data point (0.055 ppm per point), so most of the peaks that fail are stopped by the threshold rather than
-missing - the per-peak distances are in the match CSV. That layer answers "can the automatic processing
-reproduce external truth"; it does
-**not** cover your sample, your parameter choices or your scientific conclusion - so still write the
-three things above separately when you cite a product.
+Record the software/API version, compatibility manifest, and processing parameters when citing
+results. Biological interpretations and experiment-specific scientific acceptance remain the
+responsibility of downstream analysis.
 
 ## 9.6 Relationship to the desktop application: shared processing, separate entry-point validation
 
@@ -128,29 +87,16 @@ three things above separately when you cite a product.
 - Parameter merging, reference freezing, independent detection, table serialization and resume
   remain API-specific orchestration and require their own validation. Shared components do not
   prove that entry-point parameters are applied or that exported axes and QC are correct.
-- Compatibility fingerprints record versioned behaviour, not scientific validity. Historical
-  public-data evidence supports the recorded revision, input and route only; it does not
-  automatically validate other API inputs or parameter combinations.
+- The main application's current real-data evidence is in the
+  [real-data comparisons](../evidence/real-data-comparison.md). Two-dimensional positions cannot
+  validate a three-dimensional carbon axis; projections cannot cover all three-dimensional
+  overlap or artifacts. Projection candidate-match fractions are not true-peak recovery rates.
 
-## 9.7 Reading the boundary: common misreadings
+## 9.7 Interpreting run records
 
-- "It ran" is not "it is correct": the engineering regression in 9.5 only shows the pipeline is
-  self-consistent and traceable. Scientific conclusions still come from downstream analysis
-  against your own criteria.
-- "CI is green" is not "the engine is green": mocked tests do not call NMRPipe. Engine-level
-  conclusions require separate acceptance on a system with the required external tools.
-- "The tool rewrote my data" is not "my dataset is gone": the source-level NUS cleanup writes
-  into the project's own `raw/` copy, keeps `ser.bak` / `nuslist.bak`, and uses `os.replace`,
-  which breaks the link to the original; the scope is stated in the README limitations section.
-- "No coverage threshold" is not "no testing policy": the gates are the marker-classified
-  suite, the structural guards (`test_qt_independence`, `test_ownership`, the behaviour
-  fingerprints and the conformance golden vectors) and the release-readiness checks. A
-  code-coverage percentage is deliberately not a gate, and `pytest -m unit` takes about 45 s
-  (mostly collection) rather than the "seconds" a logic-only suite would suggest.
-- "No number" is not "fast": the four skipped benchmark rows are deliberately not estimated.
-- "The conversion record matched" is not "the input was not touched": above 8 MiB the recorded
-  fingerprint degrades to `size + mtime_ns` (see `core/data/raw_fingerprint.py`), so it proves
-  that the raw input is the one the converter saw - it is not content attestation.
+Review the run status, warnings, resolved parameters, and resulting spectrum together.
+A compatibility manifest identifies software behavior; an accepted QC result does not establish
+peak identity or an experiment-specific scientific conclusion.
 
 ## 9.8 Input and output boundaries
 

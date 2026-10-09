@@ -393,6 +393,13 @@ def test_auto_full_path(
     assert spec
     data = manager.data(exp_id, data_id)
     assert data.status == "processed"
+    if backend.reconstruct_params:
+        first = backend.reconstruct_params[0]
+        if dataset == "nus_2d":
+            assert first.get("_initialize_2d_nus_phase") is True
+        else:
+            assert "_initialize_2d_nus_phase" not in first
+        assert "_initialize_2d_nus_phase" not in backend.reconstruct_params[-1]
     assert any(
         r.workflow_ref == "phase_optimize_unified" and r.status == "success"
         for r in manager.project.workflow_runs
@@ -404,6 +411,53 @@ def test_auto_full_path(
         r.workflow_ref == "pick_peaks" and r.status == "success"
         for r in manager.project.workflow_runs
     )
+
+
+def test_compact_2d_nus_full_path_preserves_legal_high_coordinates(
+    tmp_path: Path, bruker_dir: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A compact 50% schedule keeps its declared grid and legal high coordinates."""
+    import hashlib
+    import re
+
+    from backend.nmrpipe_backend import NMRPipeBackend
+    from core.data.bruker_reader import read_dataset
+    from core.data.nus_reader import schedule_grid_shape
+    from workflow.stepwise import generate_fid, generate_spectrum
+
+    raw = tmp_path / "compact_nus"
+    shutil.copytree(bruker_dir / "nus_2d", raw)
+    acqu2s = (raw / "acqu2s").read_text(encoding="utf-8")
+    acqu2s = re.sub(r"##\$TD=\s*\d+", "##$TD= 62", acqu2s)
+    acqu2s = re.sub(r"##\$FnMODE=\s*\d+", "##$FnMODE= 6", acqu2s)
+    (raw / "acqu2s").write_text(acqu2s + "\n##$NusTD= 124\n", encoding="utf-8")
+    acqus = (raw / "acqus").read_text(encoding="utf-8")
+    acqus = re.sub(r"##\$NusAMOUNT=\s*\d+", "##$NusAMOUNT= 50", acqus)
+    (raw / "acqus").write_text(acqus + "\n##$FnTYPE= 2\n", encoding="utf-8")
+    points = [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 14, 17, 19, 22,
+        25, 27, 30, 33, 35, 37, 39, 40, 44, 47, 49, 53, 55, 57, 60,
+    ]
+    (raw / "nuslist").write_text("".join(f"{p}\n" for p in points), encoding="utf-8")
+    np.ones((62, 2048), dtype="<i4").tofile(raw / "ser")
+    before = {name: hashlib.sha256((raw / name).read_bytes()).hexdigest()
+              for name in ("ser", "nuslist")}
+    exp = read_dataset(raw)
+    assert schedule_grid_shape(exp) == (62,)
+    assert exp.sampling.sampling_fraction == pytest.approx(0.5)
+    count, bad, removed = NMRPipeBackend(tmp_path / "clean")._clean_source_nus(exp, [raw], [])
+    assert count == 31 and bad == [] and not removed
+    assert before == {name: hashlib.sha256((raw / name).read_bytes()).hexdigest()
+                      for name in ("ser", "nuslist")}
+
+    manager = ProjectManager.create_project(tmp_path / "proj", "demo")
+    entry = manager.create_experiment("HC-HSQC NUS")
+    data = manager.import_data(entry.id, str(raw))
+    _install_spectrum_mocks(monkeypatch)
+    backend = FakeBackend(manager.data_dir(entry.id, data.id, "process"))
+    assert generate_fid(manager, entry.id, data.id, backend)
+    assert generate_spectrum(manager, entry.id, data.id, backend)
+    assert manager.data(entry.id, data.id).status == "processed"
 
 
 def test_auto_full_path_1d_generates_ft1(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

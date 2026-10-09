@@ -1,353 +1,746 @@
-# 真实数据实测证据(公开数据 · 四条处理路径)
+# 四条处理路径：二维谱与三维投影对照
 
-> **数字状态**:本页保留 2026-09-22 那套 2D uniform 数据的**实测数字**(它是当时真机跑出来的,
-> 不重算);新增的三条路径(NUS ×2、3D uniform)的**数字列在真机运行后回填** —— 表格里标
-> `待真机` 的格子就是还没跑过的,不许当成已有结论引用。选型与内存口径见第 0 节。
+本页展示软件1.0.4、API v1.1的处理终谱、方法、结果与限制。
+四组完整对照为2D uniform、受控人工2D NUS、3D uniform及实采3D NUS；
+人工下采样的原始数据确实来自采集，但下采样日程不是仪器实采NUS。
 
-本页用**四套公开数据**,对应产品的四条处理路径。原始数据全部公开可下载,**任何人都能取同一份
-数据复算**;期望峰位取自公开条目里**作者沉积的化学位移**(期望峰表本体不进仓库,只留 sha256)。
+## 如何读图
 
-| # | 路径 | 数据 | 来源生物 | 为什么选它 |
-| --- | --- | --- | --- | --- |
-| ① | 2D uniform | BMRB timedomain **27493**,数据集 `Apo_CBL_0.4mM/2` | *Bacillus subtilis*(枯草芽孢杆菌,土壤细菌) | 真 Bruker `acqus/acqu2s/ser`;**自带 NMRPipe 处理的 `pdata/1`**,可比性最好 |
-| ② | 2D NUS | SMILE 官方示例 2:`trosyJHH`(20% NUS 2D TROSY) | 标准蛋白样品 | **真实采集的 NUS**,Bruker `ser` + 官方采样表;**参照谱在 `*.data.tar.gz`** |
-| ③ | 3D uniform | BMRB timedomain **15217**,`SR358_B600_3D_HNCO.fid` | *Bacillus subtilis*(枯草芽孢杆菌) | 真 Bruker `acqus/acqu2s/acqu3s/ser` + `pdata/1`,`pdata/2` |
-| ④ | 3D NUS | ③ 的 BMRB 15217 HNCO **降采样**成 NUS(`uniform_to_nus`,真机生成) | *Bacillus subtilis* | 真 Bruker `acqus/acqu2s/acqu3s/ser`;15N 64 × 13C 80 **天然每维 ≤ 85**;取样表**本项目生成** |
+每组左侧是NMRForge终谱，右侧是注明来源的参考谱。蓝实线为正信号，红虚线为负信号。
+红色小实点为两侧各自独立检测的候选；只在参考侧以紫色x标出未匹配候选。
+两侧使用共同物理窗口，等高线均从各自最大绝对强度的7.5%开始。
+三维先裁共同完整三维窗口，再生成H–N、H–C、N–C有符号最大绝对值投影，逐投影独立选峰匹配。
 
-## 0. 怎么选的:四条硬约束
+**参考候选覆盖率 = 匹配对数 ÷ 参考候选数**。它不是已指认真峰回收率，
+也不能证明完整三维峰身份恢复。额外候选不自动算假峰，未匹配参考候选也不自动算噪声；
+需要结合图中的弱结构、旁瓣和重叠判断。两谱分别归一，绝对强度不可直接比较。
 
-证据要能被长期公开引用,所以数据源的选取按下面四条硬约束办(任何一条不满足就不选):
+## 数据与参考
 
-1. **生物安全中性** —— 只取细菌、人、植物、真菌或**合成/标准样品**。排除病毒、致病菌与毒素类
-   (例如 *Photorhabdus luminescens* 的 Tc 毒素家族、白喉/肉毒/蓖麻毒素等一律不选)。
-2. **必须是真 Bruker 时域数据** —— 目录里要有 `acqus`/`acqu2s`(`/acqu3s`)+ `ser`。这一条
-   卡掉了大量看起来合适的 NESG 老条目:**它们多数是 Varian 格式**(`procpar`/`fid`,没有
-   `acqus`/`ser`),喂不进 Bruker 读取器。BPTI(5307)、Z domain(5656)、*E. coli* YacG(5335)
-   都属于这一类,虽然小而无害,但**格式不对**。
-3. **网格必须小** —— 见下条的内存口径。3D 间接维网格越大,SMILE 重构的内存越夸张,真机会跑不动。
-4. **有可比对的参照** —— 要么数据自带 `pdata/`(数据提供方自己处理的谱),要么是 NUS 且官方
-   给了重建结果。这样第 1 节的「自动处理 vs 参照」才有对象可比。
-
-### 网格为什么必须小:SMILE 的内存口径
-
-产品自己的护栏(`backend/memory_guard.py`)按 SMILE 启动横幅标定的模型估峰值内存:
-
-```text
-峰值 ≈ 直接维点数 × 迭代FT尺寸(x) × 迭代FT尺寸(y) × 16 B × 1.06
-迭代FT尺寸 = next_pow2(3 × NusTD),下限 256
-```
-
-按这个式子算,3D NUS 的峰值内存随间接维网格阶跃:
-
-| 间接维网格(每维) | 迭代 FT | 峰值(直接维 168 点) | 是否安全 |
-| --- | --- | --- | --- |
-| ≤ 85 | 256 × 256 | ≈ 0.17 GB | ✅ 安全区 |
-| 86 – 170 | 512 × 512 | ≈ 0.70 GB | ✅ 安全 |
-| 171 – 292 | 1024 × 1024 | ≈ 2.78 GB | ⚠️ 贴着 **2.8 GB** 上限 |
-| 更大 | 更大 | > 2.8 GB | ❌ 超出护栏 |
-
-> 校验方式:上表不是手算的,是用 `backend/memory_guard.py::smile_iteration_ft_size` 本身逐点
-> 跑出来的(85 → 256、86 → 512、170 → 512、171 → 1024),峰值按同模块的
-> `MB_PER_FT_PLANE`(16 B/点)与 `FT_OVERHEAD`(1.06)代入;292 → 1024×1024 → 2.78 GB
-> 与模块文档里记录的那次 sampleK 启动横幅实测一致。改护栏常量时这张表要跟着重算。
-
-**所以「小网格」在本项目里有确定含义:3D 间接维每维控制在 85 以内** —— 这时迭代 FT 落在最小的
-256×256 档,峰值不到 0.2 GB,真机上跑起来是秒级到分钟级,不会把机器压垮。
-
-> **只有 3D 走这个公式**。2D 路径 `estimate_smile_peak_mb` 直接返回
-> `MB_FLOOR_2D = 128 MB`,与网格无关 —— 所以 2D NUS 即使 NusTD 很大也很轻,不要拿上表去套 2D。
-
-### 0.1 四套数据的**实测**网格(2026-10-08 拉取原始头部核对)
-
-上面那段原来是「按声明推断」;现已把这四套数据的 `acqus`/`acqu2s`/`acqu3s` 真正拉下来读过
-(用 `urllib`,本机 `curl` 的 schannel 取不到凭证),数字如下 —— **这是实测,不是推断**:
-
-| 路径 | 数据 | 直接维 | 间接维实测 | 3D 峰值内存(护栏公式) | 结论 |
-| --- | --- | --- | --- | --- | --- |
-| ① 2D uniform | BMRB 27493 `Apo_CBL_0.4mM/2` | 1H TD=2048 | 15N TD=180(**uniform**,`NusTD=180` 但无 nuslist 语义) | 2D 路径:**128 MB** | ✅ 很轻 |
-| ② 2D NUS | SMILE 例 2 `trosyJHH` | 1H TD=8192 | 15N `NusTD=740`;官方 `smile.log`:**20% NUS**,370 点,实测 **130.1 MB** | 2D 路径:**128 MB** | ✅ 很轻 |
-| ③ 3D uniform | BMRB 15217 `SR358_B600_3D_HNCO.fid` | 1H TD=1024 | 15N **TD=64**、13C **TD=80** | uniform 不走 SMILE;NMRPipe 侧按点数 | ✅ **每维 ≤ 85** |
-| ④ 3D NUS | SMILE 例 4 `hnco` | 1H TD=2048 | 13C **TD=3200**、15N ~171;5% NUS | **≈ 44 GB**(FT 16384×1024) | ❌ **违反「小网格」约束** |
-
-**④ 必须换掉**。SMILE 官方示例 4 的 13C 间接维 `TD=3200`,迭代 FT 是 16384;官方自带的
-`smile.log` 白纸黑字写着 **`Memory used by SMILE: 9.3 GB`**(他们那台机器上,4 线程,
-9 轮迭代,1.2 分钟)。按本项目的护栏公式算是 **44 GB**,远超文档写明的 2.8 GB 上限。
-这与用户「确保不要找大网格的,避免运行负载过大」的要求**直接冲突**,所以本轮把它换掉。
-
-**换成的替代方案与取舍**:把 SMILE 其余 3D 示例的头部都扫了一遍(见下表),**没有一个**满足
-「每维 ≤ 85」;最小的是 `ubiq_noesyhsqc_15N`(15N TD=80、1H TD=620)→ ≈ 1.39 GB。
-
-| SMILE 3D 示例 | 间接维网格 | FT | 峰值 |
-| --- | --- | --- | --- |
-| `ubiq_noesyhsqc_15N` | 80 / 620 | 256 × 2048 | ≈ 1.39 GB |
-| `ABeta_noesyhsqc_15N` | 64 / 900 | 256 × 4096 | ≈ 2.78 GB |
-| `hncoconh` | 310 / 310 | 1024 × 1024 | ≈ 2.78 GB |
-| `hnco`(原选) | 3200 / 171 | 16384 × 1024 | ≈ 44 GB ❌ |
-| `noesyhsqc_13C` | 48048 / 1 | 262144 × 256 | ≈ 178 GB ❌ |
-
-**结论与处置(诚实版)**:在**公开的真实采集 3D NUS 数据**里,找不到同时满足「每维 ≤ 85」的
-Bruker 数据集 —— 3D NUS 的本质就是省掉间接维采样点,官方示例为演示重建质量反而用了较大的完全网格。
-所以 ④ 这一格有三条路,本页选第 3 条:
-
-1. ~~用 SMILE 官方 `hnco`~~ —— **否决**,44 GB,直接违反用户约束;
-2. 用项目自带的 `tests/fixtures/bruker/nus_3d`(NusTD 48/128)→ ≈ 0.41 GB —— **可行且最小**,
-   但它是**合成夹具**(无真实 `ser`),当证据的说服力弱;
-3. **用 ③ 的 BMRB 15217 HNCO(15N 64 × 13C 80,天然每维 ≤ 85)降采样成 NUS** ——
-   取样表由 `nmrPipe` 的 `uniform_to_nus` 生成(或本项目 2D 路径的
-   `scripts/vm_sample_make_nus.py` 同口径做法)。**本页选这条**:真 Bruker 采集数据、小网格,
-   代价是**采样表由本项目生成、不是原始采集的 NUS**。
-
-> **`scripts/vm_sample_make_nus.py` 只支持 2D**(它按 `acqu2s TD / mult` 算复点网格,不读
-> `acqu3s`)。所以 ④ 的 NUS 取样必须在真机用 NMRPipe 的 `uniform_to_nus` 做(见第 5 节),
-> **不能**指望那个脚本 —— 这一点原先写错了,已改正。
-
-**性质区分(读结论前必须看清)**:
-
-| 路径 | 数据性质 | 取样表来源 |
+| 路径 | 数据与实际采样 | 参考对象 |
 | --- | --- | --- |
-| ① 2D uniform | 原始采集,全采样 | — |
-| ② 2D NUS | **原始采集的真 NUS**(官方 `smile.log`:20%) | SMILE 官方 |
-| ③ 3D uniform | 原始采集,全采样 | — |
-| ④ 3D NUS | 原始采集(③)**降采样**成 NUS | **本项目生成** |
+| 2D uniform | BMRB27493，Apo_CBL_0.4mM/2，HSQC；90复增量 | 同目录作者Bruker `pdata/1` |
+| 2D NUS | 同一BMRB27493 uniform原始数据受控人工下采样；请求75%，实际68/90＝75.56% | NMRForge对应uniform终谱 |
+| 3D uniform | BMRB15750，850 MHz HNCO；32×32完整复网格 | 同一原始数据按作者沉积`fid.com/proc.com`重建的完整3D终谱 |
+| 3D NUS | BMRB52533 HNCO；实采441/(42×42)＝25% | 作者沉积`DomainIV_HNCO.ft3` |
 
-三条路径的数据来源性质不同,读结论时必须区分 —— ④ 因此也不做真值回收(第 2 节),
-只用目视对照 + QC。
+二维来源：[BMRB27493](https://bmrb.io/data_library/summary/?bmrbId=27493)。
+参考的独立性不同：人工2D对照共享原始数据与软件；15750独立运行作者转换与处理脚本；
+52533直接读取沉积终谱。四组均不能代替完整独立真值验证。
 
-## 1. 谱图对比:自动处理 vs **参照处理谱**
+## 结果概览与自动处理优势
 
-四套数据各出一张对比图:左列是**本软件的自动处理**终谱,右列是**该数据自带的参照处理谱**
-(BMRB 条目用其 `pdata/`;SMILE 示例用 `*.data.tar.gz` 里的官方处理/重建谱 —— 两者都由数据
-提供方处理,不是本软件的产物)。
-两列用**同一个 ppm 窗口**、同一套等高线口径(各自按自身最大值归一),所以可以直接目视比较峰形。
+四组对照的主要信号位置和整体谱形一致，当前共同窗口内未观察到明确的主要信号系统性丢失。
+未匹配候选主要涉及重叠/肩峰、一对一匹配限制和检测阈值；图中保留的弱负瓣不作为同号主信号回收目标。
+候选覆盖率衡量的是检测与对应关系，不能把“未匹配”直接解释为“处理后没有信号”。
 
-**这一组图不标任何峰位** —— 用来看谱图质量(峰形、相位、基线、伪影);峰位对照在第 2 节。
+这些结果支持NMRForge在本组2D/3D、uniform/NUS常规处理中的良好可靠性：
 
-> 图随真机运行产出后写入本目录,文件名与命令见第 5 节。在跑之前这里**不放示意占位图**:
-> 拿一张不是这四套数据跑出来的图当证据,比没有图更糟。
+- **自动处理得到可与参考对应的谱图。** 无需抄用作者最终相位或实验专用LP/窗函数方案，
+  即得到主要信号一致的结果；两组NUS重构也保留了可对应的主要谱结构。
+- **相位优化接近合理参考。** 52533统一联合符号等价后H/N/C残差为0.97°/2.50°/0°；
+  15750的N/C残差各2.50°，H须按带P1的相位曲线比较，详见下方相位核验。
+- **采集编码处理正确。** Echo–AntiEcho二维没有机械套用ALT/NEG；15750碳维正确使用FT `-alt`；
+  52533的SMILE编码和后续N维`-alt -neg`、C维`-alt`均与作者一致，谱图轴向和整体符号相符。
+- **元数据冲突可识别并正确取值。** 15750碳维谱宽冲突按现有规则解析为3636.364 Hz，与作者转换一致，
+  原始参数保持不变，采用值和冲突原因说明均可审计。
 
-## 2. 真值回收:处理结果对得上**沉积化学位移**
+作者采用实验专用处理方案，部分弱结构与分辨率更好是可解释的；这体现继续精调的空间，
+不等同于自动链丢失对应主要信号。结论范围是这些实测案例，不代替完整指认真值或全部实验类型的验证。
 
-第 1 节的图是定性对照,这一节给数字。口径(与 `workflow/truth_benchmark.py` 同源):
+## 2D uniform：与作者谱比较
 
-- **匹配**:`d = hypot(Δ1H/tol_H, Δ15N/tol_N) <= 1`,**一对一贪心最近优先**;一个检出峰只能配
-  一个期望峰,被抢走的期望峰记「未检出」;只有落在谱实际覆盖的 1H/15N 窗口内的期望峰进分母。
-- **参照**:沉积化学位移与谱自身参照差一个常数,按「容差逐级收紧的网格扫描」标定**一次**后
-  **冻结**(标定只看匹配数,不参与选窗/选参)。
-- **偶然背景**:把期望峰表**逐峰独立平移** >=5 个匹配半径(固定 seed、200 次),用同一套匹配算
-  「随便摆也能配上」的比例 —— 回收率必须连背景一起读。
-- **检出与精修都用产品自己的口径**,不改候选峰、不为凑匹配换峰。
+![二维uniform与作者谱](evidence-2d-uniform-reference-misses_20261009.png)
 
-| | ① 2D uniform<br>BMRB 27493 | ② 2D NUS<br>SMILE 例 2 | ③ 3D uniform<br>BMRB 15217 HNCO | ④ 3D NUS<br>③ 降采样 |
-| --- | --- | --- | --- | --- |
-| 软件自判实验/采样/维度 | 待真机 | 待真机 | 待真机 | 待真机 |
-| 输入指纹(文件数 / 字节 / sha256) | 待真机 | 待真机 | 待真机 | 待真机 |
-| 期望峰表来源 | BMRB 条目第一方 HSQC 峰表(沉积化学位移),`filter=backbone` | **不适用**(无沉积峰表) | 同 ①,条目 15217 | **不适用**(无沉积峰表) |
-| 期望峰表(sha256;行数 → 落在谱窗口内) | 待真机 | — | 待真机 | — |
-| 终谱形状 | 待真机 | 待真机 | 待真机 | 待真机 |
-| 全局参照平移(ppm,标定后冻结) | 待真机 | — | 待真机 | — |
-| 检出峰数 | 待真机 | 待真机 | 待真机 | 待真机 |
-| **紧容差回收率**(1H 0.01 / 15N 0.05 ppm) | 待真机 | — | 待真机 | — |
-| 同口径偶然背景 | 待真机 | — | 待真机 | — |
+本谱127个、作者谱126个候选，匹配125对：**125/126 = 99.21%**，参考候选未匹配1个。
+主要信号峰位置与峰形基本一致；紫叉所在的弱结构紧邻主峰，更像被单独选出的旁瓣候选，
+这类候选差异具有合理解释，不代表主要信号丢失。
 
-> ②④ 那两列画 `—` 不是「没测」,是**这条判据对它们不成立**:SMILE 官方示例没有沉积化学位移,
-> 没有独立于本软件的外部真值可用。硬要给它们编一张峰表就变成自己造真值,所以这两套只按第 1 节
-> 的目视对照与第 3 节的 QC 评分呈现 —— 边界说清楚,比凑一个数字诚实。
+作者谱按整轴常数平移统一参照：H加0.072584594 ppm，N加0.059775701 ppm。
+整体谱中心偏移属于参照口径差异，不评价处理好坏；未逐峰移动、拉伸或改写谱。
+对齐后匹配候选的中位绝对残差为H 0.00039、N 0.00904 ppm，
+峰高相关系数r=0.9751，局部等效线宽本谱/作者谱中位比为H 0.95、N 1.13。
 
-**①③ 的真值从哪来(不许手工拼)**:BMRB 对该条目提供**第一方** HSQC 峰表接口
-(`api.bmrb.io/.../simulate_hsqc?format=csv&filter=backbone`),它本身就是从该条目**沉积化学
-位移**算出来的。取回后用 `scripts/bmrb_expected_to_csv.py` 转成真值脚本要的三列格式:
+### 本组处理脚本 / 参数对比
 
-```bash
-curl -o expected_27493_bmrb.csv \
-  "https://api.bmrb.io/current/entry/27493/simulate_hsqc?format=csv&filter=backbone"
-python scripts/bmrb_expected_to_csv.py --input expected_27493_bmrb.csv --entry 27493 \
-    --output expected_27493.csv --report expected_27493.report.json
-```
+参考直接读取作者Bruker `pdata/1`，未提供可作为本组参考的作者NMRPipe脚本。
+以下列出沉积`procs/proc2s`中的实际参数，与本次自动终脚本对照；Bruker与NMRPipe的相位、窗口和编码不能仅按数值认定等价。
 
-转换器只做列名映射与来源留档(写输入 sha256),**不筛「哪些峰该出现在谱里」** —— 峰是否落在
-谱实际覆盖窗口内由真值基准自己按谱范围过滤(窗口外的峰进分母是冤枉人)。期望峰表本体不进仓库,
-只把 sha256 与峰数填进上表。
-
-容差阶梯固定为 `(0.01, 0.05) / (0.02, 0.10) / (0.05, 0.50) ppm`:松容差人人过关,必须有紧容差
-才说明「峰位真的对上了」。档越松,同口径的偶然背景越高,所以只有紧、宽松两档能当判据,更宽松档
-只用来归类。
-
-**阈值口径(必须一起读)**:检出阈值由使用者按样品选,软件不替使用者决定。产品默认的 35σ 是
-为强信号液体谱准备的默认值,它的价值是「在更多情形下都适用」,**不是**衡量某套数据的标尺。
-参考流程在这类数据上选定的 12σ 只用于窗选择时的「应有峰」峰集(`workflow/window_optimize.py`),
-与产品选峰默认阈值是两个独立常量,不互相覆盖。
-
-## 3. QC 评分(四套数据)
-
-同一口径 `sign_mode="auto"`(先判「单符号正峰 / 单符号负峰 / 正负共存」再评分);**自动处理终谱与
-参照处理谱都裁到同一窗口再评分**,两行才可比:
-
-| 数据 | 谱 | 综合分 | 判定 | 信噪比 | 相位 | 基线 | 伪影 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| ① 2D uniform | 自动处理终谱 | 待真机 | 待真机 | 待真机 | 待真机 | 待真机 | 待真机 |
-| ① 2D uniform | 数据自带 `pdata/1` | 待真机 | 待真机 | 待真机 | 待真机 | 待真机 | 待真机 |
-| ② 2D NUS | 自动处理终谱 | 待真机 | 待真机 | 待真机 | 待真机 | 待真机 | 待真机 |
-| ② 2D NUS | 官方重建谱 | 待真机 | 待真机 | 待真机 | 待真机 | 待真机 | 待真机 |
-| ③ 3D uniform | 自动处理终谱 | 待真机 | 待真机 | 待真机 | 待真机 | 待真机 | 待真机 |
-| ③ 3D uniform | 数据自带 `pdata/1` | 待真机 | 待真机 | 待真机 | 待真机 | 待真机 | 待真机 |
-| ④ 3D NUS | 自动处理终谱 | 待真机 | 待真机 | 待真机 | 待真机 | 待真机 | 待真机 |
-| ④ 3D NUS | 官方重建谱 | 待真机 | 待真机 | 待真机 | 待真机 | 待真机 | 待真机 |
-
-相位评分看全谱正负质量分布,回收率看指定峰位上有没有峰,两者不矛盾。**引用 QC 分数请连口径
-(含窗口)一起给。**
-
-## 4. 自动处理参数(四条路径各一份)
-
-产物里每套数据都有转换脚本 `process/fid.com`(`bruk2pipe` + `nusExpand` 按采样表展开)与终谱
-脚本。NUS 两条路径另有 SMILE 重构段。
-
-| 数据 | 直接维处理链 | 间接维处理链 |
+| 项目 | NMRForge自动处理 | 作者Bruker参考参数 |
 | --- | --- | --- |
-| ① 2D uniform | 待真机 | 待真机 |
-| ② 2D NUS | 待真机(含 SMILE) | 待真机 |
-| ③ 3D uniform | 待真机 | 待真机 |
-| ④ 3D NUS | 待真机(含 SMILE) | 待真机 |
+| H维窗 / 补零 | SP .45/.98/2/.5；ZF 4096 | WDW=4、SSB=2、LB=GB=0；SI=2048 |
+| N维窗 / 补零 | SP .45/.95/1/.5；ZF 512 | WDW=4、SSB=2、LB=GB=0；SI=256 |
+| H / N相位P0/P1 | 0°/0°；265°/0° | PHC0/PHC1：7.599999°/0°；−2.4°/0° |
+| 基线处理 | H时域POLY；H/N频域POLY ord3 auto | BC_mod：H=6、N=0（沉积原码） |
+| 处理形态 | H窗10.5～6.5 ppm，完整2D FT2 | 沉积Bruker处理谱；只在共同窗口比较 |
 
-每个参数由哪一步决定(产品的处理日志逐项写了同样的归属):
 
-| 参数 | 由哪一步决定 |
-| --- | --- |
-| 窗函数 `SP -off/-end/-pow/-c` | **窗选择**(按参考谱评分择优,`workflow/window_optimize.py`) |
-| 零填 `ZF -size` | 零填候选规则(auto:按 TD 与内存定;NUS 直接维 1×TD) |
-| 相位 `PS -p0/-p1` | 相位优化(直接维先定,间接维再搜一轮;NUS 走显示层搜索) |
-| 基线 `POLY -ord N -auto` | 基线优化(`workflow/baseline_optimize.py`:逐轴在 mode × 阶数里评分择优) |
-| SMILE 参数 | NUS 重构(`nSigma`/`thresh`/`nthread`/`-maxMem` 按当前可用内存实时设定) |
+<details>
+<summary>展开本组实际自动转换与终处理脚本</summary>
 
-## 5. 复现命令
+**自动转换**
 
-四套数据都按同一套脚本跑,只是数据集不同。**在装有 NMRPipe/SMILE 的 Linux 机器上**执行。
+```csh
+#!/bin/csh
 
-### 5.1 取数据(全部公开)
-
-```bash
-# ① 2D uniform:BMRB 27493(Apo-bsCopL)。整条目单文件 tar(82 MB,含全部 6 个滴定条件):
-curl -O https://bmrb.io/ftp/pub/bmrb/entry_directories/bmr27493/timedomain_data/N15_Chemical_shift_titration_of_bsCopl.tar
-#    只要 Apo 这一个条件时,直接抓那个目录(目录 URL 不是 tar,必须用 wget -r 或浏览器逐文件下):
-wget -r -np -nH --cut-dirs=6 \
-  https://bmrb.io/ftp/pub/bmrb/entry_directories/bmr27493/timedomain_data/BMRB_Deposition/Apo_CBL_0.4mM/2/
-
-# ③ 3D uniform:BMRB 15217 YkvR HNCO。这一条有**单文件 tar**,不必递归抓目录(推荐):
-curl -O https://bmrb.io/ftp/pub/bmrb/entry_directories/bmr15217/timedomain_data/SR358_BMRBid_15217.tar
-#    (744 MB,含条目全部 17 套数据;只要 HNCO 就用上面的 wget -r 单抓,省流量)
-wget -r -np -nH --cut-dirs=6 \
-  https://bmrb.io/ftp/pub/bmrb/entry_directories/bmr15217/timedomain_data/SR358_B600_3D_HNCO.fid/
-
-# ② 2D NUS:SMILE 官方示例 2(20% NUS 2D TROSY)。三个包各有用途,都要:
-curl -O https://spin.niddk.nih.gov/bax/software/smile/trosyJHH.ser.tar.gz    # 74 MB  原始 ser
-curl -O https://spin.niddk.nih.gov/bax/software/smile/trosyJHH.2D.tar.gz    # 67 KB  采样表+脚本
-curl -O https://spin.niddk.nih.gov/bax/software/smile/trosyJHH.data.tar.gz  # 129 MB 参照谱(关键)
-# ④ 3D NUS:不用另外下载 —— 就地把 ③ 降采样。取样表用 NMRPipe 的 uniform_to_nus 生成:
-#    (先按 ③ 的目录做出 15N 64 / 13C 80 的完全网格,再按目标 NUS 百分比抽点)
-#    nmrPipe -in <③ HNCO 的 test.fid> -fn ... | uniform_to_nus -nusAmount 25 -out nuslist ...
-#    注意:scripts/vm_sample_make_nus.py 只支持 2D,3D 这一步必须在真机用 NMRPipe 做。
+bruk2pipe -verb -in ./ser \
+  -bad 0.0 -ext -aswap -AMX -decim 2088 -dspfvs 20 -grpdly 67.9876556396484  \
+  -xN              2048  -yN               180  \
+  -xT              1024  -yT                90  \
+  -xMODE            DQD  -yMODE  Echo-AntiEcho  \
+  -xSW         9578.544  -ySW         2187.227  \
+  -xOBS         599.503  -yOBS          60.754  \
+  -xCAR           4.771  -yCAR         118.077  \
+  -xLAB 1H  -yLAB             15N  \
+  -ndim               2  -aq2D         Complex  \
+| nmrPipe -fn MULT -c 9.76562e-01 \
+  -out ./d_001.fid -ov
 ```
 
-> **三个包分别是什么(容易搞错)**:`*.ser.tar.gz` 是 Bruker `ser` 原始数据(②的包里是「全采样
-> 与伪 NUS 两份 ser」);`*.2D.tar.gz` 很小,只有**采样表与官方处理/重建脚本**,里面**没有谱**;
-> 真正含**参照谱**的是 `*.data.tar.gz`(官方说明:「conventionally processed and SMILE
-> reconstructed data」)—— 第 1 节的右列参照谱就取自它,**别只下前两个**。
->
-> ② 的 NUS 比例以官方 `smile.log` 为准:**`NUS sparsity: 20.0%`**(370 个采样点),
-> 与官方页面写的 "20% NUS" 一致。头部 `acqu2s` 的 `NusTD=740` 是**声明的网格行数**,
-> 而 `nuslist` 里的索引最大到 1849 —— 两者不是同一口径(索引是交织后的位置),
-> **不要把 370/740 当成采样率**。官方该次运行的实测内存是 **130.1 MB**,与本项目
-> `MB_FLOOR_2D = 128 MB` 的 2D 下限吻合(见第 0.1 节)。
->
-> **④ 为什么不下 SMILE 的 `hnco`**:它的 13C 间接维 `TD=3200`、峰值约 44 GB,违反本轮
-> 「小网格」约束(第 0.1 节有实测与理由)。④ 改为就地把 ③ 降采样,所以**不需要**那 2.8 GB 的包。
->
-> **BMRB 取数要点**:条目页面上的目录索引能列出内容,但那些 URL 是**目录**;`wget -r`(或浏览器
-> 逐文件下载)才拿得到 `acqus`/`acqu2s`/`ser`/`pdata`。数据集完整性用第 2 节报出的输入指纹
-> (文件数 / 字节 / sha256)核对 —— 指纹对不上就不是同一份数据,别比。
->
-> 以上清单与文件字节数取自 SMILE 官方示例页(<https://spin.niddk.nih.gov/bax/software/smile/>,
-> 2018-04-05 更新)的 "SMILE NUS Examples" 一节;该页共 12 个示例,**本页只选用示例 2**,
-> 其余示例(含 3D HNCO)网格过大,已在第 0.1 节逐条列出实测值说明为何不用。
+**自动终处理**
 
-### 5.1b 生成期望峰表(BMRB 那一侧的真值)
-
-①②③④ 里只有 BMRB 的两套有沉积化学位移,真值回收(第 2 节)也**只对这两套**成立。峰表由
-BMRB 的**第一方** HSQC 峰表接口导出(它本身就是从该条目沉积化学位移算出来的),再转成真值
-脚本要的三列格式 —— **不要手工拼峰表**,那等于自己造真值:
-
-```bash
-# 取 BMRB 的第一方峰表(公开,无需登录)
-curl -o expected_27493_bmrb.csv \
-  "https://api.bmrb.io/current/entry/27493/simulate_hsqc?format=csv&filter=backbone"
-curl -o expected_15217_bmrb.csv \
-  "https://api.bmrb.io/current/entry/15217/simulate_hsqc?format=csv&filter=backbone"
-
-# 转成 peak_id,H_ppm,N_ppm,并留下来源记录(输入 sha256 / 条目号 / 峰数)
-python scripts/bmrb_expected_to_csv.py \
-    --input expected_27493_bmrb.csv --entry 27493 \
-    --output expected_27493.csv --report expected_27493.report.json
-python scripts/bmrb_expected_to_csv.py \
-    --input expected_15217_bmrb.csv --entry 15217 \
-    --output expected_15217.csv --report expected_15217.report.json
+```csh
+#!/bin/csh
+# NMRForge processing script
+# experiment: d_001
+xyz2pipe -in d_001.fid -x \
+| nmrPipe -fn POLY -time \
+| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5 \
+| nmrPipe -fn ZF -size 4096 \
+| nmrPipe -fn FT \
+| nmrPipe -fn PS -p0 0 -p1 0 -di \
+| nmrPipe -fn POLY -ord 3 -auto \
+| nmrPipe -fn EXT -x1 10.5ppm -xn 6.5ppm -sw -round 2 \
+| nmrPipe -fn TP \
+| nmrPipe -fn SP -off 0.45 -end 0.95 -pow 1 -c 0.5 \
+| nmrPipe -fn ZF -size 512 \
+| nmrPipe -fn FT \
+| nmrPipe -fn PS -p0 265 -p1 0 -di \
+| nmrPipe -fn POLY -ord 3 -auto \
+| nmrPipe -fn TP \
+| pipe2xyz -out d_001.ft2 -x
 ```
 
-`peak_id` 形如 `27493_5_VAL`(条目_残基号_残基名),所以匹配明细里的 `expected_id` 能直接对回
-沉积条目。**期望峰表本体不进仓库**(与旧页口径一致):只把上表的 sha256 与峰数写进第 2 节。
+</details>
 
-### 5.2 真机跑四条路径
+作者参数摘录与参数文件哈希见[四组脚本记录](script-comparisons_20261009.json)。
 
-```bash
-# 逐套数据跑「导入 → 生成 FID → 生成谱图」,输出聚合 JSON(不含路径/样品名)
-nmrforge/bin/python scripts/vm_realdata_report.py \
-    --dataset <Bruker 数据集目录> --tag "<匿名标签>" --root <临时研究根> --repeats 3 \
-    --json <报告 JSON>
+## 受控人工2D NUS：请求75%，实际75.56%
 
-# 真值基准(第 2 节;输出只有聚合量 + 匹配明细 CSV)
-nmrforge/bin/python scripts/vm_truth_benchmark.py \
-    --dataset <Bruker 数据集目录> --expected <期望峰表 CSV> --tag "<匿名标签>" \
-    --root <临时研究根> --thresholds 12 --json <报告 JSON> --matches <匹配明细 CSV>
+从BMRB27493同一uniform原始`ser`调用`scripts/vm_make_evidence_nus.py`，
+`--fraction .75 --seed 20261008`。90个复增量取整保留68个，实际比例为
+**68/90＝75.5556%**；请求值75%与实际值分别留档。随机选择完整正交增量，
+包含零增量及末端增量，生成新的`ser`、`nuslist`和NUS元数据；保留增量的字节未改。
+这是**uniform原始数据的受控人工下采样**，不是实采NUS，也不模拟采集中漂移或时间变化。
 
-# 对比图 + 真值图(--case 可重复四次;2D 用 .ft2、3D 用 .ft3)
-nmrforge/bin/python scripts/vm_four_path_figure.py \
-    --case "2D uniform,<自动谱>,<参照谱>,<qc自动.json>,<qc参照.json>" \
-    --case "2D NUS,<自动谱>,<参照谱>,<qc自动.json>,<qc参照.json>" \
-    --case "3D uniform,<自动谱>,<参照谱>,<qc自动.json>,<qc参照.json>" \
-    --case "3D NUS,<自动谱>,<参照谱>,<qc自动.json>,<qc参照.json>" \
-    --out docs/evidence/four-path-compare_<日期>.png
+新输入经正常导入、生成FID、自动优化及完整SMILE终跑；未人工覆盖相位。
+H窗口为10.5～6.5 ppm。右侧是同一原始数据的NMRForge uniform终谱，
+不是作者Bruker谱。两谱参照相同，无额外整轴平移。
 
-# 有沉积峰表的案例(①②③ 这类)另外出真值回收图(点标注 + 残差 + 回收率)
-nmrforge/bin/python scripts/vm_truth_figure.py \
-    --case "<标签>,<谱.ft2>,<期望峰表 CSV>,<匹配明细 CSV>,<报告 JSON>" \
-    --out docs/evidence/truth_recovery_<日期>.png
+![受控人工二维NUS请求75%与对应uniform](evidence-2d-nus75_20261009.png)
 
-# QC 评分(第 3 节):同一口径给任意一条谱打分。
-# 每条谱单独跑;--json 的产物正是上面 vm_four_path_figure.py 要读的 qc*.json,
-# 所以先跑 QC、再出图。
-nmrforge/bin/python scripts/vm_qc_score.py \
-    --spectrum <自动谱.ft2/.ft3> --label "auto" --json <qc自动.json>
-nmrforge/bin/python scripts/vm_qc_score.py \
-    --spectrum <参照谱 或 pdata/1 目录> --label "reference" --json <qc参照.json>
+10%检测门槛下，两侧各127个候选，匹配123对：**123/127＝96.85%**，
+未匹配参考候选4个。匹配峰位中位绝对差H 0.00132、N 0.00366 ppm；
+峰高相关系数r＝0.9878，等效线宽本谱/参考中位比H 0.90、N 1.22。
+主要信号位置与谱形相近，未观察到主要谱结构系统性缺失。4个紫叉附近有近邻或弱结构，
+候选分拆及一对一检测差异可解释未匹配，不能据此直接判定信号丢失。
+自动谱在N约120 ppm附近仍有额外弱负轮廓，图中照实保留；这些弱瓣不属于本同号谱的主信号匹配目标，
+也不因未参与匹配而计为“丢峰”。具体峰身份仍需相应指认信息才能确定。
+
+自动链用时21.458 s，终谱256×1028。H最终PS为173.559°/0°；
+N的SMILE `xP0/xP1`与最终PS均为85°/0°，`nSigma=5`、`maxIter=300`。
+2D NUS首轮轻量P0初始化仅在门控通过时使用，不推断P1，后续仍精调并完整终跑；
+3D不套用此初始化。输入和导入副本的`ser/nuslist`哈希均未变。
+[构造、处理和比较记录](controlled-2d-nus75-comparison_20261009.json)记录实际采样数、种子、哈希与全部未匹配坐标；
+读取器返回的采样比例0.75是取整后的摘要，实际比例以68/90为准。
+
+### 本组处理脚本对比
+
+本组参考是同源NMRForge uniform终谱，因此对照的是**人工NUS自动脚本与uniform自动脚本**。
+不是作者NUS脚本对照。SP参数依次为off/end/pow/c；相位须结合编码与整谱符号解释。
+
+| 项目 | 人工75% NUS自动链 | 对应uniform自动链 |
+| --- | --- | --- |
+| 输入 / 展开 | 68个复增量；nusExpand yT=90、sampleCount=68 | 完整90复增量；不展开NUS |
+| H维窗 / 补零 | SP .45/.98/1/.5；ZF 4096 | SP .45/.98/2/.5；ZF 4096 |
+| H维相位 / 裁窗 | 173.559°/0°；10.5～6.5 ppm | 0°/0°；相同窗口 |
+| SMILE | nDim2、xT90、sampleCount68、nSigma5、maxIter300；xP0/P1=85/0 | 无SMILE |
+| N维窗 / 补零 | SP .45/.9/1/.5；ZF 256 | SP .45/.95/1/.5；ZF 512 |
+| N维相位 / 基线 | 85°/0°；POLY ord2 auto | 265°/0°；POLY ord3 auto |
+| 终谱形状 | 256×1028 | 512×1028 |
+
+完整自动链另含首轮门控P0初始化和参数搜索；下面是实际最终执行脚本，不把它当作全部优化过程。
+
+
+<details>
+<summary>展开本组NUS与uniform实际脚本</summary>
+
+**NUS转换**
+
+```csh
+#!/bin/csh
+
+nusExpand.tcl -yT 90 -mode bruker -sampleCount 68 -avg -off 0 \
+ -in ./ser -out ./ser_full -sample ./nuslist
+
+bruk2pipe -verb -in ./ser_full \
+  -bad 0.0 -ext -aswap -AMX -decim 2088 -dspfvs 20 -grpdly 67.9876556396484  \
+  -xN              2048  -yN               180  \
+  -xT              1024  -yT                90  \
+  -xMODE            DQD  -yMODE  Echo-AntiEcho  \
+  -xSW         9578.544  -ySW         2187.227  \
+  -xOBS         599.503  -yOBS          60.754  \
+  -xCAR           4.771  -yCAR         118.077  \
+  -xLAB 1H  -yLAB             15N  \
+  -ndim               2  -aq2D         Complex  \
+| nmrPipe -fn MULT -c 9.76562e-01 \
+  -out ./d_001.fid -ov
 ```
 
-**执行顺序**:5.1 取数 → 5.1b 生成期望峰表(①③ 才需要)→ 逐套跑 `vm_realdata_report.py`
-→ ①③ 跑 `vm_truth_benchmark.py` → 逐谱跑 `vm_qc_score.py --json` → 最后出两张图。
-图依赖前置产物,顺序反了会读不到文件。
+**NUS终处理**
 
-**②④ 没有真值行**:SMILE 示例没有沉积化学位移,第 2 节对它们**不适用**,以第 1 节的目视对照与
-第 3 节的 QC 为准 —— 这一条边界不许含糊。`vm_truth_figure.py` 因此只对 ①③ 跑。
+```csh
+#!/bin/csh
+# NMRForge 2D NUS SMILE reconstruction (two-stage)
+# experiment: d_001
+mkdir -p nus2d
+# stage 1: direct dim (F2) FT + EXT + POLY, SMILE reconstruct F1
+nmrPipe -in d_001.fid \
+| nmrPipe -fn POLY -time \
+| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 1 -c 0.5 \
+| nmrPipe -fn ZF -zf -size 4096 \
+| nmrPipe -fn FT \
+| nmrPipe -fn EXT -x1 10.5ppm -xn 6.5ppm -sw -round 2 \
+| nmrPipe -fn PS -p0 173.559 -p1 -0 -di \
+| nmrPipe -fn POLY -ord 3 -auto \
+| nmrPipe -fn TP \
+| nmrPipe -fn SMILE -nDim 2 \
+           -sample nuslist -nThread 2 \
+           -sampleCount 68 -nSigma 5 -off 0 0 -report 1 \
+           -maxMem 11.3829 \
+           -scaling 1 \
+           -maxIter 300 \
+           -xT 90 \
+           -xP0 85 -xP1 0 \
+           -thresh 0.95 \
+| pipe2xyz -out nus2d/recon.ft1 -x -ov
 
-## 6. 能说明什么
+# stage 2: indirect dim (F1) window + ZF + FT -alt + PS + POLY
+nmrPipe -in nus2d/recon.ft1 \
+| nmrPipe -fn SP -off 0.45 -end 0.9 -pow 1 -c 0.5 \
+| nmrPipe -fn ZF -size 256 \
+| nmrPipe -fn FT \
+| nmrPipe -fn PS -p0 85 -p1 0 -di \
+| nmrPipe -fn POLY -ord 2 -auto \
+| nmrPipe -fn TP \
+  -out d_001.ft2 -ov
+```
 
-- **四条处理路径都有公开数据上的对照**:2D/3D × uniform/NUS 各自有「自动处理 vs 数据提供方处理」
-  的谱图对照与 QC 评分,数据来源全部公开、非病毒、可自行下载复算。
-- **判据在软件之外**:第 2 节用的是**已发表沉积化学位移**做外部真值,不是自己跟自己比;并且附带
-  同口径的偶然匹配背景,回收率必须连背景一起读。
-- **网格是刻意选小的**:3D 两条路径的间接维网格落在 SMILE 内存护栏的安全区(见第 0 节),这样
-  证据是「在一台普通机器上跑得出来的」,而不是只有大内存工作站才能复现。
-- **这次验证要说明的是处理程序的有效性**,不是为了得出科学结论:拿处理结果去做别的科学问题,
-  属于使用者自己的事,与本软件无关。
-- 软件本身的边界:处理与留档自洽,不替用户下科学结论。
+**uniform参考终处理**
 
-**本页不覆盖**:旧版曾有的「维护者另用十几套暂无法公开的数据验证过」属维护者自述、无法仅凭
-快照复算,本页不再引用它作为证据;能复算的只有公开数据 + 随仓库发布的脚本。四套之外的其他实验
-类型与采样方式的验证,完成后按同样口径补。
+```csh
+#!/bin/csh
+# NMRForge processing script
+# experiment: d_001
+xyz2pipe -in d_001.fid -x \
+| nmrPipe -fn POLY -time \
+| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5 \
+| nmrPipe -fn ZF -size 4096 \
+| nmrPipe -fn FT \
+| nmrPipe -fn PS -p0 0 -p1 0 -di \
+| nmrPipe -fn POLY -ord 3 -auto \
+| nmrPipe -fn EXT -x1 10.5ppm -xn 6.5ppm -sw -round 2 \
+| nmrPipe -fn TP \
+| nmrPipe -fn SP -off 0.45 -end 0.95 -pow 1 -c 0.5 \
+| nmrPipe -fn ZF -size 512 \
+| nmrPipe -fn FT \
+| nmrPipe -fn PS -p0 265 -p1 0 -di \
+| nmrPipe -fn POLY -ord 3 -auto \
+| nmrPipe -fn TP \
+| pipe2xyz -out d_001.ft2 -x
+```
+
+</details>
+
+## 3D uniform：BMRB15750 HNCO与作者脚本重建谱
+
+[BMRB15750](https://bmrb.io/data_library/summary/?bmrbId=15750)的
+`lkr15_27_hnco_2_7_08.bruker`提供850 MHz Bruker原始HNCO，以及
+[作者转换脚本](https://bmrb.io/ftp/pub/bmrb/entry_directories/bmr15750/timedomain_data/nesgLkR15_bmrb15750/lkr15_27_hnco_2_7_08.bruker/fid.com)和
+[作者处理脚本](https://bmrb.io/ftp/pub/bmrb/entry_directories/bmr15750/timedomain_data/nesgLkR15_bmrb15750/lkr15_27_hnco_2_7_08.bruker/proc.com)。
+`FnTYPE=0`，直接TD=1024，间接TD=64/64、FnMODE=6/5；32×32复网格、每位置4个正交分量，
+32×32×4×1024×4＝16,777,216字节，与原始`ser`完全一致，支持完整uniform采样。
+
+右侧在Linux原样运行作者`fid.com`与`proc.com`得到完整三维`hnco.ft3`，形状128×128×274。
+它是按作者沉积脚本重建的参考，不是预计算沉积终谱或二维切片；运行前后脚本哈希一致。
+左侧使用正常Bruker导入、FID转换、自动优化和完整终跑，不共享作者转换FID，未人工覆盖相位。
+H窗口10～6 ppm；自动用时55.800 s，终谱128×128×548，原始及导入副本`ser`哈希未变。
+
+碳维原始`SW_h=2500 Hz`与`SW=17.008620557 ppm × SFO1=213.795329497 MHz`
+所得3636.363636 Hz冲突，相对差31.25%。当前逐维规则以该乘积为分母：差≤1%用`SW_h`，
+差>1%用`SW×SFO1`并记录冲突；仅一项可用则用该项，人工显式覆盖保留。
+自动转换实际采用3636.364 Hz，与作者脚本一致；没有改写原始参数，也不能仅凭元数据确定冲突成因。
+
+作者谱按整轴常数平移统一中心：H +0.018999577、N +0.025001526、C +0.001007080 ppm。
+偏移为实际终谱头同核`自动CAR−作者CAR`，在选峰统计前固定，没有逐峰拟合或修改谱。
+作者碳维`CS -ls 3.0ppm -sw`同时调整坐标标定，不另把3 ppm当作参照偏移叠加。
+
+![三维uniform与作者脚本重建谱的三个投影](evidence-3d-uniform-bmrb15750_20261009.png)
+
+先裁共同完整三维窗，再分别检测三个有符号投影：
+
+| 投影 | 本谱 / 参考候选 | 参考候选覆盖率 | 未匹配参考候选 | 峰位中位绝对差（ppm） |
+| --- | --- | --- | --- | --- |
+| H–N | 82 / 84 | 80/84＝95.24% | 4 | H 0.00090；N 0.01684 |
+| H–C | 79 / 81 | 72/81＝88.89% | 9 | H 0.00082；C 0.03196 |
+| N–C | 70 / 71 | 64/71＝90.14% | 7 | N 0.01909；C 0.03073 |
+
+主要信号位置可对应，未观察到明确的主要信号系统性丢失。作者的实验专用LP、加窗与相位方案
+使部分弱结构和分辨率更好；自动谱仍保留对应局部信号，不能仅按10%门槛下的未匹配数判断丢峰。
+自动谱N维更宽、H/C维更窄，弱负轮廓及近邻结构差异仍如实展示。
+
+对20处未匹配参考投影候选（跨投影可能重复，非20个独立三维峰）检查原有自动谱的同号局部响应：
+10处局部最大峰高为自身最大峰的8.15%～9.94%，低于10%检测门槛；
+8处在匹配容差内已有自动候选，但该候选已分配给另一参考候选，受一对一规则限制；
+剩余2处也有约14.42%和32.35%的局部响应，但没有容差内的独立检测候选，需结合肩峰/定位及峰形判断。
+这些观察支持“候选未匹配不等于局部信号消失”，不将局部响应或重叠自动当作独立真峰认证。
+[局部信号核验](bmrb15750-unmatched-local-signal_20261009.json)保留全部位置与归一化峰高，
+处理、阈值、匹配和终谱均未改变。
+匹配峰高相关系数HN/HC/NC为0.9695/0.9679/0.9652；
+等效线宽本谱/参考中位比HN为H 0.68/N 1.56，HC为H 0.69/C 0.75，NC为N 1.58/C 0.72。
+作者使用LP与不同窗函数/相位，不能将线宽差异归因于单一处理步骤。
+自动H/N/C相位为15°/0°、267.5°/0°、2.5°/0°；作者最终为−1°/43°、−90°/0°、0°/0°。
+这些参数及差异如实留档，不构成单独的非零P1实采验证，也不代表全面科学验收。
+[原始布局、谱宽审计、脚本、谱头与全部统计](3d-uniform-bmrb15750-comparison_20261009.json)可核对。
+另见[作者与自动处理脚本对比](bmrb15750-script-comparison.md)，含逐维步骤表与实际完整脚本。
+
+### 本组处理脚本对比
+
+| 项目 | NMRForge自动终脚本 | 作者沉积脚本 |
+| --- | --- | --- |
+| H维 | POLY time；无SP；ZF2048；PS15/0；裁10～6 ppm | POLY time；SP .5/1/2/.5；ZF auto；两次PS最终−1/43；相同裁窗 |
+| N维 | SP .3/.98/1/.5；ZF128；FT；PS267.5/0；无LP | LP fb；SP .5/.98/1/1；ZF auto；FT；PS−90/0；频域POLY |
+| C维 | 无SP/LP；ZF128；FT alt；PS2.5/0 | 首遍SP/FT；后续HT及逆变换→LP fb→SP hdr→FT；PS0/0；`CS -ls 3.0ppm -sw`；频域POLY |
+| H/N/C谱宽 | 12755.102 / 2500 / 3636.364 Hz | 相同 |
+| 完整3D输出 | 128×128×548 | 128×128×274 |
+
+两侧分别从原始数据转换；数字滤波选项、CAR、相位、加窗和LP差异的完整表见
+[详细脚本对照](bmrb15750-script-comparison.md)。下列代码保留实际命令，包括作者原注释；注释不算已执行操作。
+
+
+<details>
+<summary>展开本组双方实际转换与处理脚本</summary>
+
+**自动转换**
+
+```csh
+#!/bin/csh
+
+bruk2pipe -verb -in ./ser \
+  -bad 0.0 -ext -aswap -AMX -decim 1568 -dspfvs 20 -grpdly 67.9841461181641  \
+  -xN              1024  -yN                64  -zN                64  \
+  -xT               512  -yT                32  -zT                32  \
+  -xMODE            DQD  -yMODE Echo-AntiEcho  -zMODE States-TPPI  \
+  -xSW        12755.102  -ySW         2500.000  -zSW 3636.364  \
+  -xOBS         850.104  -yOBS          86.150  -zOBS         213.795  \
+  -xCAR           4.819  -yCAR         118.125  -zCAR         178.251  \
+  -xLAB 1H  -yLAB             15N  -zLAB             13C  \
+  -ndim               3  -aq2D         Complex                         \
+| nmrPipe -fn MULT -c 1.95312e+00 \
+| pipe2xyz -x -out ./fid/test%03d.fid -ov
+```
+
+**作者转换**
+
+```csh
+#!/bin/csh
+
+bruk2pipe -in ./ser -bad 0.0 -aswap -DMX -decim 1568 -dspfvs 20 -grpdly 67.9841461181641  \
+  -xN              1024  -yN                64  -zN                64  \
+  -xT               512  -yT                32  -zT                32  \
+  -xMODE            DQD  -yMODE  Echo-AntiEcho  -zMODE    States-TPPI  \
+  -xSW        12755.102  -ySW         2500.000  -zSW         3636.364  \
+  -xOBS         850.104  -yOBS          86.150  -zOBS         213.795  \
+  -xCAR           4.800  -yCAR         118.100  -zCAR         178.250  \
+  -xLAB              H1  -yLAB             N15  -zLAB             C13  \
+  -ndim               3  -aq2D          States                         \
+  -out ./data/test%03d.fid -verb -ov
+
+sleep 5
+```
+
+**自动终处理**
+
+```csh
+#!/bin/csh
+# NMRForge processing script
+# experiment: d_001
+xyz2pipe -in fid/test%03d.fid -x \
+| nmrPipe -fn POLY -time \
+| nmrPipe -fn ZF -size 2048 \
+| nmrPipe -fn FT \
+| nmrPipe -fn PS -p0 15 -p1 0 -di \
+| nmrPipe -fn EXT -x1 10ppm -xn 6ppm -sw -round 2 \
+| nmrPipe -fn TP \
+| nmrPipe -fn SP -off 0.3 -end 0.98 -pow 1 -c 0.5 \
+| nmrPipe -fn ZF -size 128 \
+| nmrPipe -fn FT \
+| nmrPipe -fn PS -p0 267.5 -p1 0 -di \
+| nmrPipe -fn ZTP \
+| nmrPipe -fn ZF -size 128 \
+| nmrPipe -fn FT -alt \
+| nmrPipe -fn PS -p0 2.5 -p1 0 -di \
+| nmrPipe -fn TP \
+| pipe2xyz -out d_001.ft3 -x
+```
+
+**作者处理**
+
+```csh
+#!/bin/csh
+
+xyz2pipe -in  data/test%03d.fid -x  -verb           \
+| nmrPipe  -fn POLY -time                           \
+| nmrPipe  -fn SP -size 512 -off 0.5 -end 1.00 -pow 2 -c 0.5  \
+| nmrPipe  -fn ZF -auto                             \
+| nmrPipe  -fn FT                                   \
+| nmrPipe  -fn PS -p0  3.0 -p1 0                    \
+| nmrPipe  -fn PS -p0 -4  -p1 43.0 -di               \
+| nmrPipe  -fn EXT -x1 10.0ppm -xn 6.0ppm -sw       \
+| pipe2xyz -out data/test%03d.ft3 -x -ov
+
+xyz2pipe -in data/test%03d.ft3 -z -verb               \
+| nmrPipe  -fn SP -off 0.5 -end 0.98 -pow 1 -c 0.5  \
+| nmrPipe  -fn ZF -auto                             \
+| nmrPipe  -fn FT -alt                              \
+| nmrPipe  -fn PS -p0 0.0 -p1 0.0 -di               \
+| pipe2xyz -out data/test%03d.ft3 -z -inPlace
+
+xyz2pipe -in data/test%03d.ft3 -y -verb               \
+| nmrPipe  -fn LP -fb                               \
+| nmrPipe  -fn SP -off 0.5 -end 0.98 -pow 1 -c 1.0  \
+| nmrPipe  -fn ZF -auto                             \
+| nmrPipe  -fn FT                                   \
+| nmrPipe  -fn PS -p0 -90 -p1 0 -di                   \
+| nmrPipe  -fn POLY -auto -ord 0                    \
+| nmrPipe  -fn TP                                   \
+| nmrPipe  -fn POLY -auto -ord 0                    \
+| pipe2xyz -out data/test%03d.ft3 -y -inPlace
+
+xyz2pipe -in data/test%03d.ft3 -z -verb               \
+| nmrPipe  -fn HT  -auto                            \
+| nmrPipe  -fn PS  -inv -hdr                        \
+| nmrPipe  -fn FT  -inv                             \
+| nmrPipe  -fn ZF  -inv                             \
+#| nmrPipe  -fn LP -pred 32 -ord 8                   \
+| nmrPipe  -fn LP -fb                               \
+| nmrPipe  -fn SP  -hdr                             \
+| nmrPipe  -fn ZF  -auto                            \
+| nmrPipe  -fn FT                                   \
+| nmrPipe  -fn PS  -hdr -di                         \
+| nmrPipe  -fn CS  -ls 3.0ppm   -sw                   \
+| nmrPipe  -fn POLY -auto -ord 0                    \
+| pipe2xyz -out data/test%03d.ft3 -z -inPlace
+
+xyz2pipe -in ./data/test%03d.ft3  -y -verb  \
+  > ./hnco.ft3
+```
+
+</details>
+
+## 实采3D NUS：与BMRB作者NMRPipe终谱比较
+
+采用[BMRB52533](https://bmrb.io/data_library/summary/?bmrbId=52533)中的
+*Bacillus subtilis* DnaA domain IV HNCO，800 MHz采集。
+[原始归档](https://bmrb.io/ftp/pub/bmrb/entry_directories/bmr52533/timedomain_data/4.HNCO.zip)
+同时提供原始`ser/nuslist`、作者NMRPipe/SMILE脚本`conv_smile.com`和
+作者终谱`DomainIV_HNCO.ft3`。右侧直接读取该沉积终谱，没有重新优化或改写作者谱。
+
+`FnTYPE=2`，两个间接维`NusTD=84`按States–TPPI换算为42×42复网格；
+采样表有441个不重复坐标，实际采样率为**441/1764＝25%**。
+原始`ser`为14,450,688字节，与441组完整四分量正交编码一致；
+不使用归档里已经补零的`ser_full`作为原始输入。
+所取ZIP成员均通过CRC检查，并记录各文件SHA256；未宣称校验了未下载的整个归档。
+
+![实采三维NUS与BMRB作者终谱的三个投影](evidence-acquired-3d-bmrb52533_20261009.png)
+
+左侧正常导入、生成FID、自动优化并运行完整终脚本，H窗显式设为10～6 ppm，
+与作者处理窗一致，没有套用作者相位。两谱CAR字段一致，无需额外平移；
+三个投影仍先裁相同完整三维共同窗，再分别独立选峰。
+
+| 投影 | 本谱 / 作者候选 | 参考候选覆盖率 | 未匹配参考候选 | 峰位中位绝对差（ppm） |
+| --- | --- | --- | --- | --- |
+| H–N | 95 / 89 | 89/89＝100% | 0 | H 0.00033；N 0.00956 |
+| H–C | 99 / 93 | 93/93＝100% | 0 | H 0.00028；C 0.00319 |
+| N–C | 89 / 79 | 79/79＝100% | 0 | N 0.01019；C 0.00335 |
+
+共同窗内主要信号的位置和整体谱形相符，未见明显氮维色散条纹。
+匹配峰高相关系数HN/HC/NC分别为0.9952/0.9945/0.9952。
+等效线宽本谱/作者谱中位比：HN为H 0.95/N 0.78，HC为H 0.94/C 0.78，NC为N 0.77/C 0.77。
+作者谱间接维128点，本谱256点，窗函数与重构参数也不同；峰形和弱结构并非逐体素一致。
+100%仅针对当前10%门槛下的投影参考候选，不证明所有弱峰、重叠峰或完整三维峰身份都被恢复。
+
+本次自动链200.301 s，终谱256×256×1176，作者终谱128×128×588。
+最终直接H相位为107.969°/0°，N的SMILE与最终PS均为182.5°/0°，C均为0°/0°。
+作者H为−73°、N/C为0°；H和N同时加180°是联合符号等价变换，
+不能仅根据单轴度数差判定整谱反号。自动值与作者值接近但并不完全相同。
+SMILE日志的“11.1% sparsity”使用外推63×63网格为分母，不是实采42×42网格的25%。
+源与导入副本的`ser/nuslist`哈希未变，终脚本相位、网格、谱头及投影统计见
+[实采3D留档](acquired-3d-bmrb52533-comparison_20261009.json)。
+单次示例与软件QC接受不构成全面科学验收。
+
+### 本组处理脚本对比
+
+作者参考直接读取归档终谱。本表对照沉积`conv_smile.com`与实际自动终脚本；作者脚本在此作为方法记录，
+没有用新重跑作者结果替换沉积参考。SP参数依次为off/end/pow/c。
+
+| 项目 | NMRForge自动链 | 作者`conv_smile.com` |
+| --- | --- | --- |
+| NUS展开 / 网格 | sampleCount441，显式yT=zT=42 | sampleCount441；转换x/y/zT=1024/42/42 |
+| H维时域基线 / 加窗 | 无POLY time；SP .45/.98/2/.5 | POLY time；SP .4/.98/2/.5 |
+| H维补零 / 相位 / 裁窗 | ZF4096；107.969°/0°；10～6 ppm | ZF auto；−73°/0°；相同窗口 |
+| SMILE共同参数 | sampleCount441、nSigma5、xAlt/xNeg/yAlt | 相同 |
+| SMILE其它显式参数 | nThread2、maxIter1500、xP0/P1=182.5/0、yP0/P1=0/0 | nThread40、xCT42、xQ3=yQ3=2；未显式写maxIter或相位 |
+| N维终处理 | ZF256；FT alt neg；PS182.5/0 | ZF auto；FT alt neg；PS0/0 |
+| C维终处理 | ZF256；FT alt；PS0/0 | ZF auto；FT alt；PS0/0 |
+| 完整3D终谱 | 256×256×1176 | 128×128×588（沉积参考谱头） |
+
+两侧间接维终脚本均未加SP；H与N同时约差180°是联合符号等价情形，不能按单轴度数判为整谱反号。
+显式参数不同不表示某一组被证明最优；参考候选覆盖率也不证明弱峰或完整三维峰身份完全恢复。
+
+
+<details>
+<summary>展开本组自动与作者实际脚本</summary>
+
+**自动转换**
+
+```csh
+#!/bin/csh
+
+nusExpand.tcl -zT 42 -yT 42 -mode bruker -sampleCount 441 -avg -off 0 \
+ -in ./ser -out ./ser_full -sample ./nuslist
+
+bruk2pipe -verb -in ./ser_full \
+  -bad 0.0 -ext -aswap -AMX -decim 1792 -dspfvs 20 -grpdly 67.9841766357422  \
+  -xN              2048  -yN                84  -zN                84  \
+  -xT              1024  -yT                42  -zT                42  \
+  -xMODE            DQD  -yMODE States-TPPI  -zMODE States-TPPI  \
+  -xSW        11160.714  -ySW         2269.632  -zSW         2816.901  \
+  -xOBS         799.864  -yOBS          81.059  -zOBS         201.160  \
+  -xCAR           4.773  -yCAR         117.084  -zCAR         176.207  \
+  -xLAB 1H  -yLAB             15N  -zLAB             13C  \
+  -ndim               3  -aq2D         Complex  \
+| nmrPipe -fn MULT -c 1.95312e+00 \
+  -out ./d_001.fid -ov
+```
+
+**自动终处理**
+
+```csh
+#!/bin/csh
+# NMRForge 3D NUS SMILE reconstruction
+# experiment: d_001
+mkdir -p nus3d_1 nus3d_rc
+# step 1: direct dim (F3) FT + EXT + PS
+xyz2pipe -in d_001.fid -x \
+| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5 \
+| nmrPipe -fn ZF -zf -size 4096 \
+| nmrPipe -fn FT \
+| nmrPipe -fn EXT -x1 10ppm -xn 6ppm -sw -round 2 \
+| nmrPipe -fn PS -p0 107.969 -p1 -0 -di \
+| pipe2xyz -out nus3d_1/test%04d.ft1 -z
+
+# step 2: SMILE reconstruct indirect dims (F2/F1)
+xyz2pipe -in nus3d_1/test%04d.ft1 -x \
+| nmrPipe -fn SMILE -nDim 3 \
+           -sample nuslist -nThread 2 \
+           -sampleCount 441 -nSigma 5 -off 0 0 -report 1 \
+           -maxMem 9.53179 \
+           -scaling 1 \
+           -maxIter 1500 \
+           -xP0 182.5 -xP1 0 \
+           -yP0 0 -yP1 0 \
+           -xAlt -xNeg \
+           -yAlt \
+           -thresh 0.95 \
+| pipe2xyz -out nus3d_rc/test%04d.ft1 -x
+
+# step 3: indirect dims (F2/F1) window + ZF + FT + PS
+xyz2pipe -in nus3d_rc/test%04d.ft1 -x \
+| nmrPipe -fn ZF -size 256 \
+| nmrPipe -fn FT -alt -neg \
+| nmrPipe -fn PS -p0 182.5 -p1 0 -di \
+| nmrPipe -fn TP \
+| nmrPipe -fn ZF -size 256 \
+| nmrPipe -fn FT -alt \
+| nmrPipe -fn PS -p0 0 -p1 0 -di \
+| nmrPipe -fn TP \
+| nmrPipe -fn ZTP \
+| pipe2xyz -out d_001.ft3 -x
+```
+
+**作者转换与处理**
+
+```csh
+#!/bin/csh
+
+set CONVERSION = y
+set PROCESSING_1 = y
+set RECONSTRUCTION = y
+set PROCESSING_23 = y
+set PROJECTIONS = y
+
+
+
+if ($CONVERSION == 'y') then
+
+nusExpand.tcl -mode bruker -sampleCount 441 -off 0 \
+ -in ./ser -out ./ser_full -sample ./nuslist
+
+bruk2pipe -verb -in ./ser_full \
+  -bad 0.0 -ext -aswap -AMX -decim 1792 -dspfvs 20 -grpdly 67.9841766357422  \
+  -xN              2048  -yN                84  -zN                84  \
+  -xT              1024  -yT                42  -zT                42  \
+  -xMODE            DQD  -yMODE    States-TPPI  -zMODE    States-TPPI  \
+  -xSW        11160.714  -ySW         2269.632  -zSW         2816.901  \
+  -xOBS         799.864  -yOBS          81.059  -zOBS         201.160  \
+  -xCAR           4.773  -yCAR         117.084  -zCAR         176.207  \
+  -xLAB              HN  -yLAB             15N  -zLAB              CO  \
+  -ndim               3  -aq2D         Complex                         \
+| nmrPipe -fn MULT -c 1.95312e+00 \
+| pipe2xyz -x -out ./fid/test%03d.fid -ov
+
+
+
+
+  echo "Expansion & conversion done..."
+
+endif
+
+if ($PROCESSING_1 == 'y') then
+
+echo "Processing Direct dimension..."
+
+xyz2pipe -in ./fid/test%03d.fid -x                    \
+| nmrPipe  -fn POLY -time                             \
+| nmrPipe  -fn SP -off 0.4 -end 0.98 -pow 2 -c 0.5    \
+| nmrPipe  -fn ZF -auto                         \
+| nmrPipe  -fn FT                                     \
+| nmrPipe  -fn EXT -x1 10ppm -xn 6ppm -sw -round 2  \
+| nmrPipe  -fn PS -p0 -73.0 -p1 0.0 -di                 \
+#| nmrPipe  -fn POLY -auto   \
+| pipe2xyz -out ft1/test%04d.ft1 -z -verb
+
+echo "Direct dimension processing done..."
+
+endif
+
+if ($RECONSTRUCTION == 'y') then
+date
+echo "Starting reconstruction..."
+
+xyz2pipe -in ft1/test%04d.ft1 -x                           \
+| nmrPipe  -fn SMILE -nDim 3 -sample nuslist -nThread 40   \
+           -sampleCount 441 -nSigma 5 -off 0 -report 2		\
+           -xCT 42 -xAlt -xNeg -yAlt -xQ3 2 -yQ3 2                                    \
+| pipe2xyz -out ft1/rc%04d.ft1 -x
+
+endif
+
+if ($PROCESSING_23 == 'y') then
+
+xyz2pipe -in ft1/rc%04d.ft1 -x                        \
+| nmrPipe  -fn ZF -auto                         \
+| nmrPipe  -fn FT -alt -neg                                     \
+| nmrPipe  -fn PS -p0 0 -p1 0 -di                     \
+| nmrPipe  -fn TP                                     \
+| nmrPipe  -fn ZF -auto                         \
+| nmrPipe  -fn FT -alt                                    \
+| nmrPipe  -fn PS -p0 0 -p1 0 -di                     \
+| nmrPipe  -fn TP                                     \
+| nmrPipe  -fn ZTP                                    \
+| pipe2xyz -out ft/DomainIV_HNCO_%03d.ft3 -x
+
+proj3D.tcl -in ft/DomainIV_HNCO_%03d.ft3
+
+endif
+
+xyz2pipe -verb -in ft/DomainIV_HNCO_%03d.ft3 -x  \
+|  nmrPipe -ov -out DomainIV_HNCO.ft3
+```
+
+</details>
+
+## 自动相位与编码核验
+
+相位按360°周期比较；同号多维谱允许H、N同时加180°的联合符号等价变换，
+不对每一轴独立选择最有利的180°差值。下表列绝对残差，原始参数与有符号残差见
+[相位及编码核验记录](phase-and-encoding-comparison_20261009.json)。
+
+| 案例 | 比较基准 | 相位差 / 核验结果 |
+| --- | --- | --- |
+| 2D uniform 27493 | 作者Bruker PHC与自动NMRPipe PS | 跨软件相位约定未映射，不报一个虚假的统一角度误差；终谱主信号直接对照良好 |
+| 人工2D NUS75% | 对应NMRForge uniform，不是作者谱；参考H/N同时加180° | H 6.441°；N 0°，P1均0 |
+| 3D uniform 15750，N/C | 作者NMRPipe脚本，按360°周期 | N 2.50°；C 2.50°，P1均0 |
+| 3D uniform 15750，H | 作者P0/P1=−1°/43°，自动15°/0° | 原始P0差16°、P1差43°；共同显示窗内相位算子残差−2.06°～+9.32°，近8 ppm为+3.61° |
+| 实采3D NUS52533 | 作者NMRPipe脚本；参考H/N同时加180° | H 0.969°；N 2.50°；C 0°，P1均0 |
+
+15750的H值是在同一份完整H维FT结果上分别应用双方实际PS命令，保留复数虚部后从复比值计算旋转差，
+再使用已记录CAR偏移选取现有共同显示窗口。它说明零阶自动结果在展示区域内接近作者相位曲线，
+不表示P0/P1参数本身相等，也不宣称已解决所有非零P1场景。
+相位接近、编码一致与最终谱图对应共同支持自动处理有效；不能只凭角度小就认证全部峰形最优。
+
+## 共同方法
+
+- 等高线为各谱最大绝对强度的7.5%、10%、20%、35%、50%、70%、90%，保留正负轮廓。
+  7.5%与10%两条低等高线均为0.25 pt，其余为0.4 pt，正负相同；避免外圈视觉加粗。
+  所有当前案例两侧候选检测门槛均为中位基线中心后的最大绝对峰高的10%，无额外35σ门槛。
+  检测门槛与等高线起点分别设置，二者含义不同。
+- 普通候选为红色小实点：`marker='.'`、`s=4`、无描边；仅参考未匹配候选另加紫色x。
+  样式不改变检测/匹配。选峰与三点抛物线定位复用产品API/底层组件，
+  同号HSQC/HNCO采用`dominant`，不强制`both`；图中仍保留负轮廓。
+- 同极性候选按二维归一化联合距离≤1、距离优先一对一匹配；H/N/C容差为0.02/0.20/0.15 ppm。
+  每个投影分别匹配；无参考候选时覆盖率为空，不记100%。未提供采集先验时不自动删边缘候选。
+- 2D uniform作者谱整轴常数平移为：H +0.072584594、N +0.059775701 ppm。
+  其来源为至少20%峰高的相互最近同极性强候选，90对初选修剪后56对迭代分量中位数，
+  冻结后用于显示；没有逐峰移动、拉伸或改写谱。这是同谱组参照校准，不是留出验证。
+  [锚点清单](author-alignment-anchors_20261009.csv)可核对。15750采用上述谱头CAR差平移；两组NUS无额外平移。
+
+## 处理记录与复现
+
+Linux，Python3.12.13，16 GB内存，SMILE2.0 beta Rev2018.094.15.20。
+四组完整对照各记录一次处理，下表不含下载、检测或出图，不代表重复性或p95：
+
+| 输入 | 记录耗时 | 终谱存储形状 |
+| --- | --- | --- |
+| 2D uniform | 导入、生成FID和终谱33.499 s | 512×1028 |
+| 人工2D NUS请求75%、实际75.56% | 导入、生成FID和终谱21.458 s | 256×1028 |
+| BMRB15750 3D uniform | 导入、生成FID和终谱55.800 s；不含作者参考重建 | 128×128×548 |
+| 实采3D HNCO NUS 25% | 导入、生成FID和终谱200.301 s | 256×256×1176 |
+
+2D uniform的原始哈希、耗时和参数见[处理留档](uniform-processing-provenance_20261009.json)，
+比较见[统计JSON](2d-uniform-author-comparison_20261009.json)、
+[作者候选CSV](author-peaks-10pct_20261009.csv)和[检测参数](author-peaks-10pct_20261009.json)。
+两份NUS的SMILE间接相位与最终PS同源，直接维相位在重构前应用；参数及哈希见各案例记录。
+原理参考[SMILE方法论文](https://pmc.ncbi.nlm.nih.gov/articles/PMC5438302/)与
+[SMILE手册](https://spin.niddk.nih.gov/bax-apps/software/SMILE/smile_manual.pdf)。
+大原始数据、终谱与完整日志另行归档，图及摘要不替代原始数据。
+
+构造人工2D输入后，使用正常自动链，`RAW_UNIFORM`与`NEW_RAW`须为不相交目录：
+
+~~~bash
+python scripts/vm_make_evidence_nus.py "$RAW_UNIFORM" "$NEW_RAW" --fraction .75 --seed 20261008
+python scripts/vm_realdata_report.py --dataset "$NEW_RAW" --root "$NEW_ROOT" --repeats 1 --ext-lo 10.5 --ext-hi 6.5
+~~~
+
+取得终谱`AUTO`和上表对应参考`REF`后：
+
+~~~bash
+python scripts/vm_projection_report.py --spectrum "$AUTO" --reference "$REF" --pairs all --min-height-fraction .10 --sign-mode dominant --json reports/comparison.json
+python scripts/vm_four_path_figure.py --projection all --mark-peaks --peak-height-fraction .10 --peak-marker-size 4 --peak-sign-mode dominant --case "Automatic vs reference,$AUTO,$REF" --out reports/comparison.png
+~~~
+
+2D uniform作者比较的两个命令另加`--reference-shift-h 0.07258459433886566 --reference-shift-n 0.05977570099166485`。
+实采3D使用沉积`DomainIV_HNCO.ft3`为参考，自动链H窗为10～6 ppm。
+15750先在独立目录原样运行沉积`fid.com`和`proc.com`，以完整`hnco.ft3`为参考。
+两份比较命令均加`--reference-shift-h 0.018999576568603516 --reference-shift-n 0.02500152587890625 --reference-shift-c 0.001007080078125`。

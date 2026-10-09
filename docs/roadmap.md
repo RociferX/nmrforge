@@ -44,7 +44,11 @@ Engineering tests check implemented software paths and record consistency. NMRPi
 must be validated separately on a system with those tools. Scientific conclusions require suitable
 ground truth and analysis criteria chosen for the question being asked.
 
-The [real-data comparison](evidence/real-data-comparison.md) is a historical snapshot dated
-2026-09-22. Its recorded figures have not been recalculated against the current source revision and
-must not be presented as current-release validation. See that page for the dataset, method, and
-limitations.
+The v1.0.0 acceptance result applies only to its historical data and configuration. Current evidence
+has four completed comparisons: BMRB 27493 2D uniform against the authors' spectrum, controlled
+artificial 2D NUS from the same uniform source, BMRB 15750 3D uniform against the complete spectrum
+reconstructed with the authors' scripts, and acquired BMRB 52533 HNCO 3D NUS at 25%. For the
+artificial 2D NUS case, 75% was requested and 68/90 complex increments were retained (75.56% actual);
+it is controlled downsampling, not acquired NUS. The 15750 comparison applies fixed whole-axis shifts
+from spectrum-header CAR differences. See the [real-data evidence](evidence/real-data-comparison.md)
+for inputs, references, and limitations.

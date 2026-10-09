@@ -16,6 +16,7 @@ mimicking the clean 1D traces seen in a manual projection:
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from core.optimization.phase_consensus import (
     search_axis_phase_consensus,
@@ -199,8 +200,7 @@ def test_direct_phase_real_ht_projected_traces() -> None:
     real = _exact_direct_spectrum((20, 16, 160), 40.0, seed=7, occ=0.15, t2=(4.0, 10.0))
     est = search_direct_phase_real_ht(real, axis=-1)
     assert est is not None, "投影迹线应有干净峰"
-    # 0.2.199-patch29p: the direct dimension returns a value folded to 0-180° (no forced sign)
-    assert _close(est[0], (-40.0) % 180.0, 20.0), est
+    assert _close(est[0], (-40.0) % 360.0, 20.0), est
     assert abs(est[1]) <= 15.0, est
     assert est[2] > 50.0, est
 
@@ -213,3 +213,29 @@ def test_direct_phase_real_ht_2d_rows() -> None:
     assert _close(est[0], 70.0, 20.0), est
     assert abs(est[1]) <= 15.0, est
     assert est[2] > 50.0, est
+
+
+@pytest.mark.parametrize("shape", [(24, 160), (20, 16, 160)])
+@pytest.mark.parametrize("correction", [-6.0, -40.0, 120.0, 174.0])
+def test_direct_ht_uniform_returns_full_circle_phase(shape, correction) -> None:
+    if len(shape) == 3:
+        # Use clean projected peaks to isolate 180-degree ambiguity from random overlap fitting.
+        row = _exact_direct_spectrum((1, shape[-1]), -correction, seed=41)
+        real = np.broadcast_to(row, shape)
+    else:
+        real = _exact_direct_spectrum(shape, -correction, seed=41, t2=(5.0, 10.0))
+    est = search_direct_phase_real_ht(real)
+    assert est is not None
+    assert _close(est[0], correction % 360.0, 8.0), est
+    assert abs(est[1]) < 10.0
+
+
+@pytest.mark.parametrize("negative_fraction", [0.25, 0.5, 0.75, 1.0])
+def test_direct_ht_mixed_does_not_flip_small_negative_correction(negative_fraction) -> None:
+    real = _exact_direct_spectrum((24, 160), 6.0, seed=43, t2=(5.0, 10.0))
+    n_negative = int(real.shape[0] * negative_fraction)
+    real[:n_negative] *= -1.0
+    est = search_direct_phase_real_ht(real, sign_mode="mixed")
+    assert est is not None
+    assert _close(est[0], 354.0, 8.0), est
+    assert abs(est[1]) < 10.0

@@ -561,6 +561,7 @@ def _generate_spectrum_impl(
         "backend_runs",
         "direct_phase",
         "diagnostics",
+        "phase_seed",
     ):
         if key in result:
             merged_params[key] = result[key]

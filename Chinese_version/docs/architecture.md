@@ -1,101 +1,43 @@
-# NMRForge 架构
+# 架构
 
-## 1. 分层总览
+NMRForge 将桌面界面、处理工作流、外部引擎集成和可复用的数据
+操作分开。公开源码树中这些组件属于同一个项目。
 
-```text
-桌面程序                             后端
-┌──────────────┐   Shared Contract   ┌──────────────────────┐
-│ gui/         │◄───────────────────►│ backend/             │
-│  main_window │  ProcessingBackend  │  nmrpipe_backend     │
-│  dialogs     │  Experiment         │  script_generator    │
-│  processing  │  Spectrum           │  runtime/finder      │
-│ viewer/      │  ProjectInfo        │ workflow/            │
-│  spectrum    │  ProcessingResult   │  engine/pipeline     │
-│  viewer/app  │                     │ core/{data,...}      │
-└──────────────┘                     │  processing/planning │
-                                     │  optimization/qc     │
-                                     └──────────────────────┘
-```
+    GUI 与 viewer
+        |
+        v
+    workflow 与 nmrforge_api
+        |
+        v
+    core 数据和处理操作
+        |
+        v
+    backend 集成 -> NMRPipe / SMILE
 
-依赖方向:GUI → Shared Contract ← Backend。GUI 不直接接触 NMRPipe 语法,
-Backend 不依赖 Qt。
+## 职责
 
-**开发策略**:桌面程序(`gui/`、`viewer/`)与后端(`backend/`、`workflow/`、`core/`)
-**分开开发** —— 各自按这份共享契约独立实现、独立评审、独立测试(后端不 import Qt,
-GUI 不写 NMRPipe 语法)—— 然后再由契约层把两侧**统一集成**,一起发布。两侧共用同一份代码。
+- gui/ 和 viewer/ 提供桌面应用与谱图查看功能。
 
-## 2. 目录归属
+- nmrforge_api/ 提供版本化的 Python 和命令行接口，并记录研究输入、
+  输出及处理溯源。
 
-| 路径 | 归属 | 说明 |
-| --- | --- | --- |
-| `gui/` | GUI | 主窗口/对话框/处理控制/面板 |
-| `viewer/` | GUI | 独立谱图查看器(含读谱契约实现) |
-| `main.py` | GUI | 程序入口(venv 引导 + Qt 启动) |
-| `scripts/make_icon.py` | GUI | 图标 |
-| `backend/` | Backend | NMRPipe/SMILE 后端与运行时 |
-| `workflow/` | Backend | stepwise 步骤化 / phase_routes 统一相位 / manual 人工 / batch(2D-only) / 优化 |
-| `core/data/`(除 internal_data_model) | Backend | Bruker 读取/nus/pipe_io |
-| `core/experiment/`、`core/experiments/` | Backend | 解析/分类/模板 |
-| `core/processing/`、`core/planning/` | Backend | 处理原语/DAG |
-| `core/optimization/` | Backend | 参数空间/搜索/相位 |
-| `core/qc/` | Backend | QC(core/reporting 已于 0.2.164 清理删除;CSP 分析 2026-09-12 删除) |
-| `scripts/{smile_optimize,param_optimize}.py` | Backend | 命令行工具(可选) |
-| `core/project/` | Shared | 项目管理模型(GUI 地基 + Backend 运行登记) |
-| `core/workspace.py` | Shared | 工作区容器(默认 ~/NMRForgeWorkspace,首次启动创建) |
-| `core/data/internal_data_model.py` | Shared | Experiment/Dimension/Sampling |
-| `backend/base.py` | Shared | ProcessingBackend Protocol |
-| `viewer/spectrum.py` | Shared | Spectrum/SpectrumAxis(读谱契约) |
-| `gui/processing.py` | Shared(实现属 GUI) | ProcessingController 跨边界适配 |
-| `pyproject.toml`/`.gitignore`/`nmrforge_data/` | Shared | 工程配置与随包数据 |
-| `docs/`、`scripts/check_ownership.py` | Shared | 文档与所有权边界检查 |
+- workflow/ 编排处理路径和用户请求的操作。
 
-## 3. 核心数据流
+- core/ 负责数据处理、实验解释、优化、质量检查及项目记录。
 
-```text
-Bruker 目录 → core/data/bruker_reader.read_dataset → Experiment(Shared)
-  → backend.process / reconstruct_nus → 谱图文件(ft2/ft3)
-  → viewer/spectrum.Spectrum(Shared) → SpectrumViewer 展示
+- backend/ 将处理流程接入外部引擎，并生成或运行引擎命令。
 
-项目管理:core/workspace.WorkspaceManager(Shared,首次启动创建默认工作区)
-  → core/project.ProjectManager(Shared):
-  实验登记 → 数据导入(raw 副本 + metadata)→ WorkflowRun(参数/快照/产物)
-  → 状态推断;目录层级即层级(见 API_CONTRACT §9)
-```
+- nmrforge_data/ 保存随包分发的配置和预设资源。
 
-## 4. 当前跨边界触点(唯一)
+界面与处理代码通过明确的数据结构和 API 契约通信。GUI 负责展示；
+引擎专用命令由后端边界处理。NMRPipe 和 SMILE 是外部依赖，不属于
+Python 包。
 
-`gui/processing.py::ProcessingController`:
+## 数据流
 
-- `generate_fid(data, exp_id, data_id, progress)` → `workflow.stepwise.generate_fid`
-  → `backend.convert_to_fid`(Backend),返回 fid 路径;
-- `generate_spectrum(data, exp_id, data_id, params, progress)` →
-  `workflow.stepwise.generate_spectrum` → `phase_routes.unified_route`
-  (Backend,统一相位优化),返回谱图路径;
-- 人工脚本经 `workflow.manual` 执行，记录实际脚本、参数差异、运行状态与产物；不是占位入口。
+core 数据模块读取并解释 Bruker 输入。所选工作流将转换或处理任务
+交给 backend，生成谱图文件和运行记录。viewer 读取谱图数据并显示。
+脚本 API 按已文档化的参考与参数组合流程运行，将研究产物写入独立目录。
 
-除此外,`gui/` 与 `viewer/` 只依赖 Shared Contract,无其它 Backend import。
-契约变化见 docs/API_CONTRACT.md,必须走 Proposal。
-
-## 5. 处理双路径
-
-- **自动化**:ProcessingController → workflow.stepwise → phase_routes.unified_route
-  (理解→处理→优化→QC),后端走 NMRPipe/SMILE;
-- **人工(已实现)**:workflow/manual——fid.com 查看/修改/运行,谱图脚本
-  编辑/运行,产物归位并登记 WorkflowRun。
-
-## 6. 测试分层
-
-- Backend 测试:不依赖 Qt;NMRPipe 逻辑用 fake/合成数据;
-- GUI 测试:offscreen,不依赖真实后端(monkeypatch ProcessingController);
-- 真实引擎回归:在装有 NMRPipe/SMILE 的机器上验证。
-
-## 7. 相关文档
-
-- docs/API_CONTRACT.md — Shared Contract 定义与变更流程
-- docs/GUI_ARCHITECTURE_VISION.md — 用户 GUI 布局愿景(设计参考)
-- docs/README.md — 文档导航
-- docs/roadmap.md — 路线图与未完成项
-
-> 开发过程记录(状态、决策、分支协作三份)只存在于私有主干,**不随公开快照发布**;读公开快照
-> 时请以本目录的 README、roadmap 与 release notes 为准(2026-09-22 复核:此前公开页把这三份
-> 列在「相关文档」里,读者找不到)。
+脚本接口见 [API 契约](API_CONTRACT.md)，面向用户的处理路径见
+[处理模型](processing-model.md)，引擎要求见[外部依赖](external-dependencies.md)。

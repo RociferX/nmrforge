@@ -61,11 +61,15 @@ from backend.nmrpipe_finder import find_nmrpipe_bin, find_tool
 from backend.nmrpipe_version import register_nmrpipe_versions
 from backend.runtime import CshRuntime, cancel_requested
 from backend.script_generator import (
+    _FT_FLAGS,
     DEFAULT_POINTS_PER_LINE,
     _as_bool,
+    _fnmode,
+    _ft_flags,
     effective_td,
     expand_baseline,
     generate_2d_nus_script,
+    generate_2d_nus_seed_script,
     generate_3d_nus_script,
     generate_convert_script,
     generate_nus_finalize_script,
@@ -445,96 +449,14 @@ def _apply_nus_grid_after_clean(
     *,
     audit: QcAuditLog | None = None,
 ) -> list[str]:
-    """Update NusTD to the actual sampling range after bad points are removed
-    (0.2.197).
+    """Preserve the full planned grid; bad-point cleanup cannot shrink NusTD.
 
-    Cross-validation (parameter correction) used the static NusTD and thereby put
-    back the grid adjusted after the bad points were cleared, leaving the fid.com
-    grid inconsistent with the cleaned data; here the acqu2s/acqu3s NusTD is shrunk
-    to the actual range (never enlarged), keeping _effective_td, the fid.com
-    parameter correction, the nusExpand grid and the reconstruction consistent.
-    Returns log lines.
+    Sparse schedules need not contain the final grid coordinate: max(nuslist)+1 is only a
+    lower bound on sampled coordinates, not the planned grid or acquisition time. Keep this
+    internal call interface for existing callers, but do not mutate parameters or report a
+    fictitious repair.
     """
-    grid = _nus_grid_from_points(points)
-    if not grid:
-        return []
-    logs: list[str] = []
-    params = experiment.acquisition_parameters
-    if len(grid) == 1:
-        block = params.setdefault("acqu2s", {})
-        old = int(block.get("NusTD", 0) or 0)
-        new = grid[0]
-        if old and 0 < new < old:
-            block["NusTD"] = new
-            logs.append(
-                tr(
-                    "Grid adjustment after sampling bad point removal: acqu2s NusTD {p0} → {p1}",
-                    p0=old,
-                    p1=new,
-                )
-            )
-            if audit is not None:
-                audit.record(
-                    QcAction(
-                        issue_detected=(
-                            tr(
-                                "After the sampling bad point is removed, the declared NusTD is "
-                                "inconsistent with the actual sampling "
-                                "range",
-                            )
-                        ),
-                        location="acqu2s.NusTD",
-                        detection_rule=(
-                            tr(
-                                "_nus_grid_from_points(nuslist after cleaning) = max+1 per "
-                                "dimension",
-                            )
-                        ),
-                        action_taken="nus_td_shrunk",
-                        before_state={"NusTD": old},
-                        after_state={"NusTD": new},
-                        extra={"axis": "acqu2s", "dataset_id": experiment.dataset_id},
-                    )
-                )
-    elif len(grid) == 2:
-        for key, g in (("acqu2s", grid[0]), ("acqu3s", grid[1])):
-            block = params.setdefault(key, {})
-            old = int(block.get("NusTD", 0) or 0)
-            new = 2 * g
-            if old and 0 < new < old:
-                block["NusTD"] = new
-                logs.append(
-                    tr(
-                        "Grid adjustment after sampling bad point removal: {p0} NusTD {p1} → {p2}",
-                        p0=key,
-                        p1=old,
-                        p2=new,
-                    )
-                )
-                if audit is not None:
-                    audit.record(
-                        QcAction(
-                            issue_detected=(
-                                tr(
-                                    "After the sampling bad point is removed, the declared NusTD "
-                                    "is inconsistent with the actual sampling "
-                                    "range",
-                                )
-                            ),
-                            location=f"{key}.NusTD",
-                            detection_rule=(
-                                tr(
-                                    "_nus_grid_from_points(cleaned nuslist) = 2 x max+1 per "
-                                    "dimension",
-                                )
-                            ),
-                            action_taken="nus_td_shrunk",
-                            before_state={"NusTD": old},
-                            after_state={"NusTD": new},
-                            extra={"axis": key, "dataset_id": experiment.dataset_id},
-                        )
-                    )
-    return logs
+    return []
 
 
 def zf_summary(plan: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -1268,10 +1190,8 @@ class NMRPipeBackend:
             )
             source_bad_points = list(_bad)
             if _bad and source_removed:
-                # 0.2.197/0.2.199: segmented data likewise adjusts the grid to the
-                # actual range of the cleaned, merged nuslist, so cross-validation
-                # (parameter correction) no longer restores each segment grid to the
-                # static NusTD
+                # Cleanup does not change the full planned grid; keep this call interface but
+                # do not shrink NusTD by coordinate range.
                 merged_points: list[tuple[int, ...]] = []
                 for seg in experiment.segments:
                     merged_points += [tuple(p) for p in read_nuslist(Path(seg) / "nuslist")]
@@ -1467,9 +1387,8 @@ class NMRPipeBackend:
                 audit, experiment, list(experiment.segments), _count, _bad, source_removed
             )
             if _bad and source_removed:
-                # 0.2.197: after bad points are removed the NusTD follows the actual
-                # range of the cleaned nuslist, and cross-validation (parameter
-                # correction) uses the adjusted value instead of restoring it
+                # Cleanup does not change the full planned grid; keep this call interface but
+                # do not shrink NusTD by coordinate range.
                 merged_points: list[tuple[int, ...]] = []
                 for seg in experiment.segments:
                     merged_points += [tuple(p) for p in read_nuslist(Path(seg) / "nuslist")]
@@ -1653,6 +1572,15 @@ class NMRPipeBackend:
                     dataset_id=experiment.dataset_id,
                 )
 
+        seed_audit: dict[str, Any] = {}
+        if (experiment.ndim == 2 and params.pop("_initialize_2d_nus_phase", False)
+                and not script_only):
+            seed_audit = self._phase_seed_2d(
+                runtime, experiment, work, in_file, params, logs, progress
+            )
+            if seed_audit.get("accepted"):
+                params["direct_phase_override"] = seed_audit["direct_phase"]
+                params["phases"] = seed_audit["phases"]
         direct_p0, direct_p1 = 0.0, 0.0
         override = direct_phase_override(params)
         if override is not None:
@@ -2077,6 +2005,7 @@ class NMRPipeBackend:
             "message": tr("SMILE Reconstruction successful"),
             "spectrum_path": str(spectrum),
             "logs": logs,
+            **({"phase_seed": seed_audit} if seed_audit else {}),
             "effective_params": {
                 **_effective_params_base(
                     extract,
@@ -2099,6 +2028,97 @@ class NMRPipeBackend:
                 "sampling": dict(sampling),
             },
         }
+
+    def _phase_seed_2d(
+        self, runtime: CshRuntime, experiment: Experiment, work: Path,
+        in_file: str, params: dict[str, Any], logs: list[str],
+        progress: Callable[[str], None] | None,
+    ) -> dict[str, Any]:
+        """Bootstrap only the first automatic 2D reconstruction using the existing FID.
+
+        Missing zero increment or uncertain quadrature is an audited skip, not
+        fabricated phase information. Conversion and frozen-FID validation have
+        already succeeded before this helper is called.
+        """
+        import nmrglue as ng
+
+        from core.optimization.nus_phase_seed import zero_increment_phase_seed
+
+        audit: dict[str, Any] = {"accepted": False,
+                                 "method": "zero_increment_quadrature", "reason": "",
+                                 "backend_runs": 0}
+        preview = work / INTERMEDIATE_SUBDIR / f"{experiment.dataset_id}_phase_seed.ft1"
+        try:
+            if direct_phase_override(params) is not None or params.get("phases"):
+                audit["reason"] = "explicit_initial_phase"
+            elif (params.get("sampling") or {}).get("auto_phase") is False:
+                audit["reason"] = "auto_phase_disabled"
+            elif _fnmode(experiment, "F1") not in (4, 5, 6):
+                audit["reason"] = "unsupported_seed_quadrature"
+            elif (0,) not in [tuple(p) for p in read_nuslist(work / "nuslist")]:
+                audit["reason"] = "zero_increment_not_sampled"
+            else:
+                if progress is not None:
+                    progress(tr("2D NUS: estimating a coarse phase before reconstruction"))
+                preview.parent.mkdir(parents=True, exist_ok=True)
+                ext_lo, ext_hi = resolve_ext_window(
+                    experiment, params.get("ext_lo"), params.get("ext_hi")
+                )
+                script = generate_2d_nus_seed_script(
+                    experiment, in_file=in_file, out_file=preview.relative_to(work).as_posix(),
+                    window=params.get("window"), zero_fill=params.get("zero_fill"),
+                    linewidth_hz=params.get("linewidth_hz"),
+                    points_per_line=resolve_points_per_line(params.get("points_per_line")),
+                    extract=_as_bool(params.get("extract", True)), ext_lo=ext_lo, ext_hi=ext_hi,
+                )
+                script_path = work / f"{experiment.dataset_id}_phase_seed.com"
+                script_path.write_text(script, encoding="utf-8", newline="\n")
+                # Never read a previous successful preview after a failed run.
+                preview.unlink(missing_ok=True)
+                audit["backend_runs"] = 1
+                result = runtime.run(["csh", script_path.name], cwd=str(work), timeout=600)
+                if result.returncode != 0 or not preview.is_file():
+                    raise RuntimeError("Direct-only phase preview failed")
+                header, data = ng.pipe.read_lowmem(str(preview))
+                if (len(data.shape) != 2 or data.shape[0] < 2
+                        or list(header.get("FDDIMORDER", []))[:2] != [2.0, 1.0]
+                        or header.get("FDF1FTFLAG") != 0
+                        or header.get("FDF2FTFLAG") != 1
+                        or header.get("FDF1QUADFLAG") != 0
+                        or header.get("FDF2QUADFLAG") != 0):
+                    raise ValueError("Unrecognized phase preview quadrature layout")
+                pair = np.asarray(data[:2, :])
+                from core.experiment.acquisition_mode_detector import ft_neg_for
+
+                fnmode = _fnmode(experiment, "F1")
+                flags = _ft_flags(*_FT_FLAGS[fnmode], sampling=params.get("sampling"),
+                                  axis="F1", force_neg=ft_neg_for(experiment, fnmode, "F1"))
+                audit = zero_increment_phase_seed(
+                    pair[0], pair[1], indirect_neg="-neg" in flags,
+                    sign_mode=str(params.get("_phase_seed_sign_mode", "uniform")),
+                )
+                audit["backend_runs"] = 1
+        except (OSError, ValueError, RuntimeError) as exc:
+            if cancel_requested():
+                raise
+            audit.update(accepted=False, reason="phase_seed_preview_failed", detail=str(exc))
+        finally:
+            preview.unlink(missing_ok=True)
+        audit["version"] = 1
+        atomic_write_text(work / "phase_seed.json", json.dumps(audit, indent=2))
+        if audit.get("accepted"):
+            message = tr(
+                "2D NUS coarse phase seed: F1={p0:.2f}°, F2={p1:.2f}°; "
+                "P1 remains zero and will be refined after reconstruction",
+                p0=audit["phases"]["F1"][0], p1=audit["direct_phase"][0],
+            )
+        else:
+            message = tr("2D NUS coarse phase seed not applied: {reason}", reason=audit["reason"])
+        logs.append(message)
+        audit["log"] = message
+        if progress is not None:
+            progress(message)
+        return audit
 
     def _make_noisy_fid_input(
         self, work: Path, in_file: str, noise_scale: float, seed: int, logs: list[str]

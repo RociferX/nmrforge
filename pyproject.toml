@@ -19,9 +19,11 @@ authors = [{ name = "Xuanfeng Li" }]
 license = { text = "Apache-2.0" }
 # Classifier policy (aligned 2026-09-21 after an external review; 2026-09-23 production release):
 # - The distribution has been 1.0.x since 2026-09-23; core.__version__ gives its version.
-#   (1) end-to-end scientific validation with quantitative evidence on public data (BMRB
-#       timedomain entries: tolerance-tiered recovery plus per-peak attribution, see
-#       docs/evidence/real-data-comparison.md);
+#   (1) public-data evidence based on final-spectrum and signed 3D-projection comparisons,
+#       with reference-candidate coverage, peak-position and peak-shape metrics. It includes
+#       acquired and controlled-sampling examples; candidate matches without an authoritative
+#       peak list are not reported as peak recovery or comprehensive scientific validation
+#       (see docs/evidence/real-data-comparison.md);
 #   (2) a compatibility promise carried by the compat process (the behaviour digests and the
 #       four levels plus a golden vector, see nmrforge_api/compat_declaration.py).
 # - `nmrforge_api` has a v1.1 public source contract (2026-10-03), separate from the software/AppImage version.

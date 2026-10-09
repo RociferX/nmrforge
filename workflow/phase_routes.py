@@ -1062,6 +1062,8 @@ def _direct_phase_params_fp(experiment: Experiment, params: dict) -> str:
         "segments": [str(s) for s in (experiment.segments or [])],
         "params": {k: params.get(k) for k in _DIRECT_PHASE_FP_KEYS},
     }
+    if experiment.ndim == 2 and "_nus_phase_seed" in params:
+        payload["params"]["_nus_phase_seed"] = params["_nus_phase_seed"]
     return hashlib.sha256(
         _json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
@@ -1103,7 +1105,8 @@ def _load_direct_phase_cache(
         data = _json.loads(path.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return None
-    if data.get("version") != 2 or data.get("source") != "unified_direct":
+    # v2 stored the half-circle folded phase and cannot be reused after the 360-degree polarity fix.
+    if data.get("version") != 3 or data.get("source") != "unified_direct":
         return None
     if list(data.get("shape") or []) != list(shape):
         return None
@@ -1129,7 +1132,7 @@ def _save_direct_phase_cache(
             _direct_phase_cache_path(work),
             _json.dumps(
                 {
-                    "version": 2,
+                    "version": 3,
                     "source": "unified_direct",
                     "p0": p0,
                     "p1": p1,
@@ -1626,6 +1629,9 @@ def _unified_nus(
             # final-run full script (params_final's direct_poly_time).
         }
     )
+    if experiment.ndim == 2 and _template_auto_phase(experiment):
+        params_first["_initialize_2d_nus_phase"] = True
+        params_first["_phase_seed_sign_mode"] = _sign_mode(experiment)
     first = backend.reconstruct_nus(experiment, params_first, progress=progress)
     if not first.get("success") or not first.get("spectrum_path"):
         raise RuntimeError(
@@ -1634,8 +1640,16 @@ def _unified_nus(
                 p0=first.get("message"),
             )
         )
-    logs: list[str] = list(diag_logs) + [
-        tr("The first pass SMILE reconstruction is completed: {p0}", p0=first.get("spectrum_path"))
+    phase_seed = dict(first.get("phase_seed") or {}) if experiment.ndim == 2 else {}
+    seed_direct_p0 = 0.0
+    if phase_seed:
+        params_first["_nus_phase_seed"] = {
+            k: v for k, v in phase_seed.items() if k != "log"
+        }
+        if phase_seed.get("accepted"):
+            seed_direct_p0 = float(phase_seed["direct_phase"][0])
+    logs: list[str] = list(diag_logs) + ([phase_seed["log"]] if phase_seed.get("log") else []) + [
+        tr("The first pass SMILE reconstruction is completed: {p0}", p0=first.get('spectrum_path'))
     ]
     if progress is not None:
         progress(tr("First pass SMILE completed"))
@@ -1654,7 +1668,7 @@ def _unified_nus(
             logs.append(tr("first-run script kept as: {p0}", p0=no_opt_script.name))
     except OSError as exc:  # noqa: BLE001 - failure to keep it does not affect the flow
         logs.append(tr("Initial script retention failed: {p0}", p0=exc))
-    backend_runs = 1
+    backend_runs = 1 + int(phase_seed.get("backend_runs", 0))
     direct_axis = "F3" if experiment.ndim >= 3 else "F2"
     sign_mode = _sign_mode(experiment)
     indirect_axes = [
@@ -1903,9 +1917,17 @@ def _unified_nus(
                     p0=elapsed,
                 )
             )
-            direct_phase = (0.0, 0.0)
+            direct_phase = (seed_direct_p0, 0.0)
             if direct_est is not None and direct_est[2] >= 30.0:
                 direct_phase = (float(direct_est[0]), float(direct_est[1]))
+                if phase_seed.get("accepted"):
+                    # This real preview already contains the direct seed. The
+                    # HT estimate is a residual, not a new absolute phase. Its
+                    # modulo-180 representative nearest zero preserves the
+                    # joint sign established by indirect phasing; independently
+                    # flipping this axis would invert the final 2D spectrum.
+                    residual = (direct_phase[0] + 90.0) % 180.0 - 90.0
+                    direct_phase = ((seed_direct_p0 + residual) % 360.0, direct_phase[1])
                 # 0.2.199-patch22: relax the p1 reset guardrail (20 -> 170) -- the high
                 # field (1200MHz) acquisition delay lets the true p1 reach 100 deg+; it
                 # is only reset above 170 deg (a near full-scale flip, suspected
@@ -1944,8 +1966,7 @@ def _unified_nus(
                 logs.append(
                     tr(
                         "direct dimension projection HT searches for no clean signal peaks or "
-                        "insufficient confidence, keep "
-                        "(0,0)",
+                        "insufficient confidence, keep the initial phase",
                     )
                 )
     logs.append(
@@ -2210,6 +2231,7 @@ def _unified_nus(
         "zero_fill": proc["zero_fill"],
         "window": proc["window"],
         "diagnostics": diagnostics,
+        **({"phase_seed": phase_seed} if phase_seed else {}),
         "spectrum_path": str(final["spectrum_path"]),
         "backend_runs": backend_runs,
         "logs": logs,

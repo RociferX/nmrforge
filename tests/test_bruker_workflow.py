@@ -24,6 +24,29 @@ from backend.bruker_workflow import (
 from core.data.bruker_reader import read_dataset
 from core.data.internal_data_model import AxisRole, Dimension, Experiment
 
+
+@pytest.mark.parametrize("fnmode,mult", [(1, 1), (3, 1), (5, 2), (6, 2)])
+def test_patch_compact_2d_nus_aligns_declared_grid(
+    bruker_dir: Path, fnmode: int, mult: int,
+) -> None:
+    exp = read_dataset(bruker_dir / "nus_2d")
+    exp.dimensions[1].td = 31 * mult
+    exp.acquisition_parameters["acqu2s"].update(TD=31 * mult, NusTD=62 * mult, FnMODE=fnmode)
+    text = (
+        "nusExpand.tcl -mode bruker -sampleCount 31 \\\n"
+        " -yT 31 -in ./ser -out ./ser_full -sample ./nuslist\n\n"
+        f"bruk2pipe -in ./ser_full -xN 2048 -xT 1009 -yN {61 * mult} -yT 61 "
+        "-out ./test.fid\n"
+    )
+    patched, _logs = patch_fid_com(text, exp)
+    conversion = parse_fid_com(patched.split("bruk2pipe", 1)[1])
+    assert conversion["yN"] == str(62 * mult)
+    assert conversion["yT"] == "62"
+    assert conversion["xN"] == "2048" and conversion["xT"] == "1009"
+    expansion = patched.split("bruk2pipe", 1)[0]
+    assert "-yT 62" in expansion and "-yT 31" not in expansion
+    assert patch_fid_com(patched, exp)[0] == patched
+
 FID_COM = (
     "bruk2pipe -in ./ser \\\n"
     "  -bad 0.0 -aswap -AMX -decim 32 -dspfvs 21 -grpdly 48 \\\n"

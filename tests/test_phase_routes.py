@@ -1142,6 +1142,7 @@ def test_direct_phase_cache_roundtrip(tmp_path: Path) -> None:
     assert float(data["p0"]) == 12.5
     assert float(data["p1"]) == -3.0
     assert float(data["duration_s"]) == 22.3
+    assert data["version"] == 3
     assert _load_direct_phase_cache(tmp_path, exp, params, (21, 16, 12)) is None
     assert _load_direct_phase_cache(tmp_path, exp, {"ext_lo": 9.0, "ext_hi": 7.0}, shape) is None
     # 0.2.166: the direct-dimension window affects the reconstruction plane, so the
@@ -1160,6 +1161,12 @@ def test_direct_phase_cache_roundtrip(tmp_path: Path) -> None:
         )
         is None
     )
+    # The old v2 half-circle-folded cache must not be reused after the fix.
+    import json
+
+    data.update(version=2, p0=174.0)
+    (tmp_path / "phase.json").write_text(json.dumps(data), encoding="utf-8")
+    assert _load_direct_phase_cache(tmp_path, exp, params, shape) is None
 
 
 def test_append_final_summary_readable_report(tmp_path: Path) -> None:
@@ -1340,3 +1347,70 @@ def test_load_preview_memory_error_hint(tmp_path, monkeypatch) -> None:
     msg = str(ei.value)
     assert "内存不足" in msg  # oom prefix
     assert "F1" in msg
+
+
+def test_2d_seed_direct_residual_and_cache_are_absolute(tmp_path, monkeypatch, bruker_dir):
+    """Final phases add the seed once; cache reuse must not add it a second time."""
+    from types import SimpleNamespace
+
+    experiment = read_dataset(bruker_dir / "nus_2d")
+    backend = _FakeBackend(tmp_path / "seed_work")
+    original = backend.reconstruct_nus
+    seed = {
+        "accepted": True,
+        "method": "zero_increment_quadrature",
+        "version": 1,
+        "backend_runs": 1,
+        "phases": {"F1": [90.0, 0.0]},
+        "direct_phase": [116.0, 0.0],
+        "log": "coarse seed",
+    }
+
+    def reconstruct(exp, params, progress=None):
+        result = original(exp, params, progress)
+        if params.get("_initialize_2d_nus_phase"):
+            result["phase_seed"] = seed
+        return result
+
+    backend.reconstruct_nus = reconstruct
+    monkeypatch.setattr(routes, "_read_real_ft3", lambda path: np.zeros((32, 64)))
+    monkeypatch.setattr(
+        routes,
+        "_load_preview_with_memory_guard",
+        lambda *args, **kwargs: np.zeros((32, 64), dtype=complex),
+    )
+    monkeypatch.setattr(
+        "workflow.memory_phase_search.search_axis_memory",
+        lambda *args, **kwargs: SimpleNamespace(
+            phase=(90.0, 0.0), score=80.0, logs=[]
+        ),
+    )
+    calls = []
+
+    def residual(*args, **kwargs):
+        calls.append(1)
+        return 178.0, 0.0, 80.0
+
+    monkeypatch.setattr(
+        "core.optimization.phase_consensus.search_direct_phase_real_ht", residual
+    )
+    monkeypatch.setattr(
+        routes,
+        "_optimize_nus_processing",
+        lambda *args, **kwargs: {
+            "baseline": None,
+            "zero_fill": None,
+            "window": None,
+            "logs": [],
+        },
+    )
+    monkeypatch.setattr(routes, "_append_final_summary", lambda *args, **kwargs: None)
+    for _ in range(2):
+        result = routes.unified_route(experiment, backend, work_dir=backend.work)
+        assert result["direct_phase"] == (114.0, 0.0)
+        assert result["backend_runs"] == 6
+        final = backend.reconstruct_params[-1]
+        assert final["direct_phase_override"] == [114.0, 0.0]
+        assert final["phases"]["F1"] == [90.0, 0.0]
+        assert "_initialize_2d_nus_phase" not in final
+    assert len(calls) == 1

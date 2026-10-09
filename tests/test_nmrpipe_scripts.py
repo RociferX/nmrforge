@@ -479,7 +479,7 @@ def test_3d_nus_script_smile_tuning(bruker_dir: Path) -> None:
     assert "-nSigma 5" in script
     assert "-thresh 0.99" in script
     assert "-xApod" not in script  # SMILE carries no window (step3 post-processing handles it)
-    assert "-xP0" not in script  # SMILE carries no phasing (step3 PS handles it)
+    assert "-xP0 0 -xP1 0" in script  # F2 passes the default phase explicitly
     assert "-xAlt" in script  # F2=States-TPPI: consistent with step3 FT -alt
     assert "-xNeg" not in script  # handedness undecidable (no pulse program) ⇒ no negation
     assert "-yNeg" not in script  # F1=States: no direction flag
@@ -502,7 +502,7 @@ def test_3d_nus_script_default_smile_params(bruker_dir: Path) -> None:
 
     script = generate_3d_nus_script(exp, in_file="exp.fid", nuslist="nuslist", out_file="exp.ft3")
     assert "-xApod" not in script  # SMILE carries no window (step3 post-processing handles it)
-    assert "-xP0" not in script  # SMILE carries no phasing (step3 PS handles it)
+    assert "-xP0 0 -xP1 0" in script  # F2 passes the default phase explicitly
     assert "-xAlt" in script  # F2=States-TPPI: consistent with step3 FT -alt
     assert "-xNeg" not in script  # handedness undecidable (no pulse program) ⇒ no negation
     assert "-yNeg" not in script  # F1=States: no direction flag
@@ -564,6 +564,62 @@ def test_3d_nus_script_direct_phase(bruker_dir: Path) -> None:
         direct_phase=(12.0, -3.0),
     )
     assert "| nmrPipe -fn PS -p0 12 -p1 -3 -di \\" in script
+
+
+def test_smile_phase_args_follow_logical_axes_and_keep_direct_phase_separate(
+    bruker_dir: Path,
+) -> None:
+    """SMILE P0/P1 match indirect-axis PS; direct phase stays in its own PS stage."""
+    from backend.script_generator import generate_2d_nus_script, generate_3d_nus_script
+
+    exp2 = read_dataset(bruker_dir / "nus_2d")
+    base2 = dict(nuslist="nuslist", out_file="e.ft2")
+    # A single-file 2D NUS script maps SMILE x to F1; direct F2 phase is separate.
+    s2 = generate_2d_nus_script(
+        exp2, in_file="e.fid", direct_phase=(12.0, -3.0),
+        phases={"F1": (-8.0, 2.5)}, **base2
+    )
+    smile2 = s2.split("-fn SMILE", 1)[1].split("| pipe2xyz", 1)[0]
+    assert "-xP0 -8 -xP1 2.5" in smile2
+    assert "| nmrPipe -fn PS -p0 -8 -p1 2.5 -di" in s2
+    assert "| nmrPipe -fn PS -p0 12 -p1 -3 -di" in s2
+    # The multi-file/sliced input path shares the same SMILE axis mapping.
+    sliced2 = generate_2d_nus_script(
+        exp2, in_file="planes/test%03d.fid", direct_phase=(12.0, -3.0),
+        phases={"F1": (-8.0, 2.5)}, **base2,
+    )
+    smile2_sliced = sliced2.split("-fn SMILE", 1)[1].split("| pipe2xyz", 1)[0]
+    assert "-xP0 -8 -xP1 2.5" in smile2_sliced
+    assert "-xP0 12" not in smile2_sliced
+
+    exp3 = read_dataset(bruker_dir / "nus_3d")
+    base3 = dict(nuslist="nuslist", out_file="e.ft3")
+    default3 = generate_3d_nus_script(exp3, in_file="e.fid", **base3)
+    default_smile3 = default3.split("-fn SMILE", 1)[1].split("| pipe2xyz", 1)[0]
+    assert "-xP0 0 -xP1 0" in default_smile3  # x is F2
+    assert "-yP0 0 -yP1 0" in default_smile3  # y is F1
+
+    s3 = generate_3d_nus_script(
+        exp3, in_file="e.fid", direct_phase=(-21.0, 4.0),
+        phases={"F2": (-11.0, 3.25), "F1": (7.0, -2.5)}, **base3,
+    )
+    smile3 = s3.split("-fn SMILE", 1)[1].split("| pipe2xyz", 1)[0]
+    assert "-xP0 -11 -xP1 3.25" in smile3
+    assert "-yP0 7 -yP1 -2.5" in smile3
+    assert "| nmrPipe -fn PS -p0 -11 -p1 3.25 -di" in s3
+    assert "| nmrPipe -fn PS -p0 7 -p1 -2.5 -di" in s3
+    assert "| nmrPipe -fn PS -p0 -21 -p1 4 -di" in s3
+    assert "-xP0 -21" not in smile3 and "-yP0 -21" not in smile3
+
+    # Direction overrides remain orthogonal to phase arguments.
+    flipped = generate_3d_nus_script(
+        exp3, sampling={"ft_neg": True}, phases={"F2": (1.0, -1.0)},
+        in_file="e.fid", **base3
+    )
+    flipped_smile = flipped.split("-fn SMILE", 1)[1].split("| pipe2xyz", 1)[0]
+    assert "-xNeg" in flipped_smile and "-xP0 1 -xP1 -1" in flipped_smile
+    assert "-xAlt" in flipped_smile  # sampling neg override preserves inferred alt
+    assert "-yP0 0 -yP1 0" in flipped_smile
 
 
 def test_process_script_ext_default_6_11(bruker_dir: Path) -> None:
@@ -662,6 +718,13 @@ def test_effective_td_2d_nus_complex_grid(bruker_dir: Path) -> None:
     exp3 = read_dataset(bruker_dir / "nus_3d")
     td3 = effective_td(exp3)
     assert td3[1] == 48 and td3[2] == 128  # 3D keeps NusTD (already a complex-point count)
+
+
+def test_effective_td_compact_2d_nus_uses_full_nustd(bruker_dir: Path) -> None:
+    exp = read_dataset(bruker_dir / "nus_2d")
+    exp.dimensions[1].td = 62
+    exp.acquisition_parameters["acqu2s"].update(TD=62, NusTD=124, FnMODE=6)
+    assert effective_td(exp)[1] == 62
 
 
 def test_process_script_window_and_zero_fill_overrides(

@@ -1,0 +1,86 @@
+{
+  "date": "2026-10-09",
+  "scope": "Actual final conversion/processing scripts for each displayed case; not optimization previews. Author 2D uniform reference supplies Bruker parameters, not an author NMRPipe script. The 3D NUS author script is deposited context; the comparison reads the deposited final spectrum directly.",
+  "scripts": {
+    "uniform-2d-fid.com": {
+      "text": "#!/bin/csh\n\nbruk2pipe -verb -in ./ser \\\n  -bad 0.0 -ext -aswap -AMX -decim 2088 -dspfvs 20 -grpdly 67.9876556396484  \\\n  -xN              2048  -yN               180  \\\n  -xT              1024  -yT                90  \\\n  -xMODE            DQD  -yMODE  Echo-AntiEcho  \\\n  -xSW         9578.544  -ySW         2187.227  \\\n  -xOBS         599.503  -yOBS          60.754  \\\n  -xCAR           4.771  -yCAR         118.077  \\\n  -xLAB 1H  -yLAB             15N  \\\n  -ndim               2  -aq2D         Complex  \\\n| nmrPipe -fn MULT -c 9.76562e-01 \\\n  -out ./d_001.fid -ov\n\n",
+      "sha256": "cdf04368145409ada04819ffee693803a90d243c773349ea792d4968ff32796d"
+    },
+    "uniform-2d-process.com": {
+      "text": "#!/bin/csh\n# NMRForge processing script\n# experiment: d_001\nxyz2pipe -in d_001.fid -x \\\n| nmrPipe -fn POLY -time \\\n| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5 \\\n| nmrPipe -fn ZF -size 4096 \\\n| nmrPipe -fn FT \\\n| nmrPipe -fn PS -p0 0 -p1 0 -di \\\n| nmrPipe -fn POLY -ord 3 -auto \\\n| nmrPipe -fn EXT -x1 10.5ppm -xn 6.5ppm -sw -round 2 \\\n| nmrPipe -fn TP \\\n| nmrPipe -fn SP -off 0.45 -end 0.95 -pow 1 -c 0.5 \\\n| nmrPipe -fn ZF -size 512 \\\n| nmrPipe -fn FT \\\n| nmrPipe -fn PS -p0 265 -p1 0 -di \\\n| nmrPipe -fn POLY -ord 3 -auto \\\n| nmrPipe -fn TP \\\n| pipe2xyz -out d_001.ft2 -x\n",
+      "sha256": "71808db0d0dab51c398b56cb7718d924c7e24574d832a62448441db5afb183e0"
+    },
+    "nus75-fid.com": {
+      "text": "#!/bin/csh\n\nnusExpand.tcl -yT 90 -mode bruker -sampleCount 68 -avg -off 0 \\\n -in ./ser -out ./ser_full -sample ./nuslist\n\nbruk2pipe -verb -in ./ser_full \\\n  -bad 0.0 -ext -aswap -AMX -decim 2088 -dspfvs 20 -grpdly 67.9876556396484  \\\n  -xN              2048  -yN               180  \\\n  -xT              1024  -yT                90  \\\n  -xMODE            DQD  -yMODE  Echo-AntiEcho  \\\n  -xSW         9578.544  -ySW         2187.227  \\\n  -xOBS         599.503  -yOBS          60.754  \\\n  -xCAR           4.771  -yCAR         118.077  \\\n  -xLAB 1H  -yLAB             15N  \\\n  -ndim               2  -aq2D         Complex  \\\n| nmrPipe -fn MULT -c 9.76562e-01 \\\n  -out ./d_001.fid -ov\n\n\n",
+      "sha256": "176c0dfb22b93e74e33ab554af8209bfa5008f9223920f7fce3f4e7544955452"
+    },
+    "nus75-process.com": {
+      "text": "#!/bin/csh\n# NMRForge 2D NUS SMILE reconstruction (two-stage)\n# experiment: d_001\nmkdir -p nus2d\n# stage 1: direct dim (F2) FT + EXT + POLY, SMILE reconstruct F1\nnmrPipe -in d_001.fid \\\n| nmrPipe -fn POLY -time \\\n| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 1 -c 0.5 \\\n| nmrPipe -fn ZF -zf -size 4096 \\\n| nmrPipe -fn FT \\\n| nmrPipe -fn EXT -x1 10.5ppm -xn 6.5ppm -sw -round 2 \\\n| nmrPipe -fn PS -p0 173.559 -p1 -0 -di \\\n| nmrPipe -fn POLY -ord 3 -auto \\\n| nmrPipe -fn TP \\\n| nmrPipe -fn SMILE -nDim 2 \\\n           -sample nuslist -nThread 2 \\\n           -sampleCount 68 -nSigma 5 -off 0 0 -report 1 \\\n           -maxMem 11.3829 \\\n           -scaling 1 \\\n           -maxIter 300 \\\n           -xT 90 \\\n           -xP0 85 -xP1 0 \\\n           -thresh 0.95 \\\n| pipe2xyz -out nus2d/recon.ft1 -x -ov\n\n# stage 2: indirect dim (F1) window + ZF + FT -alt + PS + POLY\nnmrPipe -in nus2d/recon.ft1 \\\n| nmrPipe -fn SP -off 0.45 -end 0.9 -pow 1 -c 0.5 \\\n| nmrPipe -fn ZF -size 256 \\\n| nmrPipe -fn FT \\\n| nmrPipe -fn PS -p0 85 -p1 0 -di \\\n| nmrPipe -fn POLY -ord 2 -auto \\\n| nmrPipe -fn TP \\\n  -out d_001.ft2 -ov\n",
+      "sha256": "8bcc93a9b00a7424f419c289bc1527a10cae5ef90d08ab40591da7afa21b52b5"
+    },
+    "nus3d-fid.com": {
+      "text": "#!/bin/csh\n\nnusExpand.tcl -zT 42 -yT 42 -mode bruker -sampleCount 441 -avg -off 0 \\\n -in ./ser -out ./ser_full -sample ./nuslist\n\nbruk2pipe -verb -in ./ser_full \\\n  -bad 0.0 -ext -aswap -AMX -decim 1792 -dspfvs 20 -grpdly 67.9841766357422  \\\n  -xN              2048  -yN                84  -zN                84  \\\n  -xT              1024  -yT                42  -zT                42  \\\n  -xMODE            DQD  -yMODE States-TPPI  -zMODE States-TPPI  \\\n  -xSW        11160.714  -ySW         2269.632  -zSW         2816.901  \\\n  -xOBS         799.864  -yOBS          81.059  -zOBS         201.160  \\\n  -xCAR           4.773  -yCAR         117.084  -zCAR         176.207  \\\n  -xLAB 1H  -yLAB             15N  -zLAB             13C  \\\n  -ndim               3  -aq2D         Complex  \\\n| nmrPipe -fn MULT -c 1.95312e+00 \\\n  -out ./d_001.fid -ov\n\n\n",
+      "sha256": "f479822c4413a08394a93661cdbdf21410ad79fd8e3151cfa1628946e1f88d41"
+    },
+    "nus3d-process.com": {
+      "text": "#!/bin/csh\n# NMRForge 3D NUS SMILE reconstruction\n# experiment: d_001\nmkdir -p nus3d_1 nus3d_rc\n# step 1: direct dim (F3) FT + EXT + PS\nxyz2pipe -in d_001.fid -x \\\n| nmrPipe -fn SP -off 0.45 -end 0.98 -pow 2 -c 0.5 \\\n| nmrPipe -fn ZF -zf -size 4096 \\\n| nmrPipe -fn FT \\\n| nmrPipe -fn EXT -x1 10ppm -xn 6ppm -sw -round 2 \\\n| nmrPipe -fn PS -p0 107.969 -p1 -0 -di \\\n| pipe2xyz -out nus3d_1/test%04d.ft1 -z\n\n# step 2: SMILE reconstruct indirect dims (F2/F1)\nxyz2pipe -in nus3d_1/test%04d.ft1 -x \\\n| nmrPipe -fn SMILE -nDim 3 \\\n           -sample nuslist -nThread 2 \\\n           -sampleCount 441 -nSigma 5 -off 0 0 -report 1 \\\n           -maxMem 9.53179 \\\n           -scaling 1 \\\n           -maxIter 1500 \\\n           -xP0 182.5 -xP1 0 \\\n           -yP0 0 -yP1 0 \\\n           -xAlt -xNeg \\\n           -yAlt \\\n           -thresh 0.95 \\\n| pipe2xyz -out nus3d_rc/test%04d.ft1 -x\n\n# step 3: indirect dims (F2/F1) window + ZF + FT + PS\nxyz2pipe -in nus3d_rc/test%04d.ft1 -x \\\n| nmrPipe -fn ZF -size 256 \\\n| nmrPipe -fn FT -alt -neg \\\n| nmrPipe -fn PS -p0 182.5 -p1 0 -di \\\n| nmrPipe -fn TP \\\n| nmrPipe -fn ZF -size 256 \\\n| nmrPipe -fn FT -alt \\\n| nmrPipe -fn PS -p0 0 -p1 0 -di \\\n| nmrPipe -fn TP \\\n| nmrPipe -fn ZTP \\\n| pipe2xyz -out d_001.ft3 -x\n",
+      "sha256": "fe0f108240bef945a5f5d855b6c7a6ced82629d473f921f68514ff9e52286849"
+    },
+    "nus3d-author.com": {
+      "text": "#!/bin/csh\n\nset CONVERSION = y\nset PROCESSING_1 = y\nset RECONSTRUCTION = y\nset PROCESSING_23 = y\nset PROJECTIONS = y\n\n\n\nif ($CONVERSION == 'y') then\n\nnusExpand.tcl -mode bruker -sampleCount 441 -off 0 \\\n -in ./ser -out ./ser_full -sample ./nuslist\n\nbruk2pipe -verb -in ./ser_full \\\n  -bad 0.0 -ext -aswap -AMX -decim 1792 -dspfvs 20 -grpdly 67.9841766357422  \\\n  -xN              2048  -yN                84  -zN                84  \\\n  -xT              1024  -yT                42  -zT                42  \\\n  -xMODE            DQD  -yMODE    States-TPPI  -zMODE    States-TPPI  \\\n  -xSW        11160.714  -ySW         2269.632  -zSW         2816.901  \\\n  -xOBS         799.864  -yOBS          81.059  -zOBS         201.160  \\\n  -xCAR           4.773  -yCAR         117.084  -zCAR         176.207  \\\n  -xLAB              HN  -yLAB             15N  -zLAB              CO  \\\n  -ndim               3  -aq2D         Complex                         \\\n| nmrPipe -fn MULT -c 1.95312e+00 \\\n| pipe2xyz -x -out ./fid/test%03d.fid -ov\n\n\n\n\n  echo \"Expansion & conversion done...\"\n  \nendif\n\nif ($PROCESSING_1 == 'y') then\n\necho \"Processing Direct dimension...\"\n\nxyz2pipe -in ./fid/test%03d.fid -x                    \\\n| nmrPipe  -fn POLY -time                             \\\n| nmrPipe  -fn SP -off 0.4 -end 0.98 -pow 2 -c 0.5    \\\n| nmrPipe  -fn ZF -auto                         \\\n| nmrPipe  -fn FT                                     \\\n| nmrPipe  -fn EXT -x1 10ppm -xn 6ppm -sw -round 2  \\\n| nmrPipe  -fn PS -p0 -73.0 -p1 0.0 -di                 \\\n#| nmrPipe  -fn POLY -auto   \\\n| pipe2xyz -out ft1/test%04d.ft1 -z -verb\n\necho \"Direct dimension processing done...\"\n\nendif\n\nif ($RECONSTRUCTION == 'y') then\ndate\necho \"Starting reconstruction...\"\n\nxyz2pipe -in ft1/test%04d.ft1 -x                           \\\n| nmrPipe  -fn SMILE -nDim 3 -sample nuslist -nThread 40   \\\n           -sampleCount 441 -nSigma 5 -off 0 -report 2\t\t\\\n           -xCT 42 -xAlt -xNeg -yAlt -xQ3 2 -yQ3 2                                    \\\n| pipe2xyz -out ft1/rc%04d.ft1 -x\n\nendif\n\nif ($PROCESSING_23 == 'y') then\n\nxyz2pipe -in ft1/rc%04d.ft1 -x                        \\\n| nmrPipe  -fn ZF -auto                         \\\n| nmrPipe  -fn FT -alt -neg                                     \\\n| nmrPipe  -fn PS -p0 0 -p1 0 -di                     \\\n| nmrPipe  -fn TP                                     \\\n| nmrPipe  -fn ZF -auto                         \\\n| nmrPipe  -fn FT -alt                                    \\\n| nmrPipe  -fn PS -p0 0 -p1 0 -di                     \\\n| nmrPipe  -fn TP                                     \\\n| nmrPipe  -fn ZTP                                    \\\n| pipe2xyz -out ft/DomainIV_HNCO_%03d.ft3 -x\n\nproj3D.tcl -in ft/DomainIV_HNCO_%03d.ft3\n\nendif\n\nxyz2pipe -verb -in ft/DomainIV_HNCO_%03d.ft3 -x  \\\n|  nmrPipe -ov -out DomainIV_HNCO.ft3",
+      "sha256": "1d99df0e7f029592db68985e2d50a70255caa666be52e9773e8e381c3eebba68"
+    },
+    "uniform-3d-author-fid.com": {
+      "text": "#!/bin/csh\n\nbruk2pipe -in ./ser -bad 0.0 -aswap -DMX -decim 1568 -dspfvs 20 -grpdly 67.9841461181641  \\\n  -xN              1024  -yN                64  -zN                64  \\\n  -xT               512  -yT                32  -zT                32  \\\n  -xMODE            DQD  -yMODE  Echo-AntiEcho  -zMODE    States-TPPI  \\\n  -xSW        12755.102  -ySW         2500.000  -zSW         3636.364  \\\n  -xOBS         850.104  -yOBS          86.150  -zOBS         213.795  \\\n  -xCAR           4.800  -yCAR         118.100  -zCAR         178.250  \\\n  -xLAB              H1  -yLAB             N15  -zLAB             C13  \\\n  -ndim               3  -aq2D          States                         \\\n  -out ./data/test%03d.fid -verb -ov\n\nsleep 5\n",
+      "sha256": "d3da4a6286132fc7a205b1ffbe9894354134298c5e54f00ad0b45d6ceab24aad"
+    },
+    "uniform-3d-author-proc.com": {
+      "text": "#!/bin/csh\n\nxyz2pipe -in  data/test%03d.fid -x  -verb           \\\n| nmrPipe  -fn POLY -time                           \\\n| nmrPipe  -fn SP -size 512 -off 0.5 -end 1.00 -pow 2 -c 0.5  \\\n| nmrPipe  -fn ZF -auto                             \\\n| nmrPipe  -fn FT                                   \\\n| nmrPipe  -fn PS -p0  3.0 -p1 0                    \\\n| nmrPipe  -fn PS -p0 -4  -p1 43.0 -di               \\\n| nmrPipe  -fn EXT -x1 10.0ppm -xn 6.0ppm -sw       \\\n| pipe2xyz -out data/test%03d.ft3 -x -ov\n \nxyz2pipe -in data/test%03d.ft3 -z -verb               \\\n| nmrPipe  -fn SP -off 0.5 -end 0.98 -pow 1 -c 0.5  \\\n| nmrPipe  -fn ZF -auto                             \\\n| nmrPipe  -fn FT -alt                              \\\n| nmrPipe  -fn PS -p0 0.0 -p1 0.0 -di               \\\n| pipe2xyz -out data/test%03d.ft3 -z -inPlace\n\nxyz2pipe -in data/test%03d.ft3 -y -verb               \\\n| nmrPipe  -fn LP -fb                               \\\n| nmrPipe  -fn SP -off 0.5 -end 0.98 -pow 1 -c 1.0  \\\n| nmrPipe  -fn ZF -auto                             \\\n| nmrPipe  -fn FT                                   \\\n| nmrPipe  -fn PS -p0 -90 -p1 0 -di                   \\\n| nmrPipe  -fn POLY -auto -ord 0                    \\\n| nmrPipe  -fn TP                                   \\\n| nmrPipe  -fn POLY -auto -ord 0                    \\\n| pipe2xyz -out data/test%03d.ft3 -y -inPlace\n\nxyz2pipe -in data/test%03d.ft3 -z -verb               \\\n| nmrPipe  -fn HT  -auto                            \\\n| nmrPipe  -fn PS  -inv -hdr                        \\\n| nmrPipe  -fn FT  -inv                             \\\n| nmrPipe  -fn ZF  -inv                             \\\n#| nmrPipe  -fn LP -pred 32 -ord 8                   \\\n| nmrPipe  -fn LP -fb                               \\\n| nmrPipe  -fn SP  -hdr                             \\\n| nmrPipe  -fn ZF  -auto                            \\\n| nmrPipe  -fn FT                                   \\\n| nmrPipe  -fn PS  -hdr -di                         \\\n| nmrPipe  -fn CS  -ls 3.0ppm   -sw                   \\\n| nmrPipe  -fn POLY -auto -ord 0                    \\\n| pipe2xyz -out data/test%03d.ft3 -z -inPlace\n\nxyz2pipe -in ./data/test%03d.ft3  -y -verb  \\\n  > ./hnco.ft3\n\n",
+      "sha256": "d91babc22a361ccd8237eecf435cf78381da15766e684ed03203caad59e4ba1d"
+    },
+    "uniform-3d-fid.com": {
+      "text": "#!/bin/csh\n\nbruk2pipe -verb -in ./ser \\\n  -bad 0.0 -ext -aswap -AMX -decim 1568 -dspfvs 20 -grpdly 67.9841461181641  \\\n  -xN              1024  -yN                64  -zN                64  \\\n  -xT               512  -yT                32  -zT                32  \\\n  -xMODE            DQD  -yMODE Echo-AntiEcho  -zMODE States-TPPI  \\\n  -xSW        12755.102  -ySW         2500.000  -zSW 3636.364  \\\n  -xOBS         850.104  -yOBS          86.150  -zOBS         213.795  \\\n  -xCAR           4.819  -yCAR         118.125  -zCAR         178.251  \\\n  -xLAB 1H  -yLAB             15N  -zLAB             13C  \\\n  -ndim               3  -aq2D         Complex                         \\\n| nmrPipe -fn MULT -c 1.95312e+00 \\\n| pipe2xyz -x -out ./fid/test%03d.fid -ov\n\n",
+      "sha256": "a729754a4d46fbe7798e5c693caa49b003f7b7b634a659382dd7e81f237bb3e8"
+    },
+    "uniform-3d-process.com": {
+      "text": "#!/bin/csh\n# NMRForge processing script\n# experiment: d_001\nxyz2pipe -in fid/test%03d.fid -x \\\n| nmrPipe -fn POLY -time \\\n| nmrPipe -fn ZF -size 2048 \\\n| nmrPipe -fn FT \\\n| nmrPipe -fn PS -p0 15 -p1 0 -di \\\n| nmrPipe -fn EXT -x1 10ppm -xn 6ppm -sw -round 2 \\\n| nmrPipe -fn TP \\\n| nmrPipe -fn SP -off 0.3 -end 0.98 -pow 1 -c 0.5 \\\n| nmrPipe -fn ZF -size 128 \\\n| nmrPipe -fn FT \\\n| nmrPipe -fn PS -p0 267.5 -p1 0 -di \\\n| nmrPipe -fn ZTP \\\n| nmrPipe -fn ZF -size 128 \\\n| nmrPipe -fn FT -alt \\\n| nmrPipe -fn PS -p0 2.5 -p1 0 -di \\\n| nmrPipe -fn TP \\\n| pipe2xyz -out d_001.ft3 -x\n",
+      "sha256": "94377b8f8306fea26edb363e3bffad011db62a861dcb2c0b79a7e344f18490a9"
+    }
+  },
+  "author_2d_bruker_parameters": {
+    "author-2d-procs": {
+      "BC_mod": "6",
+      "FT_mod": "6",
+      "GB": "0",
+      "LB": "0",
+      "MC2": "0",
+      "OFFSET": "12.68878",
+      "PHC0": "7.599999",
+      "PHC1": "0",
+      "SF": "599.5",
+      "SI": "2048",
+      "SSB": "2",
+      "SW_p": "9578.54406130266",
+      "WDW": "4"
+    },
+    "author-2d-proc2s": {
+      "BC_mod": "0",
+      "FT_mod": "6",
+      "GB": "0",
+      "LB": "0",
+      "MC2": "5",
+      "OFFSET": "136.0028",
+      "PHC0": "-2.4",
+      "PHC1": "0",
+      "SF": "60.74680744",
+      "SI": "256",
+      "SSB": "2",
+      "SW_p": "2187.22659667541",
+      "WDW": "4"
+    }
+  },
+  "author_2d_parameter_file_sha256": {
+    "author-2d-procs": "eaee9a7a6b39ac7884ef92cb2216c2e83cfd3c06c59c807815837de69e2f32e2",
+    "author-2d-proc2s": "fd702e9f65122c217f832cfb7d4850e80e5034bb22ca4a8b5d0c026c4c65761b"
+  }
+}

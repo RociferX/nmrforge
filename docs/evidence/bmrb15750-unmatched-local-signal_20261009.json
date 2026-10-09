@@ -1,0 +1,254 @@
+{
+  "kind": "local_signal_inspection_of_existing_unmatched_reference_projection_candidates",
+  "changes_to_processing_detection_matching_or_spectra": false,
+  "scope": "Same common 3D crop, signed projection, baseline and 10% candidate threshold as the published comparison. Each search ellipse is exactly the matching tolerance. Local signal does not establish a separate assigned 3D peak.",
+  "planes": {
+    "HC": {
+      "candidates": [
+        {
+          "reference_candidate_index_1based": 9,
+          "ppm": {
+            "C": 178.98296025170532,
+            "H": 7.225773786979872
+          },
+          "maximum_same_sign_local_height_fraction": 0.5977599885346322,
+          "below_10_percent_detection_threshold": false,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 1,
+          "interpretation": "already-used detected auto candidate in one-to-one matching"
+        },
+        {
+          "reference_candidate_index_1based": 32,
+          "ppm": {
+            "C": 176.3256144552109,
+            "H": 7.115321162586878
+          },
+          "maximum_same_sign_local_height_fraction": 0.42927083486760237,
+          "below_10_percent_detection_threshold": false,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 1,
+          "interpretation": "already-used detected auto candidate in one-to-one matching"
+        },
+        {
+          "reference_candidate_index_1based": 37,
+          "ppm": {
+            "C": 172.9975258305316,
+            "H": 8.281199272777627
+          },
+          "maximum_same_sign_local_height_fraction": 0.3573811450328541,
+          "below_10_percent_detection_threshold": false,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 1,
+          "interpretation": "already-used detected auto candidate in one-to-one matching"
+        },
+        {
+          "reference_candidate_index_1based": 53,
+          "ppm": {
+            "C": 176.86744421762106,
+            "H": 8.558473366383067
+          },
+          "maximum_same_sign_local_height_fraction": 0.3433525513854726,
+          "below_10_percent_detection_threshold": false,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 1,
+          "interpretation": "already-used detected auto candidate in one-to-one matching"
+        },
+        {
+          "reference_candidate_index_1based": 74,
+          "ppm": {
+            "C": 174.18999798079557,
+            "H": 9.405010631794523
+          },
+          "maximum_same_sign_local_height_fraction": 0.09677313403581252,
+          "below_10_percent_detection_threshold": true,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 0,
+          "interpretation": "local signal below candidate threshold"
+        },
+        {
+          "reference_candidate_index_1based": 75,
+          "ppm": {
+            "C": 172.94421934773325,
+            "H": 9.15896805849872
+          },
+          "maximum_same_sign_local_height_fraction": 0.09940739141403586,
+          "below_10_percent_detection_threshold": true,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 0,
+          "interpretation": "local signal below candidate threshold"
+        },
+        {
+          "reference_candidate_index_1based": 77,
+          "ppm": {
+            "C": 175.0784586871997,
+            "H": 8.139413836605527
+          },
+          "maximum_same_sign_local_height_fraction": 0.08670988892435523,
+          "below_10_percent_detection_threshold": true,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 0,
+          "interpretation": "local signal below candidate threshold"
+        },
+        {
+          "reference_candidate_index_1based": 80,
+          "ppm": {
+            "C": 172.6314984787685,
+            "H": 9.892971013021548
+          },
+          "maximum_same_sign_local_height_fraction": 0.08801145197758975,
+          "below_10_percent_detection_threshold": true,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 0,
+          "interpretation": "local signal below candidate threshold"
+        },
+        {
+          "reference_candidate_index_1based": 81,
+          "ppm": {
+            "C": 176.40306007180544,
+            "H": 9.009091147118186
+          },
+          "maximum_same_sign_local_height_fraction": 0.08151052660245926,
+          "below_10_percent_detection_threshold": true,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 0,
+          "interpretation": "local signal below candidate threshold"
+        }
+      ],
+      "summary": {
+        "reference_unmatched": 9,
+        "local_max_below_threshold": 5,
+        "shared_detected_auto_candidate": 4
+      }
+    },
+    "HN": {
+      "candidates": [
+        {
+          "reference_candidate_index_1based": 44,
+          "ppm": {
+            "H": 8.043762574643422,
+            "N": 117.37564503197245
+          },
+          "maximum_same_sign_local_height_fraction": 0.323512532513756,
+          "below_10_percent_detection_threshold": false,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 0,
+          "interpretation": "no independent detected candidate in ellipse; inspect peak shape and localization"
+        },
+        {
+          "reference_candidate_index_1based": 77,
+          "ppm": {
+            "H": 9.405010631794523,
+            "N": 126.6513419662763
+          },
+          "maximum_same_sign_local_height_fraction": 0.09764399157141805,
+          "below_10_percent_detection_threshold": true,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 0,
+          "interpretation": "local signal below candidate threshold"
+        },
+        {
+          "reference_candidate_index_1based": 83,
+          "ppm": {
+            "H": 9.892971013021548,
+            "N": 130.38422208340563
+          },
+          "maximum_same_sign_local_height_fraction": 0.08889075719907853,
+          "below_10_percent_detection_threshold": true,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 0,
+          "interpretation": "local signal below candidate threshold"
+        },
+        {
+          "reference_candidate_index_1based": 84,
+          "ppm": {
+            "H": 9.009091147118186,
+            "N": 118.74459573555723
+          },
+          "maximum_same_sign_local_height_fraction": 0.08239609977285951,
+          "below_10_percent_detection_threshold": true,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 0,
+          "interpretation": "local signal below candidate threshold"
+        }
+      ],
+      "summary": {
+        "reference_unmatched": 4,
+        "local_max_below_threshold": 3,
+        "shared_detected_auto_candidate": 0
+      }
+    },
+    "NC": {
+      "candidates": [
+        {
+          "reference_candidate_index_1based": 9,
+          "ppm": {
+            "C": 178.98303320960008,
+            "N": 113.17953921568788
+          },
+          "maximum_same_sign_local_height_fraction": 0.5972488786861229,
+          "below_10_percent_detection_threshold": false,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 1,
+          "interpretation": "already-used detected auto candidate in one-to-one matching"
+        },
+        {
+          "reference_candidate_index_1based": 32,
+          "ppm": {
+            "C": 176.3256144552109,
+            "N": 106.48511632846702
+          },
+          "maximum_same_sign_local_height_fraction": 0.42854563277726826,
+          "below_10_percent_detection_threshold": false,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 1,
+          "interpretation": "already-used detected auto candidate in one-to-one matching"
+        },
+        {
+          "reference_candidate_index_1based": 36,
+          "ppm": {
+            "C": 172.9975258305316,
+            "N": 114.25392717607599
+          },
+          "maximum_same_sign_local_height_fraction": 0.35656459566866977,
+          "below_10_percent_detection_threshold": false,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 1,
+          "interpretation": "already-used detected auto candidate in one-to-one matching"
+        },
+        {
+          "reference_candidate_index_1based": 49,
+          "ppm": {
+            "C": 176.86744421762106,
+            "N": 121.67704629118617
+          },
+          "maximum_same_sign_local_height_fraction": 0.3425181764639853,
+          "below_10_percent_detection_threshold": false,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 1,
+          "interpretation": "already-used detected auto candidate in one-to-one matching"
+        },
+        {
+          "reference_candidate_index_1based": 67,
+          "ppm": {
+            "C": 173.93363656593286,
+            "N": 110.26610771878654
+          },
+          "maximum_same_sign_local_height_fraction": 0.14418209640666482,
+          "below_10_percent_detection_threshold": false,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 0,
+          "interpretation": "no independent detected candidate in ellipse; inspect peak shape and localization"
+        },
+        {
+          "reference_candidate_index_1based": 70,
+          "ppm": {
+            "C": 172.94421934773325,
+            "N": 124.29018301352941
+          },
+          "maximum_same_sign_local_height_fraction": 0.09826304540512895,
+          "below_10_percent_detection_threshold": true,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 0,
+          "interpretation": "local signal below candidate threshold"
+        },
+        {
+          "reference_candidate_index_1based": 71,
+          "ppm": {
+            "C": 172.6314984787685,
+            "N": 130.38422208340563
+          },
+          "maximum_same_sign_local_height_fraction": 0.08685262561687059,
+          "below_10_percent_detection_threshold": true,
+          "number_of_same_sign_detected_auto_candidates_inside_matching_ellipse": 0,
+          "interpretation": "local signal below candidate threshold"
+        }
+      ],
+      "summary": {
+        "reference_unmatched": 7,
+        "local_max_below_threshold": 2,
+        "shared_detected_auto_candidate": 4
+      }
+    }
+  }
+}

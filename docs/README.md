@@ -1,51 +1,29 @@
 # nmrForge documentation
 
-Entry point for the documentation that ships with the repository.
+Start with the [project README](../README.md) for a short overview, Linux installation, API entry point, and evidence summary.
 
-## Start here
+## Using nmrForge
 
-1. [README](../README.md) - what nmrForge is, how to install it, how to run it.
-2. [Getting started](getting-started.md) - source/AppImage startup options and a no-NMRPipe walkthrough.
-3. [Installation](installation.md) - source installation and the version boundary for AppImages.
-
-## Desktop application and Python/CLI API
-
-The desktop application and `nmrforge_api` are supported interfaces in the same source tree. The
-Python API source contract is currently v1.1 (`API_VERSION = "1.1"`, 2026-10-03) and exposes a compatibility manifest
-for behaviour and contract changes. A released AppImage corresponds to a specific source version;
-source updates do not update that binary automatically.
-The v1.1 source API contract does not imply that the existing AppImage 1.0.2 includes these changes.
-
-### Desktop application
-
-- [GUI guide](gui.md) - window layout, the four pipeline steps, a typical session.
-- [QC system](qc-system.md) - FID, sampling and spectrum-level quality control.
-- [Peak picking](peak-picking.md) - detection, sub-grid localisation, peak tables.
-- [Batch processing](batch-processing.md) - batch runs (2D only) and how they differ from sweeps.
-- [External dependencies](external-dependencies.md) - NMRPipe and SMILE: order, detection, missing.
-- [Real-data evidence](evidence/real-data-comparison.md) - automatic vs manual (anonymised): the
-  comparison figure, the inspection verdict, the match rate, the QC scores, the two parameter sets
-  and a real-machine repeatability snapshot.
-
-### Python/CLI API
-
-- [Python API](python-api.md) - the public `nmrforge_api` surface versus the internal layers.
-- [CLI reference](cli.md) - `python -m nmrforge_api` subcommands and options.
-- [nmrforge_api guide](external-api/README.md) - the parameter-study API: quick start, API/CLI
-  reference, inputs and outputs, methods and QC, handing results to downstream analysis.
-- [Processing model](processing-model.md) - understand, plan, execute, document.
-
+- [Getting started](getting-started.md) — first run and a brief walkthrough.
+- [Installation](installation.md) — source and Linux AppImage options.
+- [GUI guide](gui.md) — desktop workflow.
+- [External dependencies](external-dependencies.md) — NMRPipe and SMILE.
 - [Troubleshooting](troubleshooting.md) and [FAQ](faq.md).
 
-## Design and contracts
+## Python/CLI API
 
-- [Architecture](architecture.md) - layers, responsibilities, dependency directions.
-- [Development](development.md) - local development, testing, environment notes.
-- [Packaging](packaging.md) - the AppImage and what it contains.
-- [Roadmap](roadmap.md) - longer-term plans (not a statement about current behaviour).
+- [Python API](python-api.md)
+- [CLI reference](cli.md)
+- [Parameter-study API guide](external-api/README.md)
 
-## Release and licensing
+The source API contract is version 1.1. The available Linux AppImage is version 1.0.2; see the [release page](https://github.com/RociferX/nmrforge/releases) for version-specific downloads and notes.
 
-- [THIRD_PARTY.md](../THIRD_PARTY.md) - third-party dependencies and their licences.
-- [LICENSE](../LICENSE) and [THIRD_PARTY.md](../THIRD_PARTY.md) - source and third-party licence information.
-- Version-specific changes are listed on the GitHub releases page.
+## Evidence
+
+[Real-data comparisons](evidence/real-data-comparison.md) cover selected 2D/3D uniform and NUS examples and describe their scope and limitations.
+
+## Project information
+
+- [Contribution guide](../CONTRIBUTING.md) · [Security policy](../SECURITY.md)
+- [Citation metadata](../CITATION.cff) · [Source license](../LICENSE) · [Third-party notices](../THIRD_PARTY.md)
+- [Development notes](development.md) · [Packaging notes](packaging.md)

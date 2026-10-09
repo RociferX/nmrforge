@@ -1,0 +1,2485 @@
+{
+  "date": "2026-10-09",
+  "software_version": "1.0.4",
+  "api_version": "1.1",
+  "kind": "display_projection_comparison_not_independent_truth",
+  "projection": "signed_max_absolute_voxel; all-axis common crop before projection",
+  "source_ndim": 2,
+  "offset_fitted": true,
+  "reference_offset_ppm": {
+    "H": 0.07258459433886566,
+    "N": 0.05977570099166485
+  },
+  "offset_source": "external_strong_anchor_median_frozen",
+  "matching": "same polarity; joint normalized distance <=1; greedy one-to-one",
+  "primary_metric": "reference_candidate_coverage; not true-peak recovery",
+  "requested_sigma_floor": 0,
+  "requested_sign_mode": "dominant",
+  "min_height_fraction": 0.1,
+  "tolerance_ppm": {
+    "H": 0.02,
+    "N": 0.2,
+    "C": 0.15
+  },
+  "spectrum_sha256": {
+    "automatic": "52bb674cee7c2ddac63d25325ae7f603111a88cfae3812a44b585cbd164fd35d",
+    "comparison": "3d4e1041c085b05e14cdf1bfb889670daa5d5caacaeeda5c1f58ce35dccb15d5"
+  },
+  "planes": {
+    "HN": {
+      "automatic": {
+        "requested_sigma_floor": 0,
+        "resolved_sigma_multiplier": 14.51987454582527,
+        "requested_sign_mode": "dominant",
+        "sign_mode": "dominant",
+        "positive_candidates": 127,
+        "negative_candidates": 0,
+        "detected_before_height_filter": 127,
+        "noise_estimate": 94171.24240781249,
+        "baseline": 8122.744140625,
+        "max_abs_centered_voxel": 13673546.255859375,
+        "height_cutoff": 1367354.6255859376,
+        "count": 127,
+        "shape": [
+          510,
+          1028
+        ]
+      },
+      "comparison": {
+        "requested_sigma_floor": 0,
+        "resolved_sigma_multiplier": 17.718986622864392,
+        "requested_sign_mode": "dominant",
+        "sign_mode": "dominant",
+        "positive_candidates": 126,
+        "negative_candidates": 0,
+        "detected_before_height_filter": 126,
+        "noise_estimate": 1471.7418372070313,
+        "baseline": 356.9931640625,
+        "max_abs_centered_voxel": 260777.7392578125,
+        "height_cutoff": 26077.77392578125,
+        "count": 126,
+        "shape": [
+          256,
+          514
+        ]
+      },
+      "matched": 125,
+      "automatic_matched_fraction": 0.984251968503937,
+      "comparison_matched_fraction": 0.9920634920634921,
+      "reference_candidate_coverage": 0.9920634920634921,
+      "automatic_unmatched_candidates": [
+        {
+          "candidate_index_1based": 126,
+          "ppm": {
+            "H": 7.948959028147177,
+            "N": 127.53371553575104
+          },
+          "intensity": 1435283.505859375,
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 127,
+          "ppm": {
+            "H": 6.901879417598897,
+            "N": 112.12931421451421
+          },
+          "intensity": 1383780.130859375,
+          "sign": 1
+        }
+      ],
+      "reference_unmatched_candidates": [
+        {
+          "candidate_index_1based": 126,
+          "ppm": {
+            "H": 8.543705039745257,
+            "N": 129.7483741652692
+          },
+          "intensity": 29501.9521484375,
+          "sign": 1
+        }
+      ],
+      "median_abs_delta_ppm": {
+        "H": 0.0003905910907455734,
+        "N": 0.009042024068648402
+      },
+      "windows_ppm": {
+        "H": [
+          6.4967250218616535,
+          10.498915245036136
+        ],
+        "N": [
+          100.21694636549852,
+          136.00736690393254
+        ]
+      },
+      "intensity_pearson": 0.9750997505628023,
+      "median_fwhm_ratio_by_nucleus": {
+        "H": 0.951864068255652,
+        "N": 1.1267132206618204
+      }
+    }
+  },
+  "alignment_calibration": {
+    "method": "same-polarity mutual nearest strong peaks; iterative trimmed componentwise median",
+    "offset_convention": "author_ppm + offset ~= automatic_ppm",
+    "anchor_height_fraction": 0.2,
+    "initial_search_radius_ppm": {
+      "H": 0.1,
+      "N": 1
+    },
+    "trim_normalized_radius_ppm": {
+      "H": 0.02,
+      "N": 0.2
+    },
+    "trim_joint_distance_limit": 1,
+    "mutual_anchor_candidates": 90,
+    "retained_anchor_pairs": 56,
+    "reference_offset_ppm": {
+      "H": 0.07258459433886566,
+      "N": 0.05977570099166485
+    },
+    "same_data_calibration_not_independent_truth": true,
+    "median_abs_anchor_residual_ppm": {
+      "H": 0.00034741682769423576,
+      "N": 0.008139643661294826
+    },
+    "intensity_and_spectrum_files_modified": false
+  },
+  "unaligned_at_same_height": {
+    "kind": "display_projection_comparison_not_independent_truth",
+    "projection": "signed_max_absolute_voxel; all-axis common crop before projection",
+    "source_ndim": 2,
+    "offset_fitted": false,
+    "reference_offset_ppm": {},
+    "offset_source": "none",
+    "matching": "same polarity; joint normalized distance <=1; greedy one-to-one",
+    "primary_metric": "reference_candidate_coverage; not true-peak recovery",
+    "requested_sigma_floor": 0,
+    "requested_sign_mode": "dominant",
+    "min_height_fraction": 0.1,
+    "tolerance_ppm": {
+      "H": 0.02,
+      "N": 0.2,
+      "C": 0.15
+    },
+    "spectrum_sha256": {
+      "automatic": "52bb674cee7c2ddac63d25325ae7f603111a88cfae3812a44b585cbd164fd35d",
+      "comparison": "3d4e1041c085b05e14cdf1bfb889670daa5d5caacaeeda5c1f58ce35dccb15d5"
+    },
+    "planes": {
+      "HN": {
+        "automatic": {
+          "requested_sigma_floor": 0,
+          "resolved_sigma_multiplier": 14.521661261003509,
+          "requested_sign_mode": "dominant",
+          "sign_mode": "dominant",
+          "positive_candidates": 127,
+          "negative_candidates": 0,
+          "detected_before_height_filter": 127,
+          "noise_estimate": 94159.1962828125,
+          "baseline": 8189.4697265625,
+          "max_abs_centered_voxel": 13673479.530273438,
+          "height_cutoff": 1367347.9530273438,
+          "count": 127,
+          "shape": [
+            510,
+            1028
+          ]
+        },
+        "comparison": {
+          "requested_sigma_floor": 0,
+          "resolved_sigma_multiplier": 17.68353318145241,
+          "requested_sign_mode": "dominant",
+          "sign_mode": "dominant",
+          "positive_candidates": 126,
+          "negative_candidates": 0,
+          "detected_before_height_filter": 126,
+          "noise_estimate": 1474.6194421875,
+          "baseline": 369.9140625,
+          "max_abs_centered_voxel": 260764.818359375,
+          "height_cutoff": 26076.481835937502,
+          "count": 126,
+          "shape": [
+            255,
+            513
+          ]
+        },
+        "matched": 3,
+        "automatic_matched_fraction": 0.023622047244094488,
+        "comparison_matched_fraction": 0.023809523809523808,
+        "reference_candidate_coverage": 0.023809523809523808,
+        "automatic_unmatched_candidates": [
+          {
+            "candidate_index_1based": 1,
+            "ppm": {
+              "H": 6.898398709820206,
+              "N": 112.67977538079043
+            },
+            "intensity": 13673479.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 2,
+            "ppm": {
+              "H": 7.472482024504855,
+              "N": 121.14859160660379
+            },
+            "intensity": 12978751.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 4,
+            "ppm": {
+              "H": 7.635388557481948,
+              "N": 112.77062055812078
+            },
+            "intensity": 12640128.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 5,
+            "ppm": {
+              "H": 7.856175173158722,
+              "N": 120.69186519165463
+            },
+            "intensity": 11630294.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 6,
+            "ppm": {
+              "H": 6.875308623516117,
+              "N": 112.77362695966704
+            },
+            "intensity": 11524140.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 7,
+            "ppm": {
+              "H": 8.63882251746814,
+              "N": 129.84850831991466
+            },
+            "intensity": 11452058.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 8,
+            "ppm": {
+              "H": 8.421071191220406,
+              "N": 123.40710949907708
+            },
+            "intensity": 11386758.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 9,
+            "ppm": {
+              "H": 8.539325684978143,
+              "N": 123.73172167124812
+            },
+            "intensity": 11350859.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 10,
+            "ppm": {
+              "H": 7.871356702987908,
+              "N": 127.45759787783288
+            },
+            "intensity": 10978447.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 11,
+            "ppm": {
+              "H": 6.884693294589955,
+              "N": 113.31165601822961
+            },
+            "intensity": 10914191.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 12,
+            "ppm": {
+              "H": 8.262197951162388,
+              "N": 122.25981896252239
+            },
+            "intensity": 10330902.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 13,
+            "ppm": {
+              "H": 6.8437409702526635,
+              "N": 112.75367294373902
+            },
+            "intensity": 10315762.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 14,
+            "ppm": {
+              "H": 8.612825935212195,
+              "N": 120.33443817727002
+            },
+            "intensity": 10228663.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 15,
+            "ppm": {
+              "H": 7.472286705919458,
+              "N": 113.31494344659957
+            },
+            "intensity": 10148749.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 16,
+            "ppm": {
+              "H": 8.258233179934933,
+              "N": 124.38526814042154
+            },
+            "intensity": 10032504.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 17,
+            "ppm": {
+              "H": 8.063437511112621,
+              "N": 118.35296998635039
+            },
+            "intensity": 9855839.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 18,
+            "ppm": {
+              "H": 8.446482509915072,
+              "N": 104.71719842983542
+            },
+            "intensity": 9572433.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 19,
+            "ppm": {
+              "H": 8.384015587670937,
+              "N": 120.03748319299629
+            },
+            "intensity": 9547780.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 20,
+            "ppm": {
+              "H": 8.58538777835413,
+              "N": 123.92897387346355
+            },
+            "intensity": 9411215.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 21,
+            "ppm": {
+              "H": 8.378554730246876,
+              "N": 125.6074699393921
+            },
+            "intensity": 9185322.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 22,
+            "ppm": {
+              "H": 7.993882079771831,
+              "N": 120.53641530141962
+            },
+            "intensity": 9156447.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 23,
+            "ppm": {
+              "H": 8.164881461241038,
+              "N": 119.50727977800713
+            },
+            "intensity": 8998067.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 24,
+            "ppm": {
+              "H": 8.54007573337211,
+              "N": 116.60966211174899
+            },
+            "intensity": 8863457.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 25,
+            "ppm": {
+              "H": 8.15039716456366,
+              "N": 123.77524333003247
+            },
+            "intensity": 8804557.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 26,
+            "ppm": {
+              "H": 7.858944842368077,
+              "N": 110.88601127163408
+            },
+            "intensity": 8511216.530273438,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 28,
+            "ppm": {
+              "H": 9.16262505428508,
+              "N": 117.78200356399924
+            },
+            "intensity": 8266144.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 29,
+            "ppm": {
+              "H": 8.047689070506538,
+              "N": 125.3649064697027
+            },
+            "intensity": 8172560.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 30,
+            "ppm": {
+              "H": 8.945960336370774,
+              "N": 118.76453573982786
+            },
+            "intensity": 8126388.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 31,
+            "ppm": {
+              "H": 8.672915319721966,
+              "N": 122.07839779777912
+            },
+            "intensity": 8072635.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 32,
+            "ppm": {
+              "H": 7.988092469115845,
+              "N": 110.48054236499695
+            },
+            "intensity": 7974566.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 33,
+            "ppm": {
+              "H": 8.185807319033692,
+              "N": 117.42631933159184
+            },
+            "intensity": 7936735.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 34,
+            "ppm": {
+              "H": 8.717941055655169,
+              "N": 127.6887808126558
+            },
+            "intensity": 7911278.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 35,
+            "ppm": {
+              "H": 7.46227560186651,
+              "N": 119.1313178551493
+            },
+            "intensity": 7878483.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 36,
+            "ppm": {
+              "H": 7.529962537078699,
+              "N": 122.0610940233135
+            },
+            "intensity": 7865676.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 37,
+            "ppm": {
+              "H": 8.77477532661034,
+              "N": 122.05280752487369
+            },
+            "intensity": 7864562.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 38,
+            "ppm": {
+              "H": 8.262773786575183,
+              "N": 125.76799387951232
+            },
+            "intensity": 7831051.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 39,
+            "ppm": {
+              "H": 7.40040607480047,
+              "N": 116.46081338668783
+            },
+            "intensity": 7785109.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 40,
+            "ppm": {
+              "H": 8.78886728038683,
+              "N": 118.9926413561577
+            },
+            "intensity": 7731838.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 41,
+            "ppm": {
+              "H": 7.443384941651197,
+              "N": 117.31772653481238
+            },
+            "intensity": 7696239.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 42,
+            "ppm": {
+              "H": 8.144701681019082,
+              "N": 122.39235118821276
+            },
+            "intensity": 7617218.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 43,
+            "ppm": {
+              "H": 8.444027716418391,
+              "N": 122.71922963341378
+            },
+            "intensity": 7570247.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 44,
+            "ppm": {
+              "H": 9.005020321119185,
+              "N": 120.36531713336562
+            },
+            "intensity": 7564313.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 45,
+            "ppm": {
+              "H": 7.033278382363808,
+              "N": 111.05604955543865
+            },
+            "intensity": 7471296.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 46,
+            "ppm": {
+              "H": 8.574246033230217,
+              "N": 125.35081829546277
+            },
+            "intensity": 7459421.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 47,
+            "ppm": {
+              "H": 9.642940451181707,
+              "N": 130.9928357098741
+            },
+            "intensity": 7424432.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 48,
+            "ppm": {
+              "H": 9.269574194052359,
+              "N": 118.37143345448246
+            },
+            "intensity": 7423648.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 49,
+            "ppm": {
+              "H": 8.719354617733963,
+              "N": 126.45506874825921
+            },
+            "intensity": 7389350.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 50,
+            "ppm": {
+              "H": 9.21108691953743,
+              "N": 127.9857427022574
+            },
+            "intensity": 7355191.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 51,
+            "ppm": {
+              "H": 8.835069561989735,
+              "N": 121.22460364714159
+            },
+            "intensity": 7306717.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 52,
+            "ppm": {
+              "H": 9.07574326655865,
+              "N": 119.76536668399356
+            },
+            "intensity": 7306285.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 53,
+            "ppm": {
+              "H": 8.46060438395462,
+              "N": 120.33251754133097
+            },
+            "intensity": 7198803.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 54,
+            "ppm": {
+              "H": 7.988943089510867,
+              "N": 117.48059678833017
+            },
+            "intensity": 7116954.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 55,
+            "ppm": {
+              "H": 8.356215040502825,
+              "N": 130.85651545262158
+            },
+            "intensity": 7111804.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 56,
+            "ppm": {
+              "H": 8.668229348571042,
+              "N": 125.50106477150231
+            },
+            "intensity": 7105537.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 57,
+            "ppm": {
+              "H": 9.211741167123192,
+              "N": 122.01712956269904
+            },
+            "intensity": 7040174.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 58,
+            "ppm": {
+              "H": 9.565710981300999,
+              "N": 120.29028307372346
+            },
+            "intensity": 7039811.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 59,
+            "ppm": {
+              "H": 8.977350192244103,
+              "N": 116.95824442384708
+            },
+            "intensity": 6992989.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 60,
+            "ppm": {
+              "H": 6.84657208967552,
+              "N": 112.2703379333129
+            },
+            "intensity": 6861453.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 61,
+            "ppm": {
+              "H": 9.023802006706974,
+              "N": 130.7997012356935
+            },
+            "intensity": 6854954.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 62,
+            "ppm": {
+              "H": 7.0250935574037445,
+              "N": 113.1840609016671
+            },
+            "intensity": 6741073.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 63,
+            "ppm": {
+              "H": 9.737577717106689,
+              "N": 114.08909464570904
+            },
+            "intensity": 6702967.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 64,
+            "ppm": {
+              "H": 8.11192314786205,
+              "N": 113.2681608916991
+            },
+            "intensity": 6657003.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 65,
+            "ppm": {
+              "H": 7.653909448586211,
+              "N": 111.02699200517003
+            },
+            "intensity": 6634666.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 66,
+            "ppm": {
+              "H": 7.562176595226181,
+              "N": 105.15971289868222
+            },
+            "intensity": 6619717.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 67,
+            "ppm": {
+              "H": 8.966688892651817,
+              "N": 115.62424024385258
+            },
+            "intensity": 6540210.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 68,
+            "ppm": {
+              "H": 8.752945139548656,
+              "N": 114.35339655144938
+            },
+            "intensity": 6531327.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 69,
+            "ppm": {
+              "H": 8.012614403932535,
+              "N": 121.45875115669935
+            },
+            "intensity": 6514586.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 70,
+            "ppm": {
+              "H": 7.986205936997124,
+              "N": 119.63078714988177
+            },
+            "intensity": 6453771.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 71,
+            "ppm": {
+              "H": 8.561428767021098,
+              "N": 122.02135119310825
+            },
+            "intensity": 6414395.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 72,
+            "ppm": {
+              "H": 8.90466571204512,
+              "N": 120.5970856515688
+            },
+            "intensity": 6324978.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 74,
+            "ppm": {
+              "H": 9.597868010222655,
+              "N": 119.70602887383386
+            },
+            "intensity": 6272743.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 75,
+            "ppm": {
+              "H": 8.381808771717406,
+              "N": 117.95913969778258
+            },
+            "intensity": 6270218.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 76,
+            "ppm": {
+              "H": 8.638748515033358,
+              "N": 123.69523958074447
+            },
+            "intensity": 6250740.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 77,
+            "ppm": {
+              "H": 7.136909255020688,
+              "N": 119.35496987272477
+            },
+            "intensity": 6197027.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 78,
+            "ppm": {
+              "H": 8.570449303738146,
+              "N": 117.96273519573109
+            },
+            "intensity": 6171294.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 79,
+            "ppm": {
+              "H": 8.877398595893165,
+              "N": 129.5747707677726
+            },
+            "intensity": 6162635.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 80,
+            "ppm": {
+              "H": 8.686478863027265,
+              "N": 125.92962638799926
+            },
+            "intensity": 5970864.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 81,
+            "ppm": {
+              "H": 8.604050040369096,
+              "N": 117.65772620395859
+            },
+            "intensity": 5962769.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 82,
+            "ppm": {
+              "H": 9.042235248883683,
+              "N": 116.65130373932848
+            },
+            "intensity": 5959970.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 83,
+            "ppm": {
+              "H": 9.049839854833783,
+              "N": 126.3633336408916
+            },
+            "intensity": 5940911.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 84,
+            "ppm": {
+              "H": 8.219456127013768,
+              "N": 124.21086330410921
+            },
+            "intensity": 5892104.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 85,
+            "ppm": {
+              "H": 9.186186090762195,
+              "N": 113.7163655196917
+            },
+            "intensity": 5858834.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 86,
+            "ppm": {
+              "H": 8.104147977259247,
+              "N": 119.12712873773097
+            },
+            "intensity": 5834028.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 87,
+            "ppm": {
+              "H": 7.297365814299943,
+              "N": 112.28515124080539
+            },
+            "intensity": 5780701.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 88,
+            "ppm": {
+              "H": 8.739770610114157,
+              "N": 119.88355904551084
+            },
+            "intensity": 5715824.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 89,
+            "ppm": {
+              "H": 9.5739921373285,
+              "N": 115.27005790218567
+            },
+            "intensity": 5660659.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 90,
+            "ppm": {
+              "H": 9.012135159588983,
+              "N": 121.52061550539952
+            },
+            "intensity": 5624947.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 91,
+            "ppm": {
+              "H": 8.632890528693075,
+              "N": 118.61768371962032
+            },
+            "intensity": 5554106.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 92,
+            "ppm": {
+              "H": 9.28934455073685,
+              "N": 116.99081864238684
+            },
+            "intensity": 5345506.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 93,
+            "ppm": {
+              "H": 9.27592571242218,
+              "N": 118.09324855886256
+            },
+            "intensity": 5243781.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 94,
+            "ppm": {
+              "H": 8.668692322761142,
+              "N": 123.43041097898043
+            },
+            "intensity": 5180745.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 95,
+            "ppm": {
+              "H": 9.952814743665472,
+              "N": 121.35098744314612
+            },
+            "intensity": 5163307.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 96,
+            "ppm": {
+              "H": 7.965944412082066,
+              "N": 122.13187417231924
+            },
+            "intensity": 5161916.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 97,
+            "ppm": {
+              "H": 6.703075575968304,
+              "N": 128.42614715445922
+            },
+            "intensity": 5155063.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 98,
+            "ppm": {
+              "H": 7.929382297120343,
+              "N": 118.64061025256721
+            },
+            "intensity": 5153188.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 99,
+            "ppm": {
+              "H": 8.265007744063846,
+              "N": 114.20305589716224
+            },
+            "intensity": 5093095.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 100,
+            "ppm": {
+              "H": 9.067979518767538,
+              "N": 115.69673202796747
+            },
+            "intensity": 5030622.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 101,
+            "ppm": {
+              "H": 9.665316799766808,
+              "N": 121.57820153863584
+            },
+            "intensity": 4927266.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 102,
+            "ppm": {
+              "H": 9.721051609524629,
+              "N": 119.54427935372384
+            },
+            "intensity": 4902566.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 103,
+            "ppm": {
+              "H": 7.163811326935123,
+              "N": 119.98449411774202
+            },
+            "intensity": 4884835.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 104,
+            "ppm": {
+              "H": 8.934650641484177,
+              "N": 114.4004639906359
+            },
+            "intensity": 4854910.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 105,
+            "ppm": {
+              "H": 9.758887419012254,
+              "N": 129.4416509912765
+            },
+            "intensity": 4800294.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 106,
+            "ppm": {
+              "H": 7.892020016148262,
+              "N": 116.01226039087722
+            },
+            "intensity": 4566885.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 107,
+            "ppm": {
+              "H": 8.098239623118738,
+              "N": 112.22996619913485
+            },
+            "intensity": 4560672.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 108,
+            "ppm": {
+              "H": 7.813279148820382,
+              "N": 108.14828160439484
+            },
+            "intensity": 4383964.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 109,
+            "ppm": {
+              "H": 8.107680838884015,
+              "N": 110.030096684852
+            },
+            "intensity": 4118162.2802734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 110,
+            "ppm": {
+              "H": 9.462264319704763,
+              "N": 119.2020280818032
+            },
+            "intensity": 4091407.7802734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 111,
+            "ppm": {
+              "H": 8.966196379945117,
+              "N": 121.09622772904255
+            },
+            "intensity": 4003368.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 112,
+            "ppm": {
+              "H": 8.693283743839654,
+              "N": 121.00515642850834
+            },
+            "intensity": 3994487.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 113,
+            "ppm": {
+              "H": 7.195276307092408,
+              "N": 118.59168414849074
+            },
+            "intensity": 3971906.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 114,
+            "ppm": {
+              "H": 6.926317090279774,
+              "N": 114.11949938503201
+            },
+            "intensity": 3950783.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 115,
+            "ppm": {
+              "H": 7.506097500772855,
+              "N": 115.0314677469253
+            },
+            "intensity": 3869636.7802734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 116,
+            "ppm": {
+              "H": 8.319572368952487,
+              "N": 121.21088965829568
+            },
+            "intensity": 3808684.2802734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 117,
+            "ppm": {
+              "H": 6.891646093857787,
+              "N": 128.35542107319947
+            },
+            "intensity": 3707594.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 118,
+            "ppm": {
+              "H": 7.549661181401877,
+              "N": 111.38262250310946
+            },
+            "intensity": 3641329.7802734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 119,
+            "ppm": {
+              "H": 7.601166980608922,
+              "N": 114.12314575012012
+            },
+            "intensity": 3536312.7802734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 120,
+            "ppm": {
+              "H": 7.002205347649235,
+              "N": 111.37191611278261
+            },
+            "intensity": 3423541.7802734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 121,
+            "ppm": {
+              "H": 9.386701236745626,
+              "N": 122.47645601818152
+            },
+            "intensity": 3350824.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 122,
+            "ppm": {
+              "H": 6.693952004513924,
+              "N": 111.07384250514647
+            },
+            "intensity": 2852224.5302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 123,
+            "ppm": {
+              "H": 8.707171451795622,
+              "N": 116.35897755307704
+            },
+            "intensity": 2412533.0302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 124,
+            "ppm": {
+              "H": 8.608664174438971,
+              "N": 124.91338557935079
+            },
+            "intensity": 2093407.7802734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 125,
+            "ppm": {
+              "H": 8.134404806642927,
+              "N": 118.59938695077638
+            },
+            "intensity": 1808812.4052734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 126,
+            "ppm": {
+              "H": 7.948959028147177,
+              "N": 127.53371553575104
+            },
+            "intensity": 1435216.7802734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 127,
+            "ppm": {
+              "H": 6.901879417598897,
+              "N": 112.12931421451421
+            },
+            "intensity": 1383713.4052734375,
+            "sign": 1
+          }
+        ],
+        "reference_unmatched_candidates": [
+          {
+            "candidate_index_1based": 1,
+            "ppm": {
+              "H": 7.399758767829591,
+              "N": 121.08863188732005
+            },
+            "intensity": 260764.818359375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 3,
+            "ppm": {
+              "H": 7.487936243424199,
+              "N": 112.61895653047173
+            },
+            "intensity": 222765.54296875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 4,
+            "ppm": {
+              "H": 6.827215401594054,
+              "N": 112.62427571422324
+            },
+            "intensity": 221673.8369140625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 5,
+            "ppm": {
+              "H": 7.798940475344448,
+              "N": 127.40781132474181
+            },
+            "intensity": 217859.3603515625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 6,
+            "ppm": {
+              "H": 8.568689551092337,
+              "N": 129.80088805316797
+            },
+            "intensity": 216960.265625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 7,
+            "ppm": {
+              "H": 8.348948021165416,
+              "N": 123.35050624925492
+            },
+            "intensity": 214759.2216796875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 8,
+            "ppm": {
+              "H": 7.783810591033886,
+              "N": 120.64337619333214
+            },
+            "intensity": 213073.3056640625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 9,
+            "ppm": {
+              "H": 6.811756046442305,
+              "N": 113.23659219135355
+            },
+            "intensity": 207802.3125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 11,
+            "ppm": {
+              "H": 7.399883215086495,
+              "N": 113.23938532627349
+            },
+            "intensity": 195877.169921875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 12,
+            "ppm": {
+              "H": 8.18959999108702,
+              "N": 122.20409027401641
+            },
+            "intensity": 194695.6015625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 13,
+            "ppm": {
+              "H": 8.374046841666438,
+              "N": 104.64798919173059
+            },
+            "intensity": 193137.900390625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 14,
+            "ppm": {
+              "H": 7.9908994141658205,
+              "N": 118.28493802341262
+            },
+            "intensity": 192178.3203125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 15,
+            "ppm": {
+              "H": 8.185846530270506,
+              "N": 124.32759687464693
+            },
+            "intensity": 191853.9931640625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 17,
+            "ppm": {
+              "H": 6.770522675074434,
+              "N": 112.67586044500459
+            },
+            "intensity": 188181.755859375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 18,
+            "ppm": {
+              "H": 6.806519512102078,
+              "N": 112.68658213022431
+            },
+            "intensity": 187367.4951171875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 19,
+            "ppm": {
+              "H": 8.537646060997224,
+              "N": 120.26398343703643
+            },
+            "intensity": 184519.4814453125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 20,
+            "ppm": {
+              "H": 8.512736111557977,
+              "N": 123.88571946930789
+            },
+            "intensity": 175057.310546875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 21,
+            "ppm": {
+              "H": 8.092224716019098,
+              "N": 119.43263992632934
+            },
+            "intensity": 169412.3798828125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 22,
+            "ppm": {
+              "H": 7.786370273622234,
+              "N": 110.823514950964
+            },
+            "intensity": 167751.591796875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 23,
+            "ppm": {
+              "H": 7.974702471438034,
+              "N": 125.30926990577028
+            },
+            "intensity": 167204.8251953125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 24,
+            "ppm": {
+              "H": 8.390243159736547,
+              "N": 123.48279934346166
+            },
+            "intensity": 163868.0244140625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 25,
+            "ppm": {
+              "H": 8.873517255998888,
+              "N": 118.70083179970858
+            },
+            "intensity": 161766.345703125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 26,
+            "ppm": {
+              "H": 8.30683718185171,
+              "N": 125.55350482463888
+            },
+            "intensity": 160088.5166015625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 27,
+            "ppm": {
+              "H": 8.467680826590543,
+              "N": 116.559915062189
+            },
+            "intensity": 157310.4853515625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 28,
+            "ppm": {
+              "H": 7.91545645351189,
+              "N": 110.41106366236545
+            },
+            "intensity": 157173.482421875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 29,
+            "ppm": {
+              "H": 9.089010454845685,
+              "N": 117.72032001812518
+            },
+            "intensity": 157014.7421875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 30,
+            "ppm": {
+              "H": 8.078123978382816,
+              "N": 123.72923085667685
+            },
+            "intensity": 156573.6767578125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 31,
+            "ppm": {
+              "H": 8.18967269598997,
+              "N": 125.7183577244313
+            },
+            "intensity": 155498.96484375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 32,
+            "ppm": {
+              "H": 9.570229797164341,
+              "N": 130.9352274131414
+            },
+            "intensity": 152234.259765625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 33,
+            "ppm": {
+              "H": 8.501651593757293,
+              "N": 125.30338107702276
+            },
+            "intensity": 151319.76953125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 34,
+            "ppm": {
+              "H": 8.071758453958374,
+              "N": 122.34279193979751
+            },
+            "intensity": 148704.611328125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 35,
+            "ppm": {
+              "H": 9.002430781321195,
+              "N": 119.6958592222601
+            },
+            "intensity": 148059.462890625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 36,
+            "ppm": {
+              "H": 8.387670745545341,
+              "N": 120.26388865281244
+            },
+            "intensity": 146831.2275390625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 37,
+            "ppm": {
+              "H": 8.283539125021433,
+              "N": 130.79712959372003
+            },
+            "intensity": 144647.7412109375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 38,
+            "ppm": {
+              "H": 7.916039034158764,
+              "N": 117.42636043191958
+            },
+            "intensity": 143602.4375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 39,
+            "ppm": {
+              "H": 7.920983386456735,
+              "N": 120.46988577195341
+            },
+            "intensity": 142212.509765625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 40,
+            "ppm": {
+              "H": 9.138912962216748,
+              "N": 121.94872831901405
+            },
+            "intensity": 142079.7900390625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 41,
+            "ppm": {
+              "H": 8.702492648637314,
+              "N": 121.97780465963854
+            },
+            "intensity": 140805.4072265625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 42,
+            "ppm": {
+              "H": 6.960545030751435,
+              "N": 110.98231815598346
+            },
+            "intensity": 140618.60546875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 43,
+            "ppm": {
+              "H": 8.904521992488283,
+              "N": 116.89037210852453
+            },
+            "intensity": 139854.3271484375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 44,
+            "ppm": {
+              "H": 8.59442490387473,
+              "N": 125.44908997487856
+            },
+            "intensity": 139218.7587890625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 45,
+            "ppm": {
+              "H": 8.370747027458062,
+              "N": 122.65319112338787
+            },
+            "intensity": 138602.744140625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 46,
+            "ppm": {
+              "H": 8.601498977540928,
+              "N": 122.03206705616861
+            },
+            "intensity": 137252.2548828125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 47,
+            "ppm": {
+              "H": 9.492025481844511,
+              "N": 120.23524777774487
+            },
+            "intensity": 136187.8818359375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 48,
+            "ppm": {
+              "H": 7.370635551677886,
+              "N": 117.26560457844998
+            },
+            "intensity": 135784.50390625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 49,
+            "ppm": {
+              "H": 9.198309124724428,
+              "N": 118.30377319905395
+            },
+            "intensity": 135454.951171875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 50,
+            "ppm": {
+              "H": 8.71667327713871,
+              "N": 118.94025071671278
+            },
+            "intensity": 133665.7861328125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 51,
+            "ppm": {
+              "H": 8.931864806770307,
+              "N": 120.28445756960508
+            },
+            "intensity": 133641.2177734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 52,
+            "ppm": {
+              "H": 7.456514617076173,
+              "N": 121.98973601078708
+            },
+            "intensity": 133294.46875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 53,
+            "ppm": {
+              "H": 8.03885634815942,
+              "N": 113.2120567416577
+            },
+            "intensity": 132870.3447265625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 54,
+            "ppm": {
+              "H": 7.389916747117247,
+              "N": 119.08105392209109
+            },
+            "intensity": 132752.30078125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 55,
+            "ppm": {
+              "H": 8.645832004359082,
+              "N": 127.61725351563933
+            },
+            "intensity": 132505.8603515625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 56,
+            "ppm": {
+              "H": 8.831495105204947,
+              "N": 120.53354087235697
+            },
+            "intensity": 130623.3642578125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 57,
+            "ppm": {
+              "H": 8.64732071643587,
+              "N": 126.40457828388202
+            },
+            "intensity": 130393.5595703125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 58,
+            "ppm": {
+              "H": 8.233969948870817,
+              "N": 119.9856658713168
+            },
+            "intensity": 129339.431640625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 59,
+            "ppm": {
+              "H": 7.581125559799988,
+              "N": 110.96325271391221
+            },
+            "intensity": 128899.59375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 60,
+            "ppm": {
+              "H": 7.327754384484065,
+              "N": 116.4070367878679
+            },
+            "intensity": 128040.8017578125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 61,
+            "ppm": {
+              "H": 8.48729737816523,
+              "N": 121.94922474951248
+            },
+            "intensity": 127935.7373046875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 62,
+            "ppm": {
+              "H": 8.612853726346076,
+              "N": 125.87082655091886
+            },
+            "intensity": 126742.35546875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 63,
+            "ppm": {
+              "H": 7.939863382995906,
+              "N": 121.39014499691284
+            },
+            "intensity": 125325.541015625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 64,
+            "ppm": {
+              "H": 6.774216484348821,
+              "N": 112.22379067083905
+            },
+            "intensity": 125250.08984375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 65,
+            "ppm": {
+              "H": 9.665334175698145,
+              "N": 114.03983517213949
+            },
+            "intensity": 124741.2763671875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 66,
+            "ppm": {
+              "H": 8.804911700665944,
+              "N": 129.5208065941104
+            },
+            "intensity": 124533.28515625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 67,
+            "ppm": {
+              "H": 7.489613258154018,
+              "N": 105.08305215876698
+            },
+            "intensity": 124385.923828125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 68,
+            "ppm": {
+              "H": 7.913162474790801,
+              "N": 119.5619579329778
+            },
+            "intensity": 123808.193359375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 69,
+            "ppm": {
+              "H": 9.138871337456274,
+              "N": 127.9329969979515
+            },
+            "intensity": 122455.662109375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 70,
+            "ppm": {
+              "H": 8.113309016191629,
+              "N": 117.35684310880117
+            },
+            "intensity": 121906.005859375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 71,
+            "ppm": {
+              "H": 8.951501846473281,
+              "N": 130.75384331318782
+            },
+            "intensity": 120103.578125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 72,
+            "ppm": {
+              "H": 8.762839730561732,
+              "N": 121.17388730209538
+            },
+            "intensity": 119840.9580078125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 73,
+            "ppm": {
+              "H": 8.976838800066428,
+              "N": 126.29931397829057
+            },
+            "intensity": 119503.9267578125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 74,
+            "ppm": {
+              "H": 6.952977157847438,
+              "N": 113.10926598729549
+            },
+            "intensity": 119249.75390625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 75,
+            "ppm": {
+              "H": 8.308447486434865,
+              "N": 117.88535906412697
+            },
+            "intensity": 117748.779296875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 76,
+            "ppm": {
+              "H": 7.062795452696215,
+              "N": 119.28376084216464
+            },
+            "intensity": 116472.0712890625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 77,
+            "ppm": {
+              "H": 9.525391637645342,
+              "N": 119.65938036982078
+            },
+            "intensity": 114848.58984375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 78,
+            "ppm": {
+              "H": 9.113282598625123,
+              "N": 113.64909412667112
+            },
+            "intensity": 114505.5087890625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 79,
+            "ppm": {
+              "H": 8.680400085804294,
+              "N": 114.2986591543018
+            },
+            "intensity": 113504.1953125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 80,
+            "ppm": {
+              "H": 7.225227247859182,
+              "N": 112.22573344456404
+            },
+            "intensity": 112584.4931640625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 81,
+            "ppm": {
+              "H": 8.5306412724548,
+              "N": 117.58640923918834
+            },
+            "intensity": 112582.150390625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 82,
+            "ppm": {
+              "H": 8.968938007654815,
+              "N": 116.58989254009352
+            },
+            "intensity": 112348.6640625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 83,
+            "ppm": {
+              "H": 8.892987539934609,
+              "N": 115.56774560197732
+            },
+            "intensity": 112292.5107421875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 84,
+            "ppm": {
+              "H": 8.667435341971435,
+              "N": 119.81876656790585
+            },
+            "intensity": 110733.1357421875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 85,
+            "ppm": {
+              "H": 9.500847007168112,
+              "N": 115.19887951597575
+            },
+            "intensity": 110585.2900390625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 86,
+            "ppm": {
+              "H": 8.561378033250206,
+              "N": 118.55706023981777
+            },
+            "intensity": 110169.421875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 87,
+            "ppm": {
+              "H": 8.566367111127757,
+              "N": 123.63137950181708
+            },
+            "intensity": 109794.1962890625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 88,
+            "ppm": {
+              "H": 8.938682503215663,
+              "N": 121.47785587599388
+            },
+            "intensity": 107380.302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 89,
+            "ppm": {
+              "H": 8.498005396671841,
+              "N": 117.89315448560288
+            },
+            "intensity": 106441.8896484375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 90,
+            "ppm": {
+              "H": 8.147070322074077,
+              "N": 124.1664049695863
+            },
+            "intensity": 106245.0009765625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 91,
+            "ppm": {
+              "H": 7.892967803890137,
+              "N": 122.07410604466205
+            },
+            "intensity": 99915.4931640625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 92,
+            "ppm": {
+              "H": 9.593085986153008,
+              "N": 121.51555855523814
+            },
+            "intensity": 99549.2978515625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 93,
+            "ppm": {
+              "H": 7.856650713394868,
+              "N": 118.5734456703991
+            },
+            "intensity": 99139.408203125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 94,
+            "ppm": {
+              "H": 9.202529533791713,
+              "N": 117.99782566146628
+            },
+            "intensity": 97121.23828125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 95,
+            "ppm": {
+              "H": 9.685470607629217,
+              "N": 129.38554409183055
+            },
+            "intensity": 96801.43359375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 96,
+            "ppm": {
+              "H": 8.031600072046391,
+              "N": 119.04698447321182
+            },
+            "intensity": 96431.978515625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 97,
+            "ppm": {
+              "H": 8.861303340576104,
+              "N": 114.34033862576354
+            },
+            "intensity": 93978.9404296875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 98,
+            "ppm": {
+              "H": 9.87960842953058,
+              "N": 121.2757451185821
+            },
+            "intensity": 93823.3095703125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 99,
+            "ppm": {
+              "H": 9.216896870743462,
+              "N": 116.91303833339748
+            },
+            "intensity": 93145.302734375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 100,
+            "ppm": {
+              "H": 8.191785678825903,
+              "N": 114.1537671606402
+            },
+            "intensity": 87557.3466796875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 101,
+            "ppm": {
+              "H": 8.995029830947674,
+              "N": 115.63489692938141
+            },
+            "intensity": 87078.6923828125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 102,
+            "ppm": {
+              "H": 6.6306077381018795,
+              "N": 128.37517717086342
+            },
+            "intensity": 85400.1259765625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 103,
+            "ppm": {
+              "H": 7.09263030777956,
+              "N": 119.93393212741191
+            },
+            "intensity": 84549.3955078125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 104,
+            "ppm": {
+              "H": 8.596718177121664,
+              "N": 123.35819628180971
+            },
+            "intensity": 82255.3173828125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 105,
+            "ppm": {
+              "H": 9.389157125240306,
+              "N": 119.13326440038774
+            },
+            "intensity": 82122.8046875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 106,
+            "ppm": {
+              "H": 6.854095748320438,
+              "N": 114.05995705797852
+            },
+            "intensity": 81422.1435546875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 107,
+            "ppm": {
+              "H": 8.61770756248876,
+              "N": 120.9488606911371
+            },
+            "intensity": 80793.255859375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 108,
+            "ppm": {
+              "H": 8.034420618367205,
+              "N": 109.97271265136709
+            },
+            "intensity": 77748.705078125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 109,
+            "ppm": {
+              "H": 9.648188122230824,
+              "N": 119.4782733917906
+            },
+            "intensity": 77412.9150390625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 110,
+            "ppm": {
+              "H": 7.819425396216373,
+              "N": 115.94344266581689
+            },
+            "intensity": 75778.099609375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 111,
+            "ppm": {
+              "H": 7.123228643706982,
+              "N": 118.54081004908272
+            },
+            "intensity": 74633.88671875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 112,
+            "ppm": {
+              "H": 7.52861172928459,
+              "N": 114.06226583423701
+            },
+            "intensity": 70203.30078125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 113,
+            "ppm": {
+              "H": 8.027375096884033,
+              "N": 112.1803311424864
+            },
+            "intensity": 70050.984375,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 114,
+            "ppm": {
+              "H": 8.245692798909673,
+              "N": 121.13501053357962
+            },
+            "intensity": 68566.78515625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 115,
+            "ppm": {
+              "H": 8.890596991400589,
+              "N": 121.01370812587275
+            },
+            "intensity": 68356.1376953125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 116,
+            "ppm": {
+              "H": 7.739756578305995,
+              "N": 108.08348858077301
+            },
+            "intensity": 67387.6015625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 117,
+            "ppm": {
+              "H": 6.819534430535668,
+              "N": 128.28513152116727
+            },
+            "intensity": 66159.029296875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 118,
+            "ppm": {
+              "H": 9.314219351579201,
+              "N": 122.39844063396023
+            },
+            "intensity": 61633.4345703125,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 119,
+            "ppm": {
+              "H": 7.4331790911726054,
+              "N": 114.97187606422571
+            },
+            "intensity": 60752.904296875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 120,
+            "ppm": {
+              "H": 6.931006926459753,
+              "N": 111.29066053860603
+            },
+            "intensity": 59289.47265625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 121,
+            "ppm": {
+              "H": 7.476253706828816,
+              "N": 111.3116359927748
+            },
+            "intensity": 56186.2509765625,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 122,
+            "ppm": {
+              "H": 6.620760707370952,
+              "N": 110.99289790363626
+            },
+            "intensity": 50433.3388671875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 123,
+            "ppm": {
+              "H": 8.635325240624914,
+              "N": 116.30133865497747
+            },
+            "intensity": 47356.373046875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 124,
+            "ppm": {
+              "H": 8.536076332665564,
+              "N": 124.86738513409809
+            },
+            "intensity": 35437.748046875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 125,
+            "ppm": {
+              "H": 8.05870517017864,
+              "N": 118.55241406469548
+            },
+            "intensity": 32208.435546875,
+            "sign": 1
+          },
+          {
+            "candidate_index_1based": 126,
+            "ppm": {
+              "H": 8.471120445406392,
+              "N": 129.68859846427756
+            },
+            "intensity": 29489.03125,
+            "sign": 1
+          }
+        ],
+        "median_abs_delta_ppm": {
+          "H": 0.0025065265929207214,
+          "N": 0.08071031441578214
+        },
+        "windows_ppm": {
+          "H": [
+            6.502155831483304,
+            10.496544514261736
+          ],
+          "N": [
+            100.27848283822125,
+            135.9370517358806
+          ]
+        },
+        "intensity_pearson": 0.998480105051574,
+        "median_fwhm_ratio_by_nucleus": {
+          "H": 0.7604405557761214,
+          "N": 1.127412081735524
+        }
+      }
+    }
+  },
+  "figure_style": {
+    "contour_fractions": [
+      0.075,
+      0.1,
+      0.2,
+      0.35,
+      0.5,
+      0.7,
+      0.9
+    ],
+    "linewidths_pt_by_absolute_level": [
+      0.25,
+      0.25,
+      0.4,
+      0.4,
+      0.4,
+      0.4,
+      0.4
+    ],
+    "candidate_marker": ".",
+    "candidate_marker_area": 4,
+    "candidate_edge": "none",
+    "unmatched_reference_only": "purple x",
+    "spectra_and_statistics_changed_by_style": false
+  }
+}

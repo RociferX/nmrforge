@@ -1,0 +1,774 @@
+{
+  "date": "2026-10-09",
+  "software_version": "1.0.4",
+  "api_version": "1.1",
+  "kind": "display_projection_comparison_not_independent_truth",
+  "matching": "same polarity; joint normalized distance <=1; greedy one-to-one",
+  "min_height_fraction": 0.1,
+  "offset_fitted": false,
+  "offset_source": "none",
+  "planes": {
+    "HC": {
+      "automatic": {
+        "baseline": 837731.875,
+        "count": 99,
+        "detected_before_height_filter": 99,
+        "height_cutoff": 193344834.8125,
+        "max_abs_centered_voxel": 1933448348.125,
+        "negative_candidates": 0,
+        "noise_estimate": 2420704.1231625,
+        "positive_candidates": 99,
+        "requested_sigma_floor": 0,
+        "requested_sign_mode": "dominant",
+        "resolved_sigma_multiplier": 79.87132048170635,
+        "shape": [
+          254,
+          1174
+        ],
+        "sign_mode": "dominant"
+      },
+      "automatic_matched_fraction": 0.9393939393939394,
+      "automatic_unmatched_candidates": [
+        {
+          "candidate_index_1based": 6,
+          "intensity": 1594950044.125,
+          "ppm": {
+            "C": 176.98827520708684,
+            "H": 8.031742429206869
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 50,
+          "intensity": 326868124.125,
+          "ppm": {
+            "C": 179.20770734796855,
+            "H": 8.228705656488387
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 52,
+          "intensity": 325366300.125,
+          "ppm": {
+            "C": 177.99597480825807,
+            "H": 8.292894575968342
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 68,
+          "intensity": 293370844.125,
+          "ppm": {
+            "C": 178.6180773743569,
+            "H": 8.379782703412847
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 97,
+          "intensity": 225702204.125,
+          "ppm": {
+            "C": 177.02831365867786,
+            "H": 7.686595384486457
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 99,
+          "intensity": 223892380.125,
+          "ppm": {
+            "C": 178.5815868049645,
+            "H": 8.346923242158375
+          },
+          "sign": 1
+        }
+      ],
+      "comparison": {
+        "baseline": 670725.84375,
+        "count": 93,
+        "detected_before_height_filter": 93,
+        "height_cutoff": 31191711.415625002,
+        "max_abs_centered_voxel": 311917114.15625,
+        "negative_candidates": 0,
+        "noise_estimate": 1840464.93789375,
+        "positive_candidates": 93,
+        "requested_sigma_floor": 0,
+        "requested_sign_mode": "dominant",
+        "resolved_sigma_multiplier": 16.94773465846145,
+        "shape": [
+          127,
+          588
+        ],
+        "sign_mode": "dominant"
+      },
+      "comparison_matched_fraction": 1,
+      "intensity_pearson": 0.994539712653537,
+      "matched": 93,
+      "median_abs_delta_ppm": {
+        "C": 0.003189101007563977,
+        "H": 0.00028405938325093416
+      },
+      "median_fwhm_ratio_by_nucleus": {
+        "C": 0.7756994840388138,
+        "H": 0.9443785218656597
+      },
+      "reference_candidate_coverage": 1,
+      "reference_unmatched_candidates": [],
+      "windows_ppm": {
+        "C": [
+          169.36946652722682,
+          183.09925187484518
+        ],
+        "H": [
+          5.999361071289801,
+          9.995254494684481
+        ]
+      }
+    },
+    "HN": {
+      "automatic": {
+        "baseline": 822001.84375,
+        "count": 95,
+        "detected_before_height_filter": 95,
+        "height_cutoff": 193346407.815625,
+        "max_abs_centered_voxel": 1933464078.15625,
+        "negative_candidates": 0,
+        "noise_estimate": 2365208.9225625,
+        "positive_candidates": 95,
+        "requested_sigma_floor": 0,
+        "requested_sign_mode": "dominant",
+        "resolved_sigma_multiplier": 81.74601658704671,
+        "shape": [
+          254,
+          1174
+        ],
+        "sign_mode": "dominant"
+      },
+      "automatic_matched_fraction": 0.9368421052631579,
+      "automatic_unmatched_candidates": [
+        {
+          "candidate_index_1based": 27,
+          "intensity": 382558158.15625,
+          "ppm": {
+            "H": 8.433699098255047,
+            "N": 123.28174975874354
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 42,
+          "intensity": 339491438.15625,
+          "ppm": {
+            "H": 8.278689317082247,
+            "N": 118.09452591940561
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 49,
+          "intensity": 325382030.15625,
+          "ppm": {
+            "H": 8.292894575968342,
+            "N": 118.81329120574082
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 62,
+          "intensity": 299059758.15625,
+          "ppm": {
+            "H": 8.183524496973403,
+            "N": 120.06725227955175
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 71,
+          "intensity": 278530062.15625,
+          "ppm": {
+            "H": 8.008000946346483,
+            "N": 123.46796865349432
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 93,
+          "intensity": 225717934.15625,
+          "ppm": {
+            "H": 7.686595384486457,
+            "N": 112.14308238797813
+          },
+          "sign": 1
+        }
+      ],
+      "comparison": {
+        "baseline": 655893.15625,
+        "count": 89,
+        "detected_before_height_filter": 89,
+        "height_cutoff": 31193194.684375003,
+        "max_abs_centered_voxel": 311931946.84375,
+        "negative_candidates": 0,
+        "noise_estimate": 1796248.2924749998,
+        "positive_candidates": 89,
+        "requested_sigma_floor": 0,
+        "requested_sign_mode": "dominant",
+        "resolved_sigma_multiplier": 17.365747717090258,
+        "shape": [
+          128,
+          588
+        ],
+        "sign_mode": "dominant"
+      },
+      "comparison_matched_fraction": 1,
+      "intensity_pearson": 0.9952130591495506,
+      "matched": 89,
+      "median_abs_delta_ppm": {
+        "H": 0.0003260290830322532,
+        "N": 0.009557174325550477
+      },
+      "median_fwhm_ratio_by_nucleus": {
+        "H": 0.9472809429959378,
+        "N": 0.782462314438275
+      },
+      "reference_candidate_coverage": 1,
+      "reference_unmatched_candidates": [],
+      "windows_ppm": {
+        "H": [
+          5.999361071289801,
+          9.995254494684481
+        ],
+        "N": [
+          103.30287401178308,
+          130.97450679157217
+        ]
+      }
+    },
+    "NC": {
+      "automatic": {
+        "baseline": 1005644.09375,
+        "count": 89,
+        "detected_before_height_filter": 89,
+        "height_cutoff": 193328043.59062502,
+        "max_abs_centered_voxel": 1933280435.90625,
+        "negative_candidates": 0,
+        "noise_estimate": 3069390.59529375,
+        "positive_candidates": 89,
+        "requested_sigma_floor": 0,
+        "requested_sign_mode": "dominant",
+        "resolved_sigma_multiplier": 62.98580698300567,
+        "shape": [
+          254,
+          254
+        ],
+        "sign_mode": "dominant"
+      },
+      "automatic_matched_fraction": 0.8876404494382022,
+      "automatic_unmatched_candidates": [
+        {
+          "candidate_index_1based": 30,
+          "intensity": 366091187.90625,
+          "ppm": {
+            "C": 180.14676603023628,
+            "N": 118.31590019793013
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 33,
+          "intensity": 360632403.90625,
+          "ppm": {
+            "C": 178.90297831353593,
+            "N": 119.80510684901085
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 37,
+          "intensity": 343611219.90625,
+          "ppm": {
+            "C": 179.29263059329648,
+            "N": 119.71591840048308
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 42,
+          "intensity": 338423795.90625,
+          "ppm": {
+            "C": 176.07071643529022,
+            "N": 120.86810192938873
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 44,
+          "intensity": 336129395.90625,
+          "ppm": {
+            "C": 178.10753411242376,
+            "N": 124.21000606666743
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 46,
+          "intensity": 326700211.90625,
+          "ppm": {
+            "C": 179.2072860993885,
+            "N": 118.95777373163844
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 75,
+          "intensity": 256931923.90625,
+          "ppm": {
+            "C": 178.40389410091885,
+            "N": 119.6891893719384
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 78,
+          "intensity": 246513747.90625,
+          "ppm": {
+            "C": 178.5010896406576,
+            "N": 116.54871382203653
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 81,
+          "intensity": 244015251.90625,
+          "ppm": {
+            "C": 175.031723925878,
+            "N": 122.2393866549538
+          },
+          "sign": 1
+        },
+        {
+          "candidate_index_1based": 87,
+          "intensity": 225534291.90625,
+          "ppm": {
+            "C": 177.02831365867786,
+            "N": 112.14308238797813
+          },
+          "sign": 1
+        }
+      ],
+      "comparison": {
+        "baseline": 896061,
+        "count": 79,
+        "detected_before_height_filter": 79,
+        "height_cutoff": 31169177.900000002,
+        "max_abs_centered_voxel": 311691779,
+        "negative_candidates": 0,
+        "noise_estimate": 2583557.77194375,
+        "positive_candidates": 79,
+        "requested_sigma_floor": 0,
+        "requested_sign_mode": "dominant",
+        "resolved_sigma_multiplier": 12.064440067291295,
+        "shape": [
+          127,
+          128
+        ],
+        "sign_mode": "dominant"
+      },
+      "comparison_matched_fraction": 1,
+      "intensity_pearson": 0.9952187328435412,
+      "matched": 79,
+      "median_abs_delta_ppm": {
+        "C": 0.0033513080070974866,
+        "N": 0.01019054779733608
+      },
+      "median_fwhm_ratio_by_nucleus": {
+        "C": 0.7748333018653369,
+        "N": 0.7724433600239935
+      },
+      "reference_candidate_coverage": 1,
+      "reference_unmatched_candidates": [],
+      "windows_ppm": {
+        "C": [
+          169.36946652722682,
+          183.09925187484518
+        ],
+        "N": [
+          103.30287401178308,
+          130.97450679157217
+        ]
+      }
+    }
+  },
+  "primary_metric": "reference_candidate_coverage; not true-peak recovery",
+  "projection": "signed_max_absolute_voxel; all-axis common crop before projection",
+  "reference_offset_ppm": {},
+  "requested_sigma_floor": 0,
+  "requested_sign_mode": "dominant",
+  "source_ndim": 3,
+  "spectrum_sha256": {
+    "automatic": "6b23ec610149b4517f24b233d0354d505c7a5ca504aa29e1fbb5f62ac705a666",
+    "comparison": "10b8a86aaa1792d7553586503d074117da0181a9576eb1767bb5f14d008fe5d5"
+  },
+  "tolerance_ppm": {
+    "C": 0.15,
+    "H": 0.02,
+    "N": 0.2
+  },
+  "source": {
+    "bmrb_id": 52533,
+    "entry": "https://bmrb.io/data_library/summary/?bmrbId=52533",
+    "archive_url": "https://bmrb.io/ftp/pub/bmrb/entry_directories/bmr52533/timedomain_data/4.HNCO.zip",
+    "archive_bytes": 190962911,
+    "whole_archive_sha256": null,
+    "download_scope": "Selected ZIP members only; downloaded members verified against ZIP CRC; complete archive not downloaded or hashed",
+    "files": [
+      {
+        "member": "4.HNCO/acqus",
+        "bytes": 9116,
+        "sha256": "ab1fd56379b05c68d7d67bebb6cf5e7445e4616e5d650e2f9a7d92faeb92711f",
+        "status": "downloaded_crc_verified"
+      },
+      {
+        "member": "4.HNCO/acqu2s",
+        "bytes": 571,
+        "sha256": "08d63db82707c7208baeb484f11ea17585009636b175b2ae1f93fbc8205b699a",
+        "status": "downloaded_crc_verified"
+      },
+      {
+        "member": "4.HNCO/acqu3s",
+        "bytes": 555,
+        "sha256": "33144b114f3d2a03d1f4b3e4b6b9a47f030e7afb6cc402a1f9a236548d23a140",
+        "status": "downloaded_crc_verified"
+      },
+      {
+        "member": "4.HNCO/nuslist",
+        "bytes": 2366,
+        "sha256": "1ffab903b925ddbdfe36db0c0b637ee24a9bbdaa7238494280da0e094e7284fe",
+        "status": "downloaded_crc_verified"
+      },
+      {
+        "member": "4.HNCO/ser",
+        "bytes": 14450688,
+        "sha256": "4c5691ce6bfca18c9c70dfd5ed9edb750d2b9448110af2d3390025b143cd06e2",
+        "status": "downloaded_crc_verified"
+      },
+      {
+        "member": "4.HNCO/conv_smile.com",
+        "bytes": 2820,
+        "sha256": "1d99df0e7f029592db68985e2d50a70255caa666be52e9773e8e381c3eebba68",
+        "status": "downloaded_crc_verified"
+      },
+      {
+        "member": "4.HNCO/DomainIV_HNCO.ft3",
+        "bytes": 38537216,
+        "sha256": "10b8a86aaa1792d7553586503d074117da0181a9576eb1767bb5f14d008fe5d5",
+        "status": "downloaded_crc_verified"
+      },
+      {
+        "member": "4.HNCO/pdata/1/procs",
+        "bytes": 2190,
+        "sha256": "da7e831af9b921694f0eb73b399dc8cb24e3a30db6da28c9ef81971a2b3e38e4",
+        "status": "downloaded_crc_verified"
+      },
+      {
+        "member": "4.HNCO/pdata/1/proc2s",
+        "bytes": 2166,
+        "sha256": "f2b57988db3a17d69bcd4e8fed7cb8d39686b75acdd90b286444a1480e0824d6",
+        "status": "downloaded_crc_verified"
+      },
+      {
+        "member": "4.HNCO/pdata/1/proc3s",
+        "bytes": 2171,
+        "sha256": "3d8a730a97ccecd9250c175bc5f7cea043b03b25fe6a835ec3730d168139f440",
+        "status": "downloaded_crc_verified"
+      },
+      {
+        "member": "4.HNCO/pdata/1/auditp.txt",
+        "bytes": 2219,
+        "sha256": "d41b04b60d10e1e0b770a1eafc0c619a5dd4e9b39177973d7141aa7c1a737e6f",
+        "status": "downloaded_crc_verified"
+      }
+    ],
+    "sample": "Bacillus subtilis DnaA domain IV",
+    "experiment": "3D HNCO",
+    "spectrometer_MHz": 800,
+    "acquired_sampling": {
+      "FnTYPE": 2,
+      "FnMODE": [
+        5,
+        5
+      ],
+      "NusTD": [
+        84,
+        84
+      ],
+      "complex_grid": [
+        42,
+        42
+      ],
+      "unique_schedule_coordinates": 441,
+      "fraction": 0.25,
+      "ser_bytes": 14450688,
+      "raw_input": "Original ser, not archive ser_full"
+    }
+  },
+  "reference": {
+    "kind": "Author-deposited final NMRPipe spectrum, read without reprocessing",
+    "member": "4.HNCO/DomainIV_HNCO.ft3",
+    "script_member": "4.HNCO/conv_smile.com",
+    "shape": [
+      128,
+      128,
+      588
+    ],
+    "algorithm": "NMRPipe with SMILE",
+    "source_script_executed": false,
+    "spectrum_modified": false,
+    "phase_deg_by_nucleus": {
+      "H": {
+        "p0": -73,
+        "p1": 0
+      },
+      "N": {
+        "p0": 0,
+        "p1": 0
+      },
+      "C": {
+        "p0": 0,
+        "p1": 0
+      }
+    },
+    "conversion": {
+      "N": [
+        2048,
+        84,
+        84
+      ],
+      "T": [
+        1024,
+        42,
+        42
+      ],
+      "mode": [
+        "DQD",
+        "States-TPPI",
+        "States-TPPI"
+      ],
+      "SW_Hz": [
+        11160.714,
+        2269.632,
+        2816.901
+      ],
+      "OBS_MHz": [
+        799.864,
+        81.059,
+        201.16
+      ],
+      "CAR_ppm": [
+        4.773,
+        117.084,
+        176.207
+      ]
+    },
+    "processing": {
+      "direct_window_ppm": [
+        10,
+        6
+      ],
+      "direct_window": {
+        "function": "SP",
+        "off": 0.4,
+        "end": 0.98,
+        "pow": 2,
+        "c": 0.5
+      },
+      "direct_phase_deg": [
+        -73,
+        0
+      ],
+      "smile_nSigma": 5,
+      "smile_flags": [
+        "-xCT 42",
+        "-xAlt",
+        "-xNeg",
+        "-yAlt",
+        "-xQ3 2",
+        "-yQ3 2"
+      ],
+      "indirect_FT_flags": {
+        "N": "-alt -neg",
+        "C": "-alt"
+      },
+      "indirect_phase_deg": {
+        "N": [
+          0,
+          0
+        ],
+        "C": [
+          0,
+          0
+        ]
+      },
+      "indirect_FT_identity_note": "Corrected evidence labels using the actual conversion nucleus labels and reconstructed intermediate FDDIMORDER. Executed commands, spectra and comparison statistics are unchanged."
+    }
+  },
+  "automatic_run": {
+    "tag": "acquired-3d-bmrb52533-hnco-20261009",
+    "software_version": "1.0.4",
+    "api_version": "1.1",
+    "behavior_digest": "84bf0abc17c2ac573efcef8ab84c1a4a0f18a29ab17a2f16bd99c22f28fe38dd",
+    "source_sha256": {
+      "ser": "4c5691ce6bfca18c9c70dfd5ed9edb750d2b9448110af2d3390025b143cd06e2",
+      "nuslist": "1ffab903b925ddbdfe36db0c0b637ee24a9bbdaa7238494280da0e094e7284fe"
+    },
+    "sampling": "nus",
+    "fraction": 0.25,
+    "complex_grid": [
+      42,
+      42
+    ],
+    "manual_phase_override": false,
+    "requested_processing": {
+      "ext_lo": "10",
+      "ext_hi": "6",
+      "final_ext_lo": "10",
+      "final_ext_hi": "6",
+      "apply_ext_to_opt": true
+    },
+    "success": true,
+    "shape": [
+      256,
+      256,
+      1176
+    ],
+    "spectrum_sha256": "6b23ec610149b4517f24b233d0354d505c7a5ca504aa29e1fbb5f62ac705a666",
+    "ppm_limits": [
+      [
+        131.08388083418004,
+        103.1934999691752
+      ],
+      [
+        183.20865061477383,
+        169.2600658625031
+      ],
+      [
+        9.998661053442705,
+        5.99595451253158
+      ]
+    ],
+    "phase_header": {
+      "FDF1P0": 182.5,
+      "FDF1P1": 0,
+      "FDF2P0": 107.96900177001953,
+      "FDF2P1": 0,
+      "FDF3P0": 0,
+      "FDF3P1": 0
+    },
+    "imported_raw_sha256": {
+      "ser": "4c5691ce6bfca18c9c70dfd5ed9edb750d2b9448110af2d3390025b143cd06e2",
+      "nuslist": "1ffab903b925ddbdfe36db0c0b637ee24a9bbdaa7238494280da0e094e7284fe"
+    },
+    "imported_raw_unchanged": true,
+    "script_sha256": {
+      "d_001_before_optimize.com": "5acf326391d95b99fd0b77fbd607973294b719b041e1a213474f68e7573c0a97",
+      "d_001_nus.com": "fe0f108240bef945a5f5d855b6c7a6ced82629d473f921f68514ff9e52286849",
+      "fid.com": "f479822c4413a08394a93661cdbdf21410ad79fd8e3151cfa1628946e1f88d41"
+    },
+    "smile_commands": [
+      "xyz2pipe -in nus3d_1/test%04d.ft1 -x  | nmrPipe -fn SMILE -nDim 3             -sample nuslist -nThread 2             -sampleCount 441 -nSigma 5 -off 0 0 -report 1             -maxMem 9.53179             -scaling 1             -maxIter 1500             -xP0 182.5 -xP1 0             -yP0 0 -yP1 0             -xAlt -xNeg             -yAlt             -thresh 0.95  | pipe2xyz -out nus3d_rc/test%04d.ft1 -x"
+    ],
+    "total_s": 200.301,
+    "source_unchanged": true,
+    "source_snapshot_commit": "9013391d6053a303e3f61ad613d8eeb3e4a4b3cb",
+    "source_snapshot_archive_sha256": "0b75992a83f83f5d9da545e8f355b95b6b49656043e962b56565ca988fee2eaf",
+    "source_snapshot_is_private_main_commit": false,
+    "phase_deg_by_nucleus": {
+      "H": {
+        "p0": 107.969,
+        "p1": 0
+      },
+      "N": {
+        "p0": 182.5,
+        "p1": 0
+      },
+      "C": {
+        "p0": 0,
+        "p1": 0
+      }
+    },
+    "smile_reported_sampling_fraction": 0.111,
+    "smile_extrapolated_complex_grid": [
+      63,
+      63
+    ],
+    "smile_reported_fraction_is_acquired_fraction": false,
+    "smile_final_memory_GB": 1.3,
+    "final_direct_ZF_size": 4096,
+    "final_indirect_ZF_size": [
+      256,
+      256
+    ]
+  },
+  "alignment": {
+    "method": "Carrier-header identity verified; no additional translation",
+    "CAR_ppm_by_nucleus": {
+      "H": 4.7729997634887695,
+      "N": 117.08399963378906,
+      "C": 176.20700073242188
+    },
+    "difference_ppm": {
+      "H": 0,
+      "N": 0,
+      "C": 0
+    },
+    "peak_fitting": false
+  },
+  "display": {
+    "contour_fractions": [
+      0.075,
+      0.1,
+      0.2,
+      0.35,
+      0.5,
+      0.7,
+      0.9
+    ],
+    "ordinary_candidate_marker": "red filled dot",
+    "marker": ".",
+    "marker_area_pt2": 4,
+    "reference_unmatched_marker": "purple x; reference side only"
+  },
+  "limitations": [
+    "One normal automatic run only; not a repeatability benchmark",
+    "Reference-candidate coverage is measured separately on 2D signed projections, not full 3D assigned-peak recovery",
+    "No authoritative peak table corresponding one-to-one with the deposited final spectrum",
+    "Nonzero P1 not validated by this real dataset",
+    "Matched linewidth estimates depend on windowing, grid and local equivalent-FWHM definition",
+    "Not comprehensive scientific acceptance; Gate V5 remains closed"
+  ],
+  "figure_style": {
+    "contour_fractions": [
+      0.075,
+      0.1,
+      0.2,
+      0.35,
+      0.5,
+      0.7,
+      0.9
+    ],
+    "linewidths_pt_by_absolute_level": [
+      0.25,
+      0.25,
+      0.4,
+      0.4,
+      0.4,
+      0.4,
+      0.4
+    ],
+    "candidate_marker": ".",
+    "candidate_marker_area": 4,
+    "candidate_edge": "none",
+    "unmatched_reference_only": "purple x",
+    "spectra_and_statistics_changed_by_style": false
+  }
+}

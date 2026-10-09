@@ -1,0 +1,53 @@
+{
+  "api_version": "1.1",
+  "base_commit_is_not_exact_tested_tree": true,
+  "date": "2026-10-09",
+  "kind": "uniform_2d_author_comparison_processing_provenance",
+  "manual_phase_override": false,
+  "processing_source_base_commit": "8fdd0d543d742c1a1412b227b0ccb5d28cedbbc6",
+  "raw_sources": {
+    "2d": {
+      "bmrb_id": 27493,
+      "files_sha256": {
+        "acqu2s": "61740de8bfc09baa1ad9c21e5467cdbd635dd3237470e18a189a97d98dca78ab",
+        "acqus": "c422d7ab064a4c7a2aaa841390f8ebdd90909b21c3fcb81b26a5db4566928dfc",
+        "pulseprogram": "9280d045d0a4d127e4d5866f230b63fd3e5102cf3d938720f0b57041b9ec0560",
+        "ser": "81564f263cb8d13f176adb2cc044cbdc79f672fb7147b45c5bd37b344ae2775e"
+      }
+    }
+  },
+  "repeat_count_per_route": 1,
+  "runs": {
+    "2d_uniform": {
+      "input": {
+        "bytes": 3593069,
+        "files": 8,
+        "sha256": "cef1d31ee3dab5d79b135ed9f908d00e514b7e784290eadb18b8dae8d501c8cf"
+      },
+      "phase_commands": [
+        "| nmrPipe -fn PS -p0 0 -p1 0 -di \\",
+        "| nmrPipe -fn PS -p0 265 -p1 0 -di \\"
+      ],
+      "script_sha256": "71808db0d0dab51c398b56cb7718d924c7e24574d832a62448441db5afb183e0",
+      "seconds": {
+        "fid_s": 5.982,
+        "import_s": 0.111,
+        "spectrum_s": 27.406,
+        "total_s": 33.499
+      },
+      "shape": [
+        512,
+        1028
+      ],
+      "smile_command": "",
+      "smile_reported_phase": [],
+      "spectrum_sha256": "52bb674cee7c2ddac63d25325ae7f603111a88cfae3812a44b585cbd164fd35d"
+    }
+  },
+  "scientific_acceptance": "not_passed",
+  "software_version": "1.0.4",
+  "processing_behavior_digests_by_run": {
+    "2d_uniform": "93258b0568a14032f9bf73cdb7894e10808977f2b7652cd6b4fb34736f734538"
+  },
+  "reconstruction_threshold_defaults_changed": false
+}

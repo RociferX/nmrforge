@@ -51,8 +51,8 @@ def test_manual_scripts_prefers_existing(bruker_dir: Path, tmp_path: Path) -> No
 def test_manual_scripts_nus_renders_latest_and_prefers_existing(
     bruker_dir: Path, tmp_path: Path
 ) -> None:
-    """3D NUS: with no existing script, render the latest nus.com (SMILE without window/phase
-    modulation, direction per sampling mode); show d_001_nus.com directly if present."""
+    """3D NUS: render the latest nus.com when missing (SMILE without window, with explicit
+    zero phase, direction per sampling mode); show d_001_nus.com directly if present."""
     manager = _manager(bruker_dir / "nus_3d", tmp_path)
     work = manager.data_dir("exp_001", "d_001", "process")
     work.mkdir(parents=True, exist_ok=True)
@@ -61,7 +61,9 @@ def test_manual_scripts_nus_renders_latest_and_prefers_existing(
     assert list(scripts) == ["nus.com"]
     content = scripts["nus.com"]
     assert "nmrPipe -fn SMILE -nDim 3" in content
-    assert "-xApod" not in content and "-xP0" not in content  # Window/phase are in step3
+    assert "-xApod" not in content  # Windowing remains in step3
+    assert "-xP0 0 -xP1 0" in content  # F2 has an explicit default zero phase
+    assert "-yP0 0 -yP1 0" in content  # F1 has an explicit default zero phase
     assert "-xAlt" in content  # F2=States-TPPI(5), consistent with step3 FT -alt
     assert "-xNeg" not in content  # handedness undecidable (no pulse program) -> no negation
     assert "-maxIter 1500" in content  # 4/6144 rate -> lowest tier (maxIter follows it)

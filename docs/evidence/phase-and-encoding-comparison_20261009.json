@@ -1,0 +1,256 @@
+{
+  "date": "2026-10-09",
+  "kind": "phase_and_encoding_comparison_of_current_four_evidence_cases",
+  "phase_difference_rule": "Wrap automatic minus equivalent reference into [-180,180). A simultaneous 180-degree correction on H and N is allowed as a joint sign equivalence, not an independent minimum on every axis. Nonzero P1 requires a frequency-dependent phase-operator comparison.",
+  "cases": {
+    "2d_uniform_bmrb27493": {
+      "automatic_nmrpipe_phase_deg": {
+        "H": [
+          0,
+          0
+        ],
+        "N": [
+          265,
+          0
+        ]
+      },
+      "reference_bruker_phc_deg": {
+        "H": [
+          7.599999,
+          0
+        ],
+        "N": [
+          -2.4,
+          0
+        ]
+      },
+      "reported_phase_error_deg": null,
+      "reason": "Bruker PHC and NMRPipe PS conventions were not mapped; no cross-vendor numerical phase error is claimed.",
+      "conversion_modes": [
+        "DQD",
+        "Echo-AntiEcho"
+      ],
+      "automatic_ft_alt_neg": {
+        "H": [],
+        "N": []
+      }
+    },
+    "controlled_2d_nus75": {
+      "reference_kind": "corresponding NMRForge uniform, not an author spectrum",
+      "automatic_phase_deg": {
+        "H": [
+          173.559,
+          0
+        ],
+        "N": [
+          85,
+          0
+        ]
+      },
+      "reference_phase_deg": {
+        "H": [
+          0,
+          0
+        ],
+        "N": [
+          265,
+          0
+        ]
+      },
+      "joint_reference_p0_correction_deg": {
+        "H": 180,
+        "N": 180
+      },
+      "signed_p0_residual_deg": {
+        "H": -6.4410000000000025,
+        "N": 0
+      },
+      "conversion_modes": [
+        "DQD",
+        "Echo-AntiEcho"
+      ],
+      "automatic_ft_alt_neg": {
+        "H": [],
+        "N": []
+      }
+    },
+    "3d_uniform_bmrb15750": {
+      "automatic_phase_deg": {
+        "H": [
+          15,
+          0
+        ],
+        "N": [
+          267.5,
+          0
+        ],
+        "C": [
+          2.5,
+          0
+        ]
+      },
+      "author_phase_deg": {
+        "H": [
+          -1,
+          43
+        ],
+        "N": [
+          -90,
+          0
+        ],
+        "C": [
+          0,
+          0
+        ]
+      },
+      "signed_p0_residual_deg": {
+        "H": 16,
+        "N": -2.5,
+        "C": 2.5
+      },
+      "signed_p1_residual_deg": {
+        "H": -43,
+        "N": 0,
+        "C": 0
+      },
+      "h_phase_operator_comparison": {
+        "kind": "phase_operator_comparison_only_not_new_spectrum_validation",
+        "source": "same pre-phase full-width H transform; author PS 3/0 then -4/43, automatic phase-only PS 15/0; imaginary data retained to measure the rotation",
+        "full_h_complex_points": 1024,
+        "author_phase_parameters_deg": [
+          -1,
+          43
+        ],
+        "automatic_phase_parameters_deg": [
+          15,
+          0
+        ],
+        "window_ppm_requested": [
+          6,
+          10
+        ],
+        "window_ppm_sampled": [
+          6.001505418469018,
+          9.98698700304076
+        ],
+        "signed_residual_auto_minus_author_deg": {
+          "min": -2.0566418170928955,
+          "max": 9.365229606628418,
+          "median": 3.6542952060699463
+        },
+        "at_8ppm": {
+          "actual_ppm": 7.994246210754889,
+          "residual_deg": 3.6542952060699463
+        },
+        "raw_parameter_difference_deg": [
+          16,
+          -43
+        ],
+        "does_not_compare_complete_processing_operators": true,
+        "spectrum_outputs_modified": false,
+        "files_sha256": {
+          "automatic-phase-only.ft2": "98d3293a891fdb5ab09a36582be87481792dd3a50f0c62795b9350bd78f93560",
+          "author-phase.ft2": "77ab4900144eff004e4c62b059738322b8e7f1c1da8a40350336d001991d3394",
+          "before-phase.ft2": "0ecb47264b1237cccdb84e38d094bd89a417ae47d247952e994d828b72d48697"
+        },
+        "aligned_common_display_window": {
+          "reference_h_car_offset_ppm": 0.018999576568603516,
+          "common_window_ppm": [
+            6.0205049618294,
+            9.991333437565487
+          ],
+          "sample_count": 272,
+          "residual_deg": {
+            "min": -2.0566418170928955,
+            "max": 9.323241233825684,
+            "median": 3.633301019668579
+          },
+          "near_8ppm": {
+            "ppm": 7.99859328149786,
+            "residual_deg": 3.612306833267212
+          },
+          "boundary_tolerance_ppm": 1e-05,
+          "boundary_tolerance_reason": "float32 header rounding between full-width and cropped files; much smaller than one spectral bin"
+        }
+      },
+      "conversion_modes": [
+        "DQD",
+        "Echo-AntiEcho",
+        "States-TPPI"
+      ],
+      "automatic_and_author_ft_alt_neg": {
+        "H": [],
+        "N": [],
+        "C": [
+          "-alt"
+        ]
+      }
+    },
+    "acquired_3d_nus_bmrb52533": {
+      "automatic_phase_deg": {
+        "H": [
+          107.969,
+          0
+        ],
+        "N": [
+          182.5,
+          0
+        ],
+        "C": [
+          0,
+          0
+        ]
+      },
+      "author_phase_deg": {
+        "H": [
+          -73,
+          0
+        ],
+        "N": [
+          0,
+          0
+        ],
+        "C": [
+          0,
+          0
+        ]
+      },
+      "joint_reference_p0_correction_deg": {
+        "H": 180,
+        "N": 180,
+        "C": 0
+      },
+      "signed_p0_residual_deg": {
+        "H": 0.9689999999999941,
+        "N": 2.5,
+        "C": 0
+      },
+      "conversion_modes": [
+        "DQD",
+        "States-TPPI",
+        "States-TPPI"
+      ],
+      "automatic_and_author_smile_encoding_flags": [
+        "-xAlt",
+        "-xNeg",
+        "-yAlt"
+      ],
+      "automatic_and_author_ft_alt_neg": {
+        "H": [],
+        "N": [
+          "-alt",
+          "-neg"
+        ],
+        "C": [
+          "-alt"
+        ]
+      },
+      "indirect_axis_identity_check": "Reconstructed intermediate FDDIMORDER=[1,3,2,4], FDF1LABEL=15N, FDF3LABEL=13C; the first indirect FT acts on N, then TP exposes C."
+    }
+  },
+  "limits": [
+    "Phase-operator audit is a mathematical rotation comparison on existing data, not an additional acquired nonzero-P1 validation.",
+    "Phase proximity is supportive; final spectral agreement and appropriate encoding remain the decisive observations.",
+    "The 2D artificial comparison shares source and software with its reference."
+  ]
+}

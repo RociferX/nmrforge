@@ -18,9 +18,8 @@ audit (SOFTWARE_SUMMARY section 6.2):
   slice stream; see nmrpipe_backend._convert_dir).
 SMILE reconstruction parameters may be overridden through reconstruct_nus params
 (nSigma/thresh/scaling/report);
-# the SMILE command carries no window or phase parameters (step3 post-processing handles
-windowing and phase), which keeps it usable for tuning against the lab script
-(data/scripts/smile2.com).
+SMILE's indirect-dimension P0/P1 values share a source with post-processing PS; post-processing
+still performs FT/PS, while window configuration is handled separately.
 """
 
 from __future__ import annotations
@@ -31,6 +30,7 @@ from typing import Any
 
 from backend.bruker_workflow import carrier_values
 from core.data.internal_data_model import Experiment, SamplingMode
+from core.data.nus_reader import indirect_grid_2d
 from core.experiment.acquisition_mode_detector import (
     _REAL_FNMODE,
     DIRECT_BRUK2PIPE_MODE,
@@ -111,12 +111,9 @@ def effective_td(experiment: Experiment) -> list[int]:
     """Effective point count per dimension: for NUS the indirect dimensions take
     the complex-point grid, everything else takes TD.
 
-    2D NUS: the indirect-dimension complex-point grid = acqu2s TD // hypercomplex
-    component count (e.g. TD=256/States -> 128), because acqu2s NusTD is not
-    trusted directly (in some data NusTD equals TD and already includes the
-    hypercomplex components);
-    3D NUS: the acqu2s/acqu3s NusTD values are already complex point counts and
-    are taken as they are.
+    2D NUS shares ``indirect_grid_2d`` with schedule validation: prefer the declared
+    ``NusTD`` grid and convert it using the acquisition mode. 3D keeps its existing script
+    point-count convention; conversion parameters use a separate NUS convention.
     """
     td = [dim.td for dim in experiment.dimensions]
     if experiment.sampling.mode is SamplingMode.NUS:
@@ -125,10 +122,7 @@ def effective_td(experiment: Experiment) -> list[int]:
                 continue
             block = experiment.acquisition_parameters.get(filename, {})
             if index == 1 and experiment.ndim == 2:
-                raw_td = int(td[index] or 0)
-                mult = _mult_for(_fnmode(experiment, "F1"))
-                if raw_td and mult:
-                    td[index] = raw_td // mult
+                td[index] = indirect_grid_2d(experiment)[0]
                 continue
             try:
                 nus_td = int(block.get("NusTD", 0) or 0)
@@ -1074,6 +1068,14 @@ def _ps_line(phases: dict[str, tuple[float, float]] | None, axis: str) -> str:
     return f"| nmrPipe -fn PS -p0 {p0:g} -p1 {p1:g} -di \\"
 
 
+def _smile_phase_args(
+    phases: dict[str, tuple[float, float]] | None, axis: str, prefix: str,
+) -> str:
+    """Use the same P0/P1 for SMILE's internal phase and the final PS on this logical axis."""
+    p0, p1 = (phases or {}).get(axis, (0.0, 0.0))
+    return f"-{prefix}P0 {p0:g} -{prefix}P1 {p1:g}"
+
+
 def _nus_direct_window_line(cfg: dict[str, Any] | None, default_pow: int = 2) -> str:
     """NUS direct-dimension window: SMILE requires the direct dimension to be
     apodised with a tail decaying to zero, so SP is used throughout (as in the
@@ -1117,6 +1119,44 @@ def _window_line(cfg: dict[str, Any] | None) -> str | None:
         f"-end {_fmt(cfg.get('end', 0.95))} -pow {_fmt(powv)} "
         f"-c {_fmt(cfg.get('c', 0.5))} \\"
     )
+
+
+def generate_2d_nus_seed_script(
+    experiment: Experiment,
+    *,
+    in_file: str,
+    out_file: str,
+    window: dict[str, dict[str, Any]] | None = None,
+    zero_fill: dict[str, Any] | int | None = None,
+    linewidth_hz: dict[str, float] | None = None,
+    points_per_line: float = DEFAULT_POINTS_PER_LINE,
+    extract: bool = True,
+    ext_lo: str = "10.5",
+    ext_hi: str = "6.5",
+) -> str:
+    """Generate a direct-only complex FT for a 2D NUS bootstrap.
+
+    No PS, TP or SMILE operation is included. Keep the indirect time-domain
+    quadrature pair intact; windowing, zero fill and extraction follow the first
+    reconstruction's conventions.
+    """
+    if experiment.ndim != 2 or experiment.sampling.mode is not SamplingMode.NUS:
+        raise ValueError("The NUS phase seed preview requires 2D NUS data")
+    td = effective_td(experiment)
+    zf = zero_fill_plan(experiment, zero_fill, linewidth_hz=linewidth_hz,
+                        points_per_line=points_per_line).get("F2", {})
+    lines = ["#!/bin/csh", "# NMRForge 2D NUS phase seed (not a final spectrum)",
+             f"# experiment: {experiment.dataset_id}",
+             (f"xyz2pipe -in {in_file} -x \\" if "%" in in_file
+              else f"nmrPipe -in {in_file} \\"),
+             _nus_direct_window_line((window or {}).get("F2"), 1)]
+    if zf.get("mode") != "none":
+        lines.append(f"| nmrPipe -fn ZF -zf -size {_nus_zf_size(zf, td[0])} \\")
+    lines.append("| nmrPipe -fn FT \\")
+    if extract:
+        lines.append(f"| nmrPipe -fn EXT -x1 {ext_lo}ppm -xn {ext_hi}ppm -sw -round 2 \\")
+    lines.append(f"| pipe2xyz -out {out_file} -x -ov")
+    return "\n".join(lines) + "\n"
 
 
 def generate_2d_nus_script(
@@ -1204,10 +1244,10 @@ def generate_2d_nus_script(
     direct_stages.append(f"| nmrPipe -fn PS -p0 {direct_phase[0]:g} -p1 {direct_phase[1]:g} -di \\")
     direct_stages += direct_poly
     smile_tail = [
-        # SMILE carries no window/phase (0.2.134): the window and phase are handled by the
-        # later finalize/step3 post-processing
+        # 2D: SMILE x is logical F1; direct F2 was phase-corrected upstream.
         f"           -maxIter {max_iter} \\",
         f"           -xT {x_t} \\",
+        f"           {_smile_phase_args(phases, 'F1', 'x')} \\",
         *([f"           {f1_dir_arg} \\"] if f1_dir_arg else []),
         f"           {xct_arg}-thresh {thresh:g} \\",
         "| pipe2xyz -out nus2d/recon.ft1 -x -ov",
@@ -1505,8 +1545,10 @@ def generate_3d_nus_script(
         *([] if max_mem is None else [f"           -maxMem {max_mem:g} \\"]),
         *(["           -scaling 1 \\"] if smile_scaling else []),
         f"           -maxIter {max_iter} \\",
-        # SMILE carries no window/phase (0.2.134): step3 post-processing handles the
-        # window/phase; the direction flags (0.2.135) come from the same source as the step3
+        # 3D: reconstruction x/y map to logical F2/F1, sharing P0/P1 with post-processing PS.
+        f"           {_smile_phase_args(phases, 'F2', 'x')} \\",
+        f"           {_smile_phase_args(phases, 'F1', 'y')} \\",
+        # Direction flags come from the same source as step3:
         # FT: F2 is derived from FnMODE with force_neg layered on (the -neg for States-type
         # 3D first indirect dimensions) and F1 follows the same FnMODE derivation, both
         # subject to the sampling override -- this keeps the direction inside the

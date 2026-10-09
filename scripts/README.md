@@ -1,29 +1,25 @@
-# scripts/
+# Command-line tools
 
-Independent command line tool and regression script (does not enter the product running path; old git retains historical versions).
+Current measurements, reference sources, and reproduction commands are on the
+[four-route evidence page](../docs/evidence/real-data-comparison.md).
 
-## Collaboration and tools
+| Tool | Purpose |
+| --- | --- |
+| `vm_realdata_report.py` | Normal import, FID conversion, automatic processing, and aggregate run records |
+| `vm_make_evidence_nus.py` | Controlled downsampling into a new directory with the seed and source hashes retained |
+| `vm_four_path_figure.py` | Signed spectrum comparisons; common 3D crop followed by independent HN/HC/NC projections |
+| `vm_projection_report.py` | Per-plane candidate detection, matching, and unmatched coordinates |
+| `vm_nus_pair_report.py` | Candidate comparison in a common multidimensional window |
+| `vm_qc_score.py` | Product QC metrics |
+| `bmrb_expected_to_csv.py` | First-party deposited HSQC positions converted to CSV with provenance |
+| `vm_truth_benchmark.py`, `vm_truth_figure.py` | Comparisons against an applicable external expected-position list |
 
-- check_ownership.py: ownership-boundary check (gui / backend / shared)
-- Make_icon.py: Generate AppImage icon PNG
+Artificial downsampling is not acquired NUS. Candidate coverage is not assigned-peak recovery.
+For current figures, contours start at 7.5%, detection uses an explicit 10% threshold, and same-sign
+HSQC/HNCO uses `dominant`. The projection tool's general default threshold is 5%; use the
+reproduction commands on the evidence page to obtain the reported settings.
 
-## Processing/optimisationCLI(optional)
-
-- Smile_optimize.py:SMILE parameter grid scan CLI (same origin as GUI smile step;
-  Output sorting table + top three scripts, candidate spectrum deleted after evaluation).
-- Param_optimize.py: Post-processing parameter optimisation CLI(phase / baseline, only reconstruct once)
-
-## Real-engine verification scripts
-
-- vm_sample_make_nus.py / vm_sample_regression.py / vm_sample_noext.py /
-  vm_sample_water_profile.py / vm_sample_viewer_check.py / vm_sample_compare.py
-- vm_validate_phase_score.py / vm_validate_zero_fill.py
-- Vm_validate_nus_indirect_equiv.py:NUS indirect dimension memory score equivalence retest
-  (maintainers' decision log, 2026-08-31)
-
-One-time troubleshooting/diagnosis script (vm_100_*/vm_102_*/vm_check_*/vm_verify_*/vm_proj_*.
-Etc., 2026-09-03 0.2.199-patch29fu) has been archived to archive/deprecated/scripts/ --.
-Both the git history and archive directory can be reviewed and are no longer distributed with scripts/.
-
-Deleted (0.2.164, old git can be restored): recon_phase_search.py.
-vm_validate_optimize.py, vm_validate_recon_phase_equiv.py.
+`param_optimize.py` and `smile_optimize.py` provide optional processing-parameter scans.
+For source checks and compatibility/UI metadata generation, see the
+[development guide](../docs/development.md). Installation and packaging entry points are documented
+in [installation](../docs/installation.md) and [packaging](../docs/packaging.md).

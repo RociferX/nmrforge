@@ -92,6 +92,11 @@ dimensions are scored with a resolution-retention factor. NUS/SMILE requires a f
 the direct dimension, so its optimiser cannot replace that window with none, Gaussian or
 exponential weighting. Indirect-dimension optimisation remains available.
 
+Before the first SMILE run, automatic 2D NUS may estimate a lightweight zero-order phase seed
+from the zero-indirect-increment quadrature pair, subject to layout and confidence checks. Phase
+refinement still follows; 3D NUS does not use this initialisation. The final script must apply
+the resolved direct PS phase and consistent indirect SMILE and subsequent PS phases.
+
 ## Step 4 - what is recorded
 
 Each run writes a `WorkflowRun` record (`core/project/models.py`) with the run id, input
@@ -143,8 +148,8 @@ nmrForge automates what it can verify and reports what it cannot:
 - automatic phase search is skipped for magnitude spectra, where it is meaningless;
 - window candidates are filtered by a resolution criterion rather than always taking the
   numerically highest score;
-- a reconstruction that fails inside SMILE is a failed run, never a success with a wrong
-  spectrum;
+- detected SMILE errors or missing products are reported as failures; engine completion does not
+  guarantee scientific correctness, so sampling, phase, lineshape and artifacts still need review;
 - bad-point repair follows specific rules and retains a backup and audit record; other anomalous
   signals are reported rather than automatically deleted.
 - the stand-alone FID quality check is read-only and does not replace pipeline diagnostics or

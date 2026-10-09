@@ -1,15 +1,12 @@
 """Real-data aggregate report: run a real Bruker dataset on a machine with NMRPipe and emit
 desensitised aggregate metrics only.
 
-Why a separate script: ``vm_sample_regression.py`` / ``vm_sample_compare.py`` are for debugging
-one item at a time - they print paths, header fields and absolute peak positions. The only form
-an outside reader can cite over time is **aggregate numbers**.
-
 Usage (on the machine; the dataset path appears on the command line only)::
 
     nmrforge/bin/python scripts/vm_realdata_report.py \
         --dataset <Bruker dataset directory> --tag <anonymous tag> \
-        --root <scratch root> --repeats 3 [--json <output path>] [--classify-only] \
+        --root <new scratch root> --repeats 3 [--json <output path>] [--classify-only] \
+        [--ext-lo <ppm> --ext-hi <ppm>] \
         [--manual <manually processed .ft2>]
 
 ``--manual`` adds an "automatic vs manual" comparison: point it at the manually processed NMRPipe
@@ -33,21 +30,24 @@ The output is one JSON document (also written to ``--json`` when given) containi
   by name, the path itself is not hashed);
 * ``classification``: the experiment type, sampling mode and dimensionality the software works out;
 * ``runs[]``: per repeat, the import / fid / spectrum seconds, the final spectrum shape,
-  whether each localisation method succeeded or fell back, and the F1/F2 FWHM in ppm;
+        the requested processing window, whether parabolic localisation succeeded or fell back,
+        and the F1/F2 FWHM in ppm;
 * ``aggregate``: median and p95 timings, the **maximum repeat-to-repeat peak difference**
-  (repeatability), the maximum difference between the two methods, the median line width and the
+  (repeatability), the median line width and the
   F2/F1 ratio, and the fallback counts;
 * ``manual_comparison`` (with ``--manual``): the four results above (peak tables / shift /
   matching / line widths).
+
+``--ext-lo`` and ``--ext-hi`` must be supplied together as finite, different values. They request
+the same direct-dimension signal window for optimization and the final spectrum. Each run uses a
+new project directory; choose a new ``--root`` for every invocation.
 
 Never in the output: dataset paths, file names, sample names, host names. Absolute main-peak ppm
 values are only used inside the script to compute differences and are stripped before printing
 (keys starting with ``_``).
 
 ppm axes always come from ``workflow.pick_peaks.read_spectrum_axes`` (shared with peak picking
-and the viewer); this script does not rebuild header fields itself. The old Hz-as-ppm misreading
-in ``vm_sample_compare.py`` is recorded in ``docs/evidence/real-data-comparison.md``
-section 5.
+and the viewer); this script does not rebuild header fields itself.
 """
 
 from __future__ import annotations
@@ -55,7 +55,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import shutil
 import sys
 import time
 from pathlib import Path
@@ -439,7 +438,17 @@ def _peak_metrics(spectrum: Path) -> dict:
     return metrics
 
 
-def run_once(dataset: Path, root: Path, index: int) -> dict:
+def run_once(
+    dataset: Path,
+    root: Path,
+    index: int,
+    *,
+    ext_lo: float | None = None,
+    ext_hi: float | None = None,
+    final_ext_lo: float | None = None,
+    final_ext_hi: float | None = None,
+    apply_ext_to_opt: bool = True,
+) -> dict:
     from backend.nmrpipe_backend import NMRPipeBackend
     from core.project import ProjectManager
     from workflow.import_workflow import import_data
@@ -447,7 +456,9 @@ def run_once(dataset: Path, root: Path, index: int) -> dict:
 
     project_dir = root / f"run_{index:02d}"
     if project_dir.exists():
-        shutil.rmtree(project_dir)
+        raise FileExistsError(
+            f"Output project already exists: {project_dir}; choose a new output root"
+        )
 
     manager = ProjectManager.create_project(project_dir, f"realdata_report_{index:02d}")
     entry = manager.create_experiment(title="real-data aggregate report")
@@ -465,7 +476,22 @@ def run_once(dataset: Path, root: Path, index: int) -> dict:
     spectrum: Path | None = None
     error = ""
     try:
-        spectrum = Path(generate_spectrum(manager, entry.id, imported.data_id, backend))
+        processing = {
+            "ext_lo": ext_lo,
+            "ext_hi": ext_hi,
+            "final_ext_lo": final_ext_lo,
+            "final_ext_hi": final_ext_hi,
+            "apply_ext_to_opt": apply_ext_to_opt,
+        }
+        spectrum = Path(
+            generate_spectrum(
+                manager,
+                entry.id,
+                imported.data_id,
+                backend,
+                params=processing if ext_lo is not None else None,
+            )
+        )
     except Exception as exc:  # noqa: BLE001 - record the failure instead of only raising
         error = f"{type(exc).__name__}: {exc}"
     spectrum_s = time.perf_counter() - started
@@ -475,6 +501,7 @@ def run_once(dataset: Path, root: Path, index: int) -> dict:
         "import_s": round(import_s, 3),
         "fid_s": round(fid_s, 3),
         "spectrum_s": round(spectrum_s, 3),
+        "requested_processing": processing,
         "total_s": round(import_s + fid_s + spectrum_s, 3),
         "spectrum_exists": bool(spectrum and spectrum.is_file()),
         "peak": _peak_metrics(spectrum) if spectrum and spectrum.is_file() else {},
@@ -524,19 +551,6 @@ def aggregate(runs: list[dict]) -> dict:
             1 for run in runs if run.get("peak", {}).get(f"{method}_error")
         )
 
-    method_deltas = [
-        run["peak"]["parabolic_vs_gaussian_delta_ppm"]
-        for run in runs
-        if run.get("peak", {}).get("parabolic_vs_gaussian_delta_ppm") is not None
-    ]
-
-    summary["parabolic_vs_gaussian_delta_ppm_median"] = (
-        round(float(np.median(method_deltas)), 9) if method_deltas else None
-    )
-    summary["parabolic_vs_gaussian_delta_ppm_max"] = (
-        round(max(method_deltas), 9) if method_deltas else None
-    )
-
     series = [
         list(values) for values in (run.get("peak", {}).get("fwhm_ppm") for run in runs) if values
     ]
@@ -574,6 +588,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tag", default="dataset", help="anonymous label used instead of the path")
     parser.add_argument("--root", type=Path, default=Path.home() / "realdata-report")
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument(
+        "--ext-lo", type=float, default=None, help="lower bound of the signal window"
+    )
+    parser.add_argument(
+        "--ext-hi", type=float, default=None, help="upper bound of the signal window"
+    )
     parser.add_argument("--json", type=Path, default=None, help="write the same JSON to this path")
     parser.add_argument(
         "--manual",
@@ -587,6 +607,15 @@ def main(argv: list[str] | None = None) -> int:
         help="fingerprint and classify only, no processing (useful when choosing a dataset)",
     )
     args = parser.parse_args(argv)
+
+    if (args.ext_lo is None) != (args.ext_hi is None):
+        parser.error("--ext-lo and --ext-hi must be provided together")
+    if args.ext_lo is not None and (
+        not np.isfinite(args.ext_lo)
+        or not np.isfinite(args.ext_hi)
+        or args.ext_lo == args.ext_hi
+    ):
+        parser.error("--ext-lo and --ext-hi must be finite and different")
 
     dataset = args.dataset.expanduser()
     if not dataset.is_dir():
@@ -608,8 +637,21 @@ def main(argv: list[str] | None = None) -> int:
     }
     if not args.classify_only:
         root = args.root.expanduser()
+        if root.exists():
+            parser.error("--root already exists; choose a new output root")
         root.mkdir(parents=True, exist_ok=True)
-        runs = [run_once(dataset, root, index) for index in range(args.repeats)]
+        runs = [
+            run_once(
+                dataset,
+                root,
+                index,
+                ext_lo=args.ext_lo,
+                ext_hi=args.ext_hi,
+                final_ext_lo=args.ext_lo,
+                final_ext_hi=args.ext_hi,
+            )
+            for index in range(args.repeats)
+        ]
         payload["aggregate"] = aggregate(runs)
         if manual is not None and runs and Path(runs[0]["_spectrum"]).is_file():
             payload["manual_comparison"] = compare_with_manual(Path(runs[0]["_spectrum"]), manual)

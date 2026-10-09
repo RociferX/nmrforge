@@ -348,17 +348,12 @@ def search_direct_phase_real_ht(
     decoupled from the cluster centre and the trace constant) and p0 then follows under that p1;
     across traces: p1 = median, p0 = circular mean folded onto the half circle.
 
-    The +-180 flip is not forced: the sign only decides whether peaks point up and affects
-    neither
-    peak picking nor the lineshape (the user confirmed), and the projection traces mix 13C CA+
-    and
-    CB-, which makes the sign statistics unreliable (a uniform flip once took 100/30 to 180 deg
-    away
-    from the hand-tuned value). The result is always the value folded into 0-180 deg, as in
-    manual
-    tuning (102/100/101 ~ 150, 30 ~ 2). score = 100 x the median peak absorption under the
-    consensus
-    phase.
+    Half-circle statistics are used only to estimate the absorption phase, not as the final
+    phase. In uniform mode, the peak-window sign resolves the 180-degree ambiguity. In mixed
+    mode, do not force positive peaks: choose the minimum-zero-order-rotation representative to
+    avoid folding a small negative correction into a global flip. The absolute polarity of
+    mixed data still requires an experimental prior or manual confirmation. The returned p0 is
+    in [0, 360); score = 100 x the median peak absorption under the consensus phase.
     """
     if cancel is not None and cancel():
         raise RuntimeError(
@@ -402,10 +397,10 @@ def search_direct_phase_real_ht(
                 p0=len(ht_rows),
             )
         )
-    # inlined per-trace consensus (avoiding the gmax mismatch a second peak-locking pass inside
+    # Inlined per-trace consensus (avoiding the gmax mismatch a second peak-locking pass inside
     # search_axis_phase_consensus would cause): fit p1 per trace from the concentration, then p0 per
-    # trace under that global p1, take the folded circular mean and disambiguate +-180 by the
-    # positive-peak sign; score = 100 x the median absorption under the consensus phase.
+    # trace under that global p1, take the folded circular mean, and finally restore the full
+    # 360-degree representative; score = 100 x the median absorption under the consensus phase.
     infos: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
     for cplx in ht_rows:
         peaks = _lock_trace_peaks(
@@ -440,9 +435,19 @@ def search_direct_phase_real_ht(
         )
     ) % 180.0
 
-    # 0.2.199-patch29p: the direct dimension does not force a positive peak -- +-180 only flips the
-    # peak sign and affects neither peak picking nor the lineshape; the folded value is the final p0
-    # (0-180 deg) and the score uses its absorption.
+    if sign_mode == "mixed":
+        # With coexisting signs alone, global polarity is unknowable. Keep the minimum-rotation
+        # representative instead of flipping according to the dominant peak.
+        # For example, folded 174 degrees becomes 354 degrees (-6 degrees), not a global flip.
+        if p0 > 90.0:
+            p0 = (p0 + 180.0) % 360.0
+    else:
+        signs = [
+            _row_absorption(cplx, pos, heights, p0, p1, radius=1)[1]
+            for cplx, pos, heights in infos
+        ]
+        if float(np.median(signs)) < 0.0:
+            p0 = (p0 + 180.0) % 360.0
     abs_vals: list[float] = []
     for cplx, pos, heights in infos:
         a, _sgn = _row_absorption(cplx, pos, heights, p0, p1, radius=1)
