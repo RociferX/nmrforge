@@ -34,12 +34,6 @@ from gui.pipeline_panel import (  # noqa: E402
 )
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 @pytest.fixture
 def host(qapp: QApplication):
     """Widget host: destroyed with the test to avoid leftover top-level widgets

@@ -1,6 +1,8 @@
 # BMRB 15750 HNCO: Comparison of Author and Automatic Processing Scripts
 
-This page compares the scripts actually run for software 1.0.4 and API v1.1. Both sides use the same
+This page compares the scripts actually run with the software 1.0.4 / API v1.1 measurement baseline.
+The current release is software 1.0.5 / API v1.1.1; the measured values below retain their original
+baseline. Both sides use the same
 32×32 complex-grid uniform raw data. The author branch runs the deposited `fid.com` and `proc.com`
 unchanged; the automatic branch generates its scripts through normal Bruker import, FID conversion,
 automatic optimization, and a complete final run. Each branch converts the raw data independently;

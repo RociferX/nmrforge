@@ -15,12 +15,6 @@ from gui.dialogs import ConfirmDialog
 from gui.main_window import MainWindow
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 def _build_manager(tmp_path: Path, monkeypatch: pytest.MonkeyPatch | None = None) -> ProjectManager:
     ws = tmp_path / "ws"
     ws.mkdir(exist_ok=True)

@@ -1,7 +1,8 @@
 # Four Processing Routes: 2D Spectra and 3D Projection Comparisons
 
-This page presents final processed spectra, methods, results, and limitations for software 1.0.4 and
-API v1.1. Four comparisons cover 2D uniform, controlled artificial 2D NUS, 3D uniform, and acquired
+This page presents final processed spectra, methods, results, and limitations measured with software
+1.0.4 and API v1.1. The current release is software 1.0.5 / API v1.1.1; the measurements below
+remain on the original baseline. Four comparisons cover 2D uniform, controlled artificial 2D NUS, 3D uniform, and acquired
 3D NUS. The source data for artificial downsampling were acquired, but the downsampling schedule was
 not acquired by an instrument as NUS.
 

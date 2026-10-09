@@ -21,12 +21,6 @@ from gui.pipeline_state import (
 )
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 def _manager_with_artifacts(tmp_path: Path):
     """Project + experiment type + sample data + the full artifact set
     (fid/spectrum/peak table/report, no fingerprint state)."""

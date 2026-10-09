@@ -15,12 +15,6 @@ from gui.pipeline_panel import PipelinePanel  # noqa: E402
 from gui.processing import ProcessingController  # noqa: E402
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 def _manager(tmp_path: Path):
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     exp = manager.create_experiment("HNCA")

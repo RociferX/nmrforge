@@ -16,7 +16,7 @@
 - [CLI 参考](cli.md)
 - [参数研究 API 指南](external-api/README.md)
 
-当前源码 API 契约为 1.1；当前可用的 Linux AppImage 为 1.0.2。各版本下载与说明见[发布页](https://github.com/RociferX/nmrforge/releases)。
+当前源码版本为软件 1.0.5 / API v1.1.1。这是已有相位/NUS 修复与证据整理的补丁发布，API 参数和 38 列峰表契约未变。1.0.5 发行提供源码与一份 Linux AppImage；具体产物可用性和验证状态以[发布页](https://github.com/RociferX/nmrforge/releases)为准。1.0.2 保留为历史版本。
 
 ## 实测证据
 

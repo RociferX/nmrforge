@@ -17,12 +17,6 @@ from gui.pipeline_panel import PipelinePanel, PipelineStepRow
 from ui_support.i18n import tr
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 class SyncThread:
     """Run the background thread synchronously (as in test_gui_layout)."""
 

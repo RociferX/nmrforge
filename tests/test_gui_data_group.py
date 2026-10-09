@@ -15,12 +15,6 @@ from gui.group_panel import GroupBatchPanel
 from gui.project_tree import ProjectTreePanel
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 class _TempWorkspace:
     """Workspace stub pointing to temporary directory."""
 

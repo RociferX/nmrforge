@@ -14,12 +14,6 @@ from core.project import ProjectManager
 from gui.spectrum_panel import SpectrumPanel
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 def _manager_with_peaks(tmp_path: Path):
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("HSQC")

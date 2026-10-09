@@ -1,4 +1,4 @@
-# 01 · Positioning and terminology (v1.1, 2026-10-03)
+# 01 · Positioning and terminology (v1.1.1, 2026-10-10)
 
 ## What is it
 
@@ -55,7 +55,7 @@ allowed, and their order is part of source identity.
   The rest is completed by subsequent independent analysis codes based on the unified peak table;
 - No peak attribution/Identify (an external peak table can be used as a reference peak, but the software does not infer the assignment);
 - No peak overlap decoupling or deconvolution; sub-grid localisation is by three-point parabola;
-- API v1.1 can build 3D NUS references but cannot run their parameter combinations; 2D uniform and 2D NUS support combination studies. See [05](05-inputs-and-data.md) for the input boundaries;
+- API v1.1.1 can build 3D NUS references but cannot run their parameter combinations; 2D uniform and 2D NUS support combination studies. See [05](05-inputs-and-data.md) for the input boundaries;
 - No parallel scheduling (serial + breakpoint resume);
 - The research parameter space is not automatically generated (`axes` is just a convenient expansion entry; `combos=` is executed as is)
 

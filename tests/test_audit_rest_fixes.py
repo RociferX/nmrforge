@@ -425,16 +425,9 @@ def test_packaging_policy_declares_source_and_appimage_release() -> None:
     from core import __version__
 
     released = "v" + __version__
-    assert any(
-        status in text
-        for status in (
-            f"{released} 已发布",
-            f"released with {released}",
-            f"{released} 源码与 AppImage 发布准备中",
-            f"{released} source and AppImage release in preparation",
-            f"{released} 仅源码发布",
-            f"source-only {released} release",
-        )
+    assert (
+        f"{released} 源码与 AppImage 发布" in text
+        or f"The {released} source and AppImage release" in text
     )
     assert "AppImage" in text
     assert "wheel" in text
@@ -443,9 +436,6 @@ def test_packaging_policy_declares_source_and_appimage_release() -> None:
     else:
         assert "THIRD_PARTY_LICENSES/PROVENANCE.txt" in text
         assert "THIRD_PARTY_LICENSES/NOTICE.md" in text
-    if f"{released} 仅源码发布" in text or f"source-only {released} release" in text:
-        assert "1.0.2" in text and "77b535f" in text
-        assert "不重建 AppImage" in text or "No AppImage is rebuilt" in text
 
 
 def test_appimage_build_keeps_the_machine_local_config_out() -> None:

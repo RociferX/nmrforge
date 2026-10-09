@@ -1,9 +1,10 @@
 # Packaging
 
-The current source-only v1.0.4 release has scripting API contract 1.1.
-These version numbers describe separate interfaces. The existing Linux
-AppImage is version 1.0.2, built from source revision `77b535f`; it does not
-contain the later API contract. No AppImage is rebuilt by this source update.
+The v1.0.5 source and AppImage release includes the source and one Linux AppImage (API v1.1.1). This
+patch packages existing phase/NUS fixes and evidence organization; API parameters and the 38-column
+peak-table contract are unchanged. See the [release page](https://github.com/RociferX/nmrforge/releases)
+for artifact availability and validation status. Version 1.0.2 is retained as a historical release.
+These version numbers describe separate interfaces.
 Source installation and wheel packages include the runtime resources.
 
 ## Linux AppImage

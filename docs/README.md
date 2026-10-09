@@ -16,7 +16,7 @@ Start with the [project README](../README.md) for a short overview, Linux instal
 - [CLI reference](cli.md)
 - [Parameter-study API guide](external-api/README.md)
 
-The source API contract is version 1.1. The available Linux AppImage is version 1.0.2; see the [release page](https://github.com/RociferX/nmrforge/releases) for version-specific downloads and notes.
+The current source release is software 1.0.5 / API v1.1.1. This patch packages existing phase/NUS fixes and evidence organization; API parameters and the 38-column peak-table contract are unchanged. The 1.0.5 release provides the source and one Linux AppImage; see the [release page](https://github.com/RociferX/nmrforge/releases) for artifact availability and validation status. Version 1.0.2 is retained as a historical release.
 
 ## Evidence
 

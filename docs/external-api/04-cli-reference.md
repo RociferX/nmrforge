@@ -1,9 +1,12 @@
-# 04 · Command line reference (v1.1)
+# 04 · Command line reference (v1.1.1)
 
 Entry:`python -m nmrforge_api <Order> --study <Research roots>`.
 Public parameter:`--study`(required), `--name`(new research name), `--condition <A|B|…>`.
 (Default = all conditions).
-This source release is software 1.0.4 with API v1.1; the previously released AppImage remains 1.0.2.
+This source release is software 1.0.5 with API v1.1.1. API parameters and the 38-column peak-table
+contract are unchanged. The 1.0.5 release provides the source and one Linux AppImage; see the
+[release page](https://github.com/RociferX/nmrforge/releases) for artifact availability and
+validation status. Version 1.0.2 is retained as a historical release.
 
 ## Init -- Create the study and import the dataset
 

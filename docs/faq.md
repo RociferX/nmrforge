@@ -13,8 +13,10 @@ editable repository checkout.
 ### Can I run it on Windows or macOS?
 
 Linux is the target runtime; Windows is an editing environment. macOS has not been validated.
-Install the current 1.0.4 from source. The existing Linux AppImage remains 1.0.2 (with runtime
-language switching) and does not include the later API updates.
+The current version is software 1.0.5 / API v1.1.1. This patch leaves API parameters and the
+38-column peak-table contract unchanged. The 1.0.5 release provides the source and one Linux AppImage;
+see the [release page](https://github.com/RociferX/nmrforge/releases) for artifact availability and
+validation status. Version 1.0.2 is retained as a historical release.
 
 ### Does nmrForge send my data anywhere?
 

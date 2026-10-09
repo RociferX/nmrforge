@@ -1,8 +1,7 @@
 # 打包
 
-当前为 v1.0.4 仅源码发布，脚本 API 契约版本为 1.1，两者分别版本化。
-现有 Linux AppImage 为 1.0.2，由源码修订 `77b535f` 构建，不包含后续
-API 契约；本轮不重建 AppImage。源码安装与 wheel 包均包含运行资源。
+当前为 **v1.0.5 源码与 AppImage 发布**，脚本 API 版本为 **1.1.1**，两者分别版本化。
+这是已有相位/NUS 修复与证据整理的补丁发布，参数和 38 列峰表契约未变。1.0.5 发行提供源码与一份 Linux AppImage；具体产物可用性和验证状态以[发布页](https://github.com/RociferX/nmrforge/releases)为准。1.0.2 保留为[历史版本](https://github.com/RociferX/nmrforge/releases/tag/v1.0.2)。源码安装与 wheel 包均包含运行资源。
 
 ## Linux AppImage
 

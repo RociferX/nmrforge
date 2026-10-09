@@ -25,12 +25,6 @@ from gui.pipeline_state import ALL_STEP_RUN_REFS, STEP_RUN_REFS  # noqa: E402
 from gui.project_tree import ProjectTreePanel  # noqa: E402
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 @pytest.fixture
 def host(qapp: QApplication):
     """Widget host: destroyed as a whole when the test ends, so no top-level widget is

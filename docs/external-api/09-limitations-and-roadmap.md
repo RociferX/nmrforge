@@ -1,8 +1,8 @@
-# 09 - Limits and extension paths (v1.1)
+# 09 - Limits and extension paths (v1.1.1)
 
 ## 9.1 Support matrix
 
-| Item | v1.1 | Notes |
+| Item | v1.1.1 | Notes |
 | --- | --- | --- |
 | uniform 1D/2D/3D data | yes, combinations run | goes through NMRPipe `process()`; studies are mostly 2D |
 | NUS **2D** data | yes, combinations run | goes through `reconstruct_nus()` (SMILE); candidates are isolated; SMILE parameters can be swept |

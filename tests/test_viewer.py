@@ -30,10 +30,6 @@ def _axis(label: str, size: int = 128, sw: float = 6000.0) -> SpectrumAxis:
     )
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
 
 
 def _synthetic_spectrum(shape: tuple[int, int] = (128, 256)) -> Spectrum:

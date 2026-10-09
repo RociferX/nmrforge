@@ -1,9 +1,11 @@
 # Python API
 
-The public scripting contract is `API_VERSION = "1.1"`; this source release uses software version
-1.0.4. The previously released AppImage remains at 1.0.2 and does not gain newer API functionality
-automatically. Install from source containing this contract and check `compat_manifest()` before
-reusing results.
+The public scripting API version is `API_VERSION = "1.1.1"`; this source release uses software
+version 1.0.5. This patch changes the API version identifier only; parameters and the 38-column
+peak-table contract are unchanged. The 1.0.5 release provides the source and one Linux AppImage; see
+the [release page](https://github.com/RociferX/nmrforge/releases) for artifact availability and
+validation status. Version 1.0.2 is retained as a historical release. Install from source containing
+this version and check `compat_manifest()` before reusing results.
 
 | Surface | Import | Stability |
 | --- | --- | --- |

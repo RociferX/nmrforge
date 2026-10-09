@@ -57,7 +57,7 @@ STUDY_STATE_FILENAME = "study.json"
 # reference caches. This is the **contract** version, not the package version (see
 # `core.__version__`); it is written into study.json, records/manifest.json, and
 # records/workflows.json, so this is its only definition.
-API_VERSION = "1.1"
+API_VERSION = "1.1.1"
 #: order in which condition labels are assigned (A/B/C...)
 CONDITION_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 

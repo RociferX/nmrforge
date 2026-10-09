@@ -1,6 +1,6 @@
-# nmrforge_api 对外文档(API 契约 1.1 · 2026-10-03)
+# nmrforge_api 对外文档(API 版本 1.1.1 · 2026-10-10)
 
-> `nmrforge_api` 是公开、版本化且不依赖 Qt 的脚本接口(`API_VERSION = "1.1"`,2026-10-03 当前源码契约)。
+> `nmrforge_api` 是公开、版本化且不依赖 Qt 的脚本接口(`API_VERSION = "1.1.1"`,2026-10-10 当前版本标识)。
 > 跨版本比较数值前，请查看 `compat_manifest()` 中的行为指纹、兼容级别与受影响步骤。
 > 已发布 AppImage 对应特定源码版本；更新源码不会自动更新它。
 
@@ -22,7 +22,7 @@
 
 支持的处理路径与验证边界见[限制与路线图](09-limitations-and-roadmap.md)。
 
-当前源码1.0.4/API v1.1，旧 AppImage 仍1.0.2。API 多段导入默认关闭；开启
+当前发行版本为软件1.0.5/API v1.1.1；这是已有相位/NUS修复与证据整理的补丁发布，参数和38列峰表契约未变。1.0.5发行提供源码与一份Linux AppImage；具体产物可用性和验证状态以[发布页](https://github.com/RociferX/nmrforge/releases)为准，1.0.2保留为历史版本。API多段导入默认关闭；开启
 `segmented=True` 后传完整有序原始目录列表，同一列表组成一个条件。参考阶段生成 FID，
 组合只读复用参考 FID；失效或旧参考缺冻结证据时要求 `force=True` 重建参考，不自动转换兜底。
 详见[输入规则](05-inputs-and-data.md)与[FID 复用边界](09-limitations-and-roadmap.md#99-fid-复用边界)。
@@ -43,7 +43,7 @@
 | [10-troubleshooting.md](10-troubleshooting.md) | 常见错误、warning 处理、断点续跑 |
 | [examples/](examples/) | 可运行示例(一步式/分步/只测量) |
 
-契约版本:`API_VERSION = "1.1"`；公开入口和输出字段见本组文档。旧 AppImage 1.0.2 不包含 v1.1 API 契约。
+当前版本:`API_VERSION = "1.1.1"`；公开入口和输出字段见本组文档。本补丁不改变API参数或38列峰表契约；1.0.5发行提供源码与一份Linux AppImage，具体产物可用性和验证状态见[发布页](https://github.com/RociferX/nmrforge/releases)；历史版本1.0.2不包含当前API版本。
 
 ## 安装与运行
 

@@ -15,12 +15,6 @@ from gui.main_window import MainWindow
 from gui.pipeline_panel import PipelinePanel
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 class _SyncThread:
     def __init__(self, target=None, daemon=None) -> None:
         self._target = target

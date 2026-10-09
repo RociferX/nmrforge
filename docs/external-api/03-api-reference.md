@@ -1,6 +1,6 @@
-# 03 · API reference (v1.1)
+# 03 · API reference (v1.1.1)
 
-See `nmrforge_api/__init__.py`(`API_VERSION = "1.1"`) for top-level exports; v1.1 is the current source contract, with the version defined once in `nmrforge_api.session`. This source release is software 1.0.4. The existing AppImage 1.0.2 is a separate older build and does not include this API contract.
+See `nmrforge_api/__init__.py`(`API_VERSION = "1.1.1"`) for top-level exports; the version is defined once in `nmrforge_api.session`. This patch updates the version identifier only; parameters and the 38-column peak-table contract are unchanged. Current software version is 1.0.5. The 1.0.5 release provides the source and one Linux AppImage; see the [release page](https://github.com/RociferX/nmrforge/releases) for artifact availability and validation status. Version 1.0.2 is retained as a historical release and does not include this API version.
 
 ## 3.1 Sessions and Datasets
 

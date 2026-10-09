@@ -1,4 +1,4 @@
-# 06 · Output and records (v1.1)
+# 06 · Output and records (v1.1.1)
 
 ## 6.1 directory layout
 
@@ -55,7 +55,7 @@ authentication. Legacy references without this evidence require an explicit `for
 calling reference mode again with its default cache policy is not enough. Resume fingerprints include
 the frozen FID evidence and strict input policy, so older permissive runs are not silently reused.
 
-The v1.1 unified table has currently **38 columns**, in the order below. Older 29-, 27-, and
+The v1.1.1 unified table has currently **38 columns**, in the order below. Older 29-, 27-, and
 36-column tables are historical formats, not a current compatibility promise; rebuild old reference
 peak tables from the frozen reference spectrum before reuse.
 

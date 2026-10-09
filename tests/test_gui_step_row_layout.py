@@ -16,11 +16,9 @@ from gui.pipeline_panel import PipelineStepRow, _FlowLayout
 from ui_support.theme import apply_dark_theme
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    apply_dark_theme(app)
-    yield app
+@pytest.fixture(scope="module", autouse=True)
+def _apply_dark_theme(qapp: QApplication):
+    apply_dark_theme(qapp)
 
 
 @pytest.fixture

@@ -20,12 +20,6 @@ from viewer.spectrum import Spectrum, Spectrum3D, SpectrumAxis
 from viewer.spectrum_viewer import SpectrumViewer
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 def _axis3(label: str, size: int, carrier: float) -> SpectrumAxis:
     return SpectrumAxis(
         label=label,

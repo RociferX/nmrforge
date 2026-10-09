@@ -12,7 +12,7 @@
 ### 能在 Windows 或 macOS 上跑吗?
 
 Linux 是目标运行平台，Windows 仅作为编辑环境；macOS 未验证。
-当前 1.0.4 从源码安装；已有 Linux AppImage 为 1.0.2（界面中英运行时切换），不包含后续 API 更新。
+当前版本为 1.0.5，API v1.1.1；本补丁不改变 API 参数或 38 列峰表契约。1.0.5 发行提供源码与一份 Linux AppImage，具体产物可用性和验证状态以[发布页](https://github.com/RociferX/nmrforge/releases)为准；1.0.2 保留为历史版本。
 
 ### nmrForge 会把我的数据发到什么地方吗?
 

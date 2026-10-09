@@ -1,8 +1,8 @@
 # API contract
 
 This page summarizes the current public Python and command-line contract.
-The source API version is 1.1 and is versioned separately from the desktop
-application and AppImage. Detailed function signatures, fields, and errors
+The source API version is 1.1.1 and is versioned separately from the desktop
+application and AppImage. This patch preserves the API parameters and 38-column peak-table contract. Detailed function signatures, fields, and errors
 are maintained in the [external API documentation](external-api/README.md).
 
 ## 11. Public nmrforge_api contract

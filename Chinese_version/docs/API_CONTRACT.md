@@ -1,7 +1,7 @@
 # API 契约
 
 本页简要说明当前公开的 Python 与命令行契约。源码 API 版本为
-1.1，与桌面应用和 AppImage 分别版本化。函数签名、字段和错误的
+1.1.1（延续 v1.1 契约），与桌面应用和 AppImage 分别版本化；此补丁不改变参数或38列峰表契约。函数签名、字段和错误的
 详细定义维护在[外部 API 文档](external-api/README.md)。
 
 ## 11. Public nmrforge_api contract

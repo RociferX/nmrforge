@@ -1,4 +1,4 @@
-# 07 · Methods and QC criteria (v1.1)
+# 07 · Methods and QC criteria (v1.1.1)
 
 > This page describes what the software **executed** and what QC records were left. Any
 > cross-combination or cross-condition statistic
@@ -130,7 +130,7 @@ audit are recorded separately. It is not a boolean boundary detector.
 a reference-measurement record. They do not by themselves establish that a peak is an artifact.
 
 **Historical v1.0 wording (superseded; not current behavior):** the following discussion treated
-`cell_edge` as an exclusive-cell marker. Current v1.1 always writes this field as NaN.
+`cell_edge` as an exclusive-cell marker. Current v1.1.1 always writes this field as NaN.
 **How to read `cell_edge` (owner's wording, 2026-09-19 - historical)**: it fires very
 often because an exclusive cell can be narrow in a crowded spectrum
 only 1-2 points wide, so an extremum sitting on the cell bound is normal for crowded spectra. It is

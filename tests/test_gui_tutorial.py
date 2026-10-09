@@ -28,10 +28,6 @@ from ui_support.i18n import load_catalogue, tr
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
 
 
 def _plain(label: str) -> str:

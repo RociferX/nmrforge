@@ -23,12 +23,12 @@ from typing import Any
 
 #: declared behaviour level (see the module doc; meaning matches nmrforge_api.compat)
 DECLARATION: dict[str, Any] = {'schema': 'nmrforge_api.compat.declaration.v1',
- 'digest': 'd3731daacfb757138d058771bd7bccf42410e42e94e7bcf633db9febccdf008c',
- 'token_digest': '5bf66f04fe1118846d5142f2eae6eb91d56c838e474bed856c37b30310424983',
- 'compat_level': 'behavior_changed',
- 'affected': ['reference', 'processing', 'sweep_detection', 'localization', 'qc'],
- 'updated': '2026-10-09',
- 'note': 'NUS grids; 2D phase bootstrap; terminal SMILE phases',
+ 'digest': '27f57abe8233f52f493749a48a241ceb1fd3d984a348cba93a64b61f4fa0887b',
+ 'token_digest': '40686f68f9cb79511d6652fccb92f549294840abd2ca0bbbd54417866ffe48ca',
+ 'compat_level': 'contract_changed',
+ 'affected': ['records', 'api_surface', 'cli'],
+ 'updated': '2026-10-10',
+ 'note': 'Version metadata 1.0.5/API 1.1.1; signatures and 38 columns unchanged',
  'golden': {'name': 'conformance_v1',
             'spectrum_sha256': '382b330926da93d856feef40ca33c2df1eec21b61e50db471bdf7aa4bb2fb311',
             'peak_table_sha256': 'e9ef45f2cae32bc580fc1bdeea1928ceb8406154848f8aca3c4558285e532242',

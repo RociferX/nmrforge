@@ -13,12 +13,6 @@ from qtcompat.QtWidgets import QApplication
 from gui.dialogs import ConfirmDialog, ImportExperimentDialog, InfoDialog
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 def test_import_dialog_result_data(qapp: QApplication) -> None:
     dialog = ImportExperimentDialog(None, samples=[("S001", "sample A")])
     dialog.source_edit.setText(str(Path.home()))

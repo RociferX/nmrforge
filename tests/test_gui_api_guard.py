@@ -32,10 +32,6 @@ CROSS_PRIVATE_RE = re.compile(r"self\.[a-z_][a-z0-9_]*\._[a-zA-Z]")
 ALLOWED: set[str] = set()
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
 
 
 @pytest.fixture

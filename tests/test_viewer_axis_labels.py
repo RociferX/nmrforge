@@ -20,12 +20,6 @@ from viewer.axis_labels import (
 )
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 def test_infer_nucleus_from_sf() -> None:
     """0.2.89: infer the nucleus from the observation frequency sf: 600->1H, 60.8->15N,
     150.9->13C."""

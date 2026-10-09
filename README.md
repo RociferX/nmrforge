@@ -4,7 +4,7 @@
 
 nmrForge automates Bruker multidimensional NMR processing, parameter optimization, and quality control with NMRPipe. It provides a desktop interface, command-line tools, and a Python API, and records the resolved parameters and outputs.
 
-The current source release is **1.0.4**. It supports 2D and 3D uniform data, and 2D and 3D NUS processing; batch processing is currently limited to 2D. The Linux AppImage currently available is **1.0.2** and is a separate, older release. The source API contract is **1.1**; API version and application version are separate.
+The current source release is **1.0.5**. It packages existing phase/NUS fixes and evidence organization. The API version is **1.1.1**; API parameters and the 38-column peak-table contract are unchanged. It supports 2D and 3D uniform data, and 2D and 3D NUS processing; batch processing is currently limited to 2D. The 1.0.5 release provides the source and one Linux AppImage; see the [release page](https://github.com/RociferX/nmrforge/releases) for artifact availability and validation status. Version 1.0.2 is retained as a historical release. API version and application version are separate.
 
 ## Install and start on Linux
 

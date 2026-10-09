@@ -25,12 +25,6 @@ from gui.project_tree import ProjectTreePanel
 from gui.spectrum_panel import SpectrumPanel
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 class SyncThread:
     """Turn background threads into synchronous execution so tests don't depend on timing."""
 

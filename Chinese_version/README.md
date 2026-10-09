@@ -4,7 +4,7 @@
 
 nmrForge通过NMRPipe自动处理Bruker多维NMR数据，提供参数优化、质量控制、桌面界面、命令行及Python API，并记录实际采用的参数和输出。
 
-当前源码版本为 **1.0.4**。支持 2D、3D uniform 数据及 2D、3D NUS 处理；批量处理目前仅支持 2D。当前可用的 Linux AppImage 为较早的 **1.0.2**。源码 API 契约为 **1.1**；API 版本与软件版本分别管理。
+当前源码版本为 **1.0.5**。这是已有相位/NUS 修复与证据整理的补丁发布。API 版本为 **1.1.1**，参数和 38 列峰表契约未变。支持 2D、3D uniform 数据及 2D、3D NUS 处理；批量处理目前仅支持 2D。1.0.5 发行提供源码与一份 Linux AppImage；具体产物可用性和验证状态以[发布页](https://github.com/RociferX/nmrforge/releases)为准。1.0.2 保留为历史版本。API 版本与软件版本分别管理。
 
 ## 在 Linux 上安装和启动
 

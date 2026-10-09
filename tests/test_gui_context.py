@@ -16,12 +16,6 @@ from gui.main_window import MainWindow
 from gui.spectrum_panel import SpectrumPanel
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 class _TempWorkspace:
     def __init__(self, root) -> None:
         self.root = Path(root)

@@ -1,6 +1,6 @@
-# nmrforge_api external documentation (API contract 1.1 · 2026-10-03)
+# nmrforge_api external documentation (API version 1.1.1 · 2026-10-10)
 
-> `nmrforge_api` is the public, versioned scripting interface (`API_VERSION = "1.1"`) and does
+> `nmrforge_api` is the public, versioned scripting interface (`API_VERSION = "1.1.1"`) and does
 > not depend on Qt. Use `compat_manifest()` and the release notes to identify behaviour or contract
 > changes between versions. Source updates and released AppImages are separate deliverables.
 
@@ -9,7 +9,7 @@
 freezes a reference workflow, executes user-provided combinations and writes one parabolic peak
 table per candidate spectrum with processing provenance and QC records.
 
-The current v1.1 contract writes one independent reference and reference peak table per condition,
+The current v1.1.1 version writes one independent reference and reference peak table per condition,
 then one independently detected combination table per condition and workflow. A condition may use
 one raw Bruker directory by default, or an explicitly enabled ordered list of two or more source
 directories (`segmented=True`). Reference construction imports, converts and merges these sources;
@@ -53,9 +53,11 @@ validation boundaries.
 | [10-troubleshooting.md](10-troubleshooting.md) | Common errors, warning processing, breakpoint resume |
 | [examples/](examples/) | Runnable example(one step/step by step/Measure only) |
 
-Contract version: `API_VERSION = "1.1"` (2026-10-03); the public entry points and output fields are described
-in this document set. This source release is software 1.0.4; the source API and desktop/AppImage are
-separate release lines. The existing 1.0.2 AppImage does not contain this API contract.
+Current release: API v1.1.1 / software 1.0.5. This patch packages existing phase/NUS fixes and
+evidence organization; API parameters and the 38-column peak-table contract are unchanged. The 1.0.5
+release provides the source and one Linux AppImage; see the [release page](https://github.com/RociferX/nmrforge/releases)
+for artifact availability and validation status. Version 1.0.2 is retained as a historical release
+and does not contain this API version.
 
 ## Install and run
 

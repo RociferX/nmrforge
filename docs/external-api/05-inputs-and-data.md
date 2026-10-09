@@ -1,4 +1,4 @@
-# 05 · Input: data, condition and parameter combination table (v1.1)
+# 05 · Input: data, condition and parameter combination table (v1.1.1)
 
 ## 5.1 Raw data
 
@@ -145,7 +145,7 @@ run_parameter_study(..., peaks="library.list")   # or a peak_id,H_ppm,N_ppm CSV
 - All parameters that affect the result must be traceable: `parameters_requested` ->
   `parameters_used` -> `parameters_resolved` (automatic parameter actual result).
 
-### Reference cache, carrier and spectral width (v1.1)
+### Reference cache, carrier and spectral width (v1.1.1)
 
 Reference reuse requires an exact normalized processing request match, including phase route,
 direct range, and all parameters (nested mappings and equivalent dotted keys normalize alike).

@@ -186,6 +186,21 @@ def _clear_cancel_between_tests() -> None:
     yield
 
 
+_QAPP_STRONG_REF = None
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    """One Qt application per test process, retained through session cleanup."""
+    global _QAPP_STRONG_REF
+
+    from qtcompat.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    _QAPP_STRONG_REF = app
+    yield app
+
+
 def _qt_widgets_loaded() -> bool:
     """Whether this session really loaded Qt (checks sys.modules, triggers no new import)."""
     return any(name in sys.modules for name in ("PySide6.QtWidgets", "PyQt6.QtWidgets"))
@@ -218,3 +233,10 @@ def _close_gui_windows_at_session_end() -> None:
         except RuntimeError:  # pragma: no cover - already destroyed
             pass
     app.processEvents()
+    from shiboken6 import getAllValidWrappers
+
+    # Qt dispatches events while destroying parent/child objects. Retain their
+    # Python wrappers until native destruction finishes, before Python finalizes.
+    wrappers = getAllValidWrappers()
+    app.shutdown()
+    del wrappers

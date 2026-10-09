@@ -1,6 +1,6 @@
-# 03 · API 参考(v1.1)
+# 03 · API 参考(v1.1.1)
 
-顶层导出见 `nmrforge_api/__init__.py`(`API_VERSION = "1.1"`;2026-10-03 当前契约,版本由 `nmrforge_api.session.API_VERSION` 单点定义)。软件/AppImage 版本独立；旧 AppImage 1.0.2 不包含此后新增的 v1.1 API 契约。
+顶层导出见 `nmrforge_api/__init__.py`(`API_VERSION = "1.1.1"`;2026-10-10 当前版本标识,版本由 `nmrforge_api.session.API_VERSION` 单点定义)。本补丁不改变 API 参数或 38 列峰表契约。软件与 API 分别版本化；1.0.5 发行提供源码与一份 Linux AppImage，具体产物可用性和验证状态以[发布页](https://github.com/RociferX/nmrforge/releases)为准；1.0.2 保留为历史版本，不包含当前 API 契约。
 
 ## 3.1 会话与数据集
 

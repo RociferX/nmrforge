@@ -16,12 +16,6 @@ from gui.dialogs import RunHistoryDialog
 from gui.processing import ProcessingController
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 def _manager_with_data(tmp_path: Path) -> tuple[ProjectManager, str, str]:
     manager = ProjectManager.create_project(tmp_path / "proj", "demo")
     entry = manager.create_experiment("HSQC")

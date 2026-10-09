@@ -47,10 +47,6 @@ class _SyncThread:
         self._target()
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
 
 
 def _manager(tmp_path: Path):

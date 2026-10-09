@@ -6,8 +6,8 @@
 python -m nmrforge_api --help
 ```
 
-当前命令行属于 API v1.1；请在含该契约的源码检出里完成可编辑安装后使用，
-本轮源码软件版本为 1.0.4，已发布 AppImage 仍为 1.0.2；见
+当前命令行属于 API v1.1.1；参数和 38 列峰表契约未变。请在含该契约的源码检出里完成可编辑安装后使用。
+1.0.5 发行提供源码与一份 Linux AppImage；具体产物可用性和验证状态以[发布页](https://github.com/RociferX/nmrforge/releases)为准，1.0.2 保留为历史版本；见
 [installation.md](installation.md)。
 
 ## 子命令

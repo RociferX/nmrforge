@@ -1,4 +1,4 @@
-"""nmrforge_api v1.1 contract regressions (frozen 2026-10-03; software version is separate).
+"""nmrforge_api v1.1.1 version regression (2026-10-10; parameters and 38-column contract unchanged).
 
 Covers: reference workflows (1 script + 1 parabolic peak table), workflow_id,
 three-layer parameter archival, independently detected combination peak tables,
@@ -522,13 +522,13 @@ def test_error_hierarchy() -> None:
     assert issubclass(SweepError, Exception)
 
 
-def test_api_version_is_1_1_with_a_single_definition() -> None:
-    """The current API contract is version 1.1 and has a single definition point."""
+def test_api_version_is_1_1_1_with_a_single_definition() -> None:
+    """The current API version is 1.1.1 and has a single definition point."""
     import nmrforge_api
     import nmrforge_api.records as records_module
     import nmrforge_api.session as session_module
 
-    assert API_VERSION == "1.1"
+    assert API_VERSION == "1.1.1"
     # Single definition point: the public surface re-exports the same object from session
     # (previously three places each had their own literal)
     assert nmrforge_api.API_VERSION is session_module.API_VERSION

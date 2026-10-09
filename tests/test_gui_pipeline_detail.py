@@ -15,12 +15,6 @@ from core.project import ProjectManager
 from gui.pipeline_panel import PipelinePanel, compute_data_step_statuses
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 class _FakeController:
     def set_manager(self, manager) -> None:
         pass

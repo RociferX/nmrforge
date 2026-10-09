@@ -19,12 +19,6 @@ from gui.processing import ProcessingController
 from gui.spectrum_panel import SpectrumPanel
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance() or QApplication([])
-    yield app
-
-
 class SyncThread:
     """Make the background thread synchronous; tests do not depend on thread timing."""
 
