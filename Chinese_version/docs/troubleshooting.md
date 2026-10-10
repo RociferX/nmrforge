@@ -51,7 +51,6 @@ nmrForge 在开始前先估算峰值,并把显式的 `-maxMem` 传下去;估算�
    「内存不足:直接维填零已降为 1×TD 以降低 SMILE 内存」。请尽量把这个降低显式化,
    让它记为你的选择而不是回退。
 
-项目历史上有过一次低估重建内存、导致宿主机器断电的案例,所以这道护栏偏保守而不是偏乐观。
 
 ## 采样分类给出 `uncertain`,处理拒绝启动
 
@@ -66,13 +65,13 @@ nmrForge 在开始前先估算峰值,并把显式的 `-maxMem` 传下去;估算�
 
 ## 提示「Gaussian peak fitting … was removed」/「The Gaussian peak-fitting method was removed」
 
-二维高斯峰拟合算法已于 2026-09-26(用户需求⑦)**整体删除**:峰定位只剩三点抛物线。
+峰定位只支持三点抛物线；二维高斯峰拟合不可用。
 所以 `localization="gaussian"|"both"`、`localize_peaks={"gaussian": …}`、
 组合表键 `localization.targets.gaussian` 会报 `SweepError`;`refine="gaussian"` 报
 `MeasurementError`;参考层直接抛 `LocalizationError`。这不是缺功能开关,而是没有
-高斯路径可选 —— 请改回 `parabolic`(缺省),并把脚本里的
+高斯路径可选 —— 请改用 `parabolic`(缺省),并把脚本里的
 `localization_method=` / `gaussian_roi_*` / `roi_f1_ppm` / `roi_f2_ppm` /
-`method=` 参数删掉(2026-09-26 起它们不存在)。
+`method=` 参数移除。
 
 定位 QC 仍在:三点抛物线给 `fit_success`/`FWHM_H`/`FWHM_N`/`boundary_hit`
 (顶点贴 ±0.5 点 = 边界命中),逐峰记录在 `<峰表>.localization.json` 与 run 参数里;

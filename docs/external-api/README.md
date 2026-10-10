@@ -1,63 +1,41 @@
-# nmrforge_api external documentation (API version 1.1.1 · 2026-10-10)
+# nmrforge_api guide (API 1.1.1)
 
-> `nmrforge_api` is the public, versioned scripting interface (`API_VERSION = "1.1.1"`) and does
-> not depend on Qt. Use `compat_manifest()` and the release notes to identify behaviour or contract
-> changes between versions. Source updates and released AppImages are separate deliverables.
+`nmrforge_api` is the Qt-free Python/CLI interface for software **1.0.5**. It imports Bruker data,
+builds and freezes an independent reference spectrum/table per condition, runs explicit parameter
+combinations and writes independently detected parabolic peak tables with provenance and QC records.
 
+A condition uses one raw directory by default. `segmented=True` enables an ordered list of two or
+more directories. Reference construction imports/converts/merges the sources; combinations reuse
+the frozen FID and do not convert or merge as a fallback. Missing or changed evidence requires
+reference rebuilding with `force=True` (`reference --force` on the CLI).
 
-`nmrforge_api` runs parameter-combination processing studies. It imports Bruker data, builds and
-freezes a reference workflow, executes user-provided combinations and writes one parabolic peak
-table per candidate spectrum with processing provenance and QC records.
+The unified table has **38 columns**, including full F1/F2/F3 coordinates, nuclei and equivalent
+linewidths. Peak IDs belong to one spectrum; combinations leave `reference_peak_id` empty.
+Cross-spectrum matching, assignment and statistical inference belong to downstream analysis.
+`compat_manifest()` records code/contract fingerprints and affected processing steps.
 
-The current v1.1.1 version writes one independent reference and reference peak table per condition,
-then one independently detected combination table per condition and workflow. A condition may use
-one raw Bruker directory by default, or an explicitly enabled ordered list of two or more source
-directories (`segmented=True`). Reference construction imports, converts and merges these sources;
-combination runs only process the frozen reference FID and never convert or merge as a fallback. It does not match
-peaks across conditions or from combinations to reference identities. The software only performs
-processing and archiving; **statistical inference and scientific conclusions are outside its scope**
-and belong to downstream analysis. The public functions,
-records, and compatibility behaviour are described in this documentation set.
+## Checks and evidence
 
-If the reference FID is missing or damaged, its source/conversion evidence differs, or a request would
-require conversion or merging, a combination run fails and requires rebuilding the reference with
-`force=True` (`reference --force` on the CLI).
-
-## Validation boundary: engineering regression vs scientific validation
-
-When you cite a product of this software, keep the two apart:
-
-- **Engineering regression** (the configured tests using mocked engine boundaries) checks
-  covered software paths and record consistency; these tests do not run NMRPipe or SMILE and
-  are not real-engine or scientific validation;
-- **Scientific validation** (a benchmark and criteria of your own) is outside the scope of this
-  software and belongs to the downstream analysis program -- engineering regression and real-engine
-  smoke runs **cannot** show that the processing is scientifically correct on real systems.
-
-See [limitations and roadmap](09-limitations-and-roadmap.md) for supported processing routes and
-validation boundaries.
+Mocked-engine tests check workflow and record behaviour. Real NMRPipe/SMILE comparisons retain
+input, command/parameter provenance and resulting spectra in the [evidence report](../evidence/real-data-comparison.md).
+Detection/localisation QC and candidate matching describe those measurements, rather than assigned
+peak identities. See [support and execution boundaries](09-limitations-and-roadmap.md).
 
 ## Reading order
 
 | Document | Content |
 | --- | --- |
-| [01-overview.md](01-overview.md) | Positioning, terminology, runtime semantics, software boundaries |
-| [02-quickstart.md](02-quickstart.md) | One-step / step-by-step / two conditions A/B / CLI Get started |
-| [03-api-reference.md](03-api-reference.md) | All public functions and data structures |
-| [04-cli-reference.md](04-cli-reference.md) | `python -m nmrforge_api` Six commands |
-| [05-inputs-and-data.md](05-inputs-and-data.md) | data, condition, parameter key, combination table |
-| [06-outputs-and-records.md](06-outputs-and-records.md) | directory layout, unified peak table fields, status and warning codes |
-| [07-methods-and-metrics.md](07-methods-and-metrics.md) | Reference workflow, parabolic localisation, peak threshold/margin and QC |
-| [08-integration-guide.md](08-integration-guide.md) | Handover to downstream analysis (what to read, how to read) |
-| [09-limitations-and-roadmap.md](09-limitations-and-roadmap.md) | support matrix, NUS boundaries, shards, roadmap |
-| [10-troubleshooting.md](10-troubleshooting.md) | Common errors, warning processing, breakpoint resume |
-| [examples/](examples/) | Runnable example(one step/step by step/Measure only) |
-
-Current release: API v1.1.1 / software 1.0.5. This patch packages existing phase/NUS fixes and
-evidence organization; API parameters and the 38-column peak-table contract are unchanged. The 1.0.5
-release provides the source and one Linux AppImage; see the [release page](https://github.com/RociferX/nmrforge/releases)
-for artifact availability and validation status. Version 1.0.2 is retained as a historical release
-and does not contain this API version.
+| [Overview](01-overview.md) | Terminology, runtime semantics and boundaries |
+| [Quickstart](02-quickstart.md) | One-step, stepwise, multiple conditions and CLI examples |
+| [API reference](03-api-reference.md) | Public signatures and return structures |
+| [CLI reference](04-cli-reference.md) | Commands and flags |
+| [Inputs and data](05-inputs-and-data.md) | Conditions, segmented import, parameter keys and tables |
+| [Outputs and records](06-outputs-and-records.md) | Layout, 38 columns, status, warnings and provenance |
+| [Methods and metrics](07-methods-and-metrics.md) | Reference processing, localisation, threshold, sign and QC |
+| [Integration](08-integration-guide.md) | Reading products and downstream interfaces |
+| [Support and execution boundaries](09-limitations-and-roadmap.md) | NUS, parameter validation, resume and FID reuse |
+| [Troubleshooting](10-troubleshooting.md) | Errors, warnings and recovery |
+| [Examples](examples/) | Executable API walkthroughs |
 
 ## Install and run
 

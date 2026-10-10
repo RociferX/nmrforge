@@ -1,6 +1,6 @@
 # 03 · API reference (v1.1.1)
 
-See `nmrforge_api/__init__.py`(`API_VERSION = "1.1.1"`) for top-level exports; the version is defined once in `nmrforge_api.session`. This patch updates the version identifier only; parameters and the 38-column peak-table contract are unchanged. Current software version is 1.0.5. The 1.0.5 release provides the source and one Linux AppImage; see the [release page](https://github.com/RociferX/nmrforge/releases) for artifact availability and validation status. Version 1.0.2 is retained as a historical release and does not include this API version.
+Top-level exports are defined in `nmrforge_api/__init__.py`; `nmrforge_api.session.API_VERSION` defines API **1.1.1**. Software **1.0.5** and the API have separate version identifiers. The unified peak table has 38 columns.
 
 ## 3.1 Sessions and Datasets
 
@@ -44,10 +44,10 @@ build_reference_peak_tables(session, reference, *, window_pts=None,
                             window_ppm=None) -> ReferenceSpectrum
 ```
 
-- `build_reference` Go through the complete automatic chain (`generate_fid` -> `generate_spectrum`, including unity
-  Phase optimisation), frozen spectrum and **actually executed script**; the actual results of automatic phase identification are written.
-  `direct_phase`(`ReferenceSpectrum.phase_record()` gives `phase_mode="auto"` +.
-  `actual_p0/actual_p1`);
+- `build_reference` runs the complete automatic chain (`generate_fid` → `generate_spectrum`,
+  including unified phase optimisation), then freezes the spectrum and the actually executed
+  script. `direct_phase` records the phase result; `ReferenceSpectrum.phase_record()` reports
+  `phase_mode="auto"` with `actual_p0` and `actual_p1`;
 - `ensure_reference_peaks`: each condition independently selects peaks on its own reference
   spectrum. An external peak table applies to the main condition only. Every condition has its own
   reference.list and reference peak table; conditions do not share peak identities.
@@ -63,24 +63,21 @@ build_reference_peak_tables(session, reference, *, window_pts=None,
   empty maps, unknown axes, and axes beyond the data dimensionality are rejected. Unspecified axes
   retain the conversion path's CAR; raw acqus is unchanged. Changed carriers require force=True.
   Sweeps inherit the reference carrier and reject carrier scans because the converted FID is reused.
-- `sigma_multiplier` (peak selection threshold, σ multiple) **can be specified externally when generating the reference**: default 35σ;
-  Once the reference peak table is frozen, all subsequent workflows can only use the reference threshold -- and then throw different thresholds.
-  `ReferenceError` (Change the threshold value to the reconstruction reference: `force=True` or delete the condition.
-  `study/reference/<key>/`);The actual usage is written into `peak_params.sigma_multiplier` /.
-  `peak_params.previous_sigma_multiplier` /
-  `peak_params.detection.sigma_multiplier` /
-  `peak_params.detection.threshold_source`;
-- Reference peak positions use three-point parabolic localisation. Removed `gaussian` and `both`
-  requests raise an error; they are not silently downgraded.
+- `sigma_multiplier` is the noise-σ detection threshold, default 35σ, set during reference
+  construction. Once the reference is frozen, a different threshold raises `ReferenceError`;
+  rebuild with `force=True` to change it. Applied values and their source are recorded in
+  `peak_params.sigma_multiplier`, `previous_sigma_multiplier`, `detection.sigma_multiplier`
+  and `detection.threshold_source`;
+- Reference peak positions use three-point parabolic localisation. The reference API does not
+  accept `localization_method` or `gaussian_roi_*` arguments. Unsupported measurement and sweep
+  methods raise the public errors described below.
 
-`ReferenceSpectrum` Key fields: `dataset_key`, `condition`, `ndim`, `sampling`.
-`frozen_spectrum`, `script_path`, `script_sha256`, `spectrum_sha256`, `params`,
-`sweep_params`, `direct_phase`, `peak_table_path`(identity table), `peak_count`.
-`peak_source` (`auto|external`), `peak_params`, `peak_tables`. Legacy `shared:<condition>`
-references are rejected and must be rebuilt; identities are never propagated between conditions.
-(parabolic table path/hash/row count/detected count), `peak_localization`(position QC).
-`tool_versions`;Method:`direct_phase_override()`, `phase_record()`.
-`peak_table_parabolic_path`.
+`ReferenceSpectrum` fields include `dataset_key`, `condition`, `ndim`, `sampling`, `frozen_spectrum`,
+`script_path`, `script_sha256`, `spectrum_sha256`, `params`, `sweep_params`, `direct_phase`,
+`peak_table_path`, `peak_count`, `peak_source` (`auto|external`), `peak_params`, `peak_tables`,
+`peak_localization`, `stage_times_s`, `processing_audit` and `tool_versions`. `peak_tables` and
+`peak_localization` contain the single `parabolic` method. Methods include
+`direct_phase_override()`, `phase_record()` and the `peak_table_parabolic_path` property.
 
 ## 3.3 parameter combination and workflow plan
 
@@ -104,8 +101,8 @@ plan_sweep(reference, *, axes=None, combos=None, max_runs=256,
 - Lock key (`phases`/`direct_phase`/`phase_route`/`sampling.auto_phase`) error;
   Deterministic parameters (extraction window, point distance target, sampling schedule, timeout, `fid_noise*`) and unknown key writing.
   `plan.notes` Prompt but not block;
-- `base_overrides` is a batch-level coverage; when executing each condition, press "The reference of the condition is valid parameter ->
-  `base_overrides` -> Current combination "merged. The old absolute `base_params` entry has been deleted;
+- `base_overrides` is a batch-level override. Each condition merges its effective reference
+  parameters, then `base_overrides`, then the current combination;
 - `SweepPlan.workflow_ids()` → `["W0001", ...]`.
 
 ## 3.4 Batch execution
@@ -114,7 +111,7 @@ plan_sweep(reference, *, axes=None, combos=None, max_runs=256,
 run_sweep(session, plan, *, reference=None, datasets=None,
           localization="parabolic", localize_peaks=None,
           edge_margin_ppm=None,
-          sign="abs",            # legacy parameter (the detection sign convention is fixed to dominant)
+          sign="abs",            # compatibility argument; does not choose detection polarity
           resume=True,
           stop_on_error=False, progress=None, on_run=None) -> list[SweepRun]
 ```
@@ -126,13 +123,14 @@ run_sweep(session, plan, *, reference=None, datasets=None,
   automatically (`params.diagnostics`, such as the direct-dimension DC correction `POLY -time`),
   folded into the combination base and executed **in the reference working directory** -- reusing
   the reference's converted fid and script from that directory; every run directory keeps the full
-  `process.com` + SHA-256 (a missing one raises `processing_script_not_found`);
-- `parameters_used` Base = The condition refers to the effective parameters of the run (phase lock), and subsequently applies the batch
-  `base_overrides`, the combination table finally covers only the keys it explicitly specifies; threshold class keys (`sigma_multiplier`/`min_snr`/`threshold_sigma`/.
-  `detection.sigma_multiplier`) is written into the combination table -> `SweepError` (the threshold is locked at the reference);
+  `process.com` + SHA-256 (a missing one records a `processing_script_not_found` warning);
+- `parameters_used` starts from the condition’s effective reference parameters, then applies batch
+  `base_overrides` and the combination’s explicitly supplied keys. Threshold keys (`sigma_multiplier`,
+  `min_snr`, `threshold_sigma`, `detection.sigma_multiplier`) raise `SweepError`; detection thresholds
+  are locked by the reference;
 - `localization` accepts only `parabolic`; `gaussian` and `both` raise `SweepError`. The
   combination-table `localization` key follows the same rule;
-- `localize_peaks` (**targeted localization**, 2026-09-19): a CSV path (at least a
+- `localize_peaks` (**targeted localization**): a CSV path (at least a
   `peak_id` column) / a sequence of peak numbers / `LocalizationTargets`; **only those
   peaks take the chosen method's refinement**. Detection, row count and `peak_id`
   numbering are unchanged and unlisted peaks retain their integer detection-grid
@@ -141,7 +139,7 @@ run_sweep(session, plan, *, reference=None, datasets=None,
   parabolic refinement, and an attempted failure is recorded in `failure_reason`; a combination
   may override it with the combination table's `localization.targets`; default = the
   whole spectrum;
-- `localize_peaks` (**condition granularity**, 2026-09-20): the CSV may carry a
+- `localize_peaks` (**condition granularity**): the CSV may carry a
   `condition` column, and each condition then reads only its own rows (`peak_id` is
   validated against that condition's spectrum); without the column one list is shared
   by the whole batch (recorded as `by_condition: "all"`). A condition with no rows
@@ -152,8 +150,8 @@ run_sweep(session, plan, *, reference=None, datasets=None,
 - `edge_margin_ppm` is an optional manual edge exclusion margin. By default, experiment/acquisition
   priors and spectrum evidence determine whether axial-edge screening applies; there is no
   unconditional edge band. The effective point and ppm values are recorded in `run.json.window`;
-- Combined peak table **Do not track reference peak table**: `reference_peak_id`/`assignment` Leave blank, `detected`
-  Always true (there are only peaks detected by this combination in the table).
+- Combination peak tables contain independently detected peaks. `reference_peak_id` and `assignment`
+  are blank; `detected` is always true because the table contains only detected candidates.
 
 `SweepRun` fields and methods are described in 06; `run.peak_table_path("parabolic")` returns the
 sole peak table path.
@@ -179,7 +177,7 @@ window_points_by_axis(axes, *, window_pts=None, window_ppm=None) -> dict
   experiment and spectrum evidence (`auto` by default), then uses three-point parabolic
   localisation. There is no `max_peaks` limit. Explicit sign requests take precedence over auto;
   without an `Experiment`, an independent spectrum retains edge peaks.
-- `refine` uses the three-point parabola. Requests for removed methods raise an explicit error.
+- `refine` uses the three-point parabola. Requests for unsupported methods raise an explicit error.
 - `PeakMeasurement.localization` records localisation status, equivalent linewidth metrics,
   `boundary_hit` and compatibility fields `fallback` / `fallback_reason`.
   `fwhm_by_nucleus`/`sigma_by_nucleus`;
@@ -207,7 +205,7 @@ write_records(session, *, reference=None, references=None, plan, runs,
 For fields and semantics, see 06; `write_records` produces `manifest.json`, `sweep_plan.json`,
 `runs.json`, `workflows.json`, `measurement.json` and the unified `peak_table_parabolic.csv`.
 
-## 3.9 Two modes: reference mode / combination mode (2026-09-14)
+## 3.9 Two modes: reference mode / combination mode
 
 The interface splits "generate reference" and "run processing based on parameter combination" into **two modes**. The combination mode must be externally.
 **Specify the reference explicitly**.
@@ -272,9 +270,9 @@ How to write `reference` (string/Path, or `ReferenceHandle`):
 | `"~/studies/s1#B"` | Reference for this study **Condition B**; only run condition B |
 | `"~/studies/s1/study/reference/<key>/reference.json"` | Directly give the reference file (the research root is inferred from the path; only the conditions corresponding to the reference are run) |
 
-- Combination **does not generate a reference**: parameter base = valid parameter for this reference (phase locked), the combination table only covers it
-  Explicitly specified key; **Peak selection threshold is locked with reference** (threshold key is written into the combination table -> `SweepError`.
-  Prompt "If you want to change the threshold, please rebuild the reference");
+- Combination execution requires an existing reference. Effective reference parameters form the
+  base, then explicit combination keys override it. Detection thresholds are locked: threshold
+  keys in the combination table raise `SweepError` and require reference rebuilding;
 - **Independent peak selection for combinations**: Each combination independently detects its own complete peak table on its own candidate spectrum
   (`peak_id` = serial number of this spectrum, `reference_peak_id`/`assignment` left blank), and
   matching against the reference peak table is done downstream. On a per-combination basis, record
@@ -309,12 +307,12 @@ Auxiliary function: `parse_reference_spec(spec) -> ReferenceHandle`.
 | --- | --- |
 | `DatasetError` | The data directory is not recognized, the condition label is repeated, and there is no dataset in the study |
 | `ReferenceError` | Reference spectrum/Product missing, the peak table does not exist |
-| `MeasurementError` | Spectrum does not exist, parameter is illegal, or a removed localisation method was requested |
+| `MeasurementError` | Spectrum does not exist, parameter is illegal, or an unsupported localization method was requested |
 | `SweepError` | combination table/grid illegal (locked key, exceeded upper limit, no design input), unsupported data type |
 
 All four inherit `SensitivityError`.
 
-## Behaviour compatibility manifest (compat, 2026-09-19/20)
+## Behaviour compatibility manifest (compat)
 
 **Why**: an unchanged interface name does not mean unchanged behaviour (the exclusive window
 and the two repairs of the ratio denominator all left the API surface alone while changing the

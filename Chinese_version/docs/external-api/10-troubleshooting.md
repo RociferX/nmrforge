@@ -7,11 +7,11 @@
 | `DatasetError: 无法识别为 Bruker 原始数据集` | 传了压缩包/已处理格式 | 解压出含 `acqus`(2D 还需 `acqu2s`)与 `ser` 的目录 |
 | `DatasetError: 条件标签 'A' 已被 … 占用` | 同一条件标签绑了两份数据 | 换标签(B/C…)或另建研究根 |
 | `ReferenceError: 参考谱产物缺失,请重建(force=True)` | `study/reference/<key>/` 被移动/删除 | 删掉该目录或 `build_reference(..., force=True)` |
-| `ReferenceError: 非主条件的参考峰身份需要主条件先选峰` | 只给 B 选峰,主条件 A 还没选 | 先对主条件(A)调用 `ensure_reference_peaks` |
-| `MeasurementError: unknown refine: 'gaussian' …(the Gaussian fit was removed)` | 还在用 `refine="gaussian"` | 高斯拟合算法已于 2026-09-26 删除:改用 `refine="parabolic"`(默认)或 `refine="none"`;参数组合执行里请求 `localization="gaussian"`/`"both"` 抛 `SweepError` |
+| 不支持的峰位精修方法报 `MeasurementError` 或 `SweepError` | `refine` 或 `localization` 使用了不支持的方法 | `measure_peak_positions` 使用 `refine="parabolic"`(默认)或 `refine="none"`；组合模式使用 `localization="parabolic"`，不支持的方法不会自动替换 |
+| 组合提示参考FID缺失、损坏或不一致 | 冻结FID、来源指纹、转换证据或请求参数不匹配 | 用`force=True` / `reference --force`重建参考；组合不会现场重转或合并 |
 | `SweepError: …超过上限 max_runs` | 组合数超限 | 减网格/显式提高 `max_runs`,或分批 |
-| `SweepError: 网格里的 'phases'/'direct_phase' 会破坏相位锁定` | 直接写相位字典 | 改用 `phase_delta.<轴>.p0|p1` 或 `phase.<轴>.p0|p1` |
-| `SweepError: 当前只支持 2D NUS 参数组合` | 3D NUS | 先只建参考;组合执行待 roadmap |
+| `SweepError: 网格里的 'phases'/'direct_phase' 会破坏相位锁定` | 直接写相位字典 | 改用 `phase_delta.<轴>.p0\|p1` 或 `phase.<轴>.p0\|p1` |
+| `SweepError: 当前只支持 2D NUS 参数组合` | 3D NUS | 3D NUS 可建立参考，不能运行参数组合 |
 | `plan.notes` 里出现「不在后端读取的参数清单内」 | 键名拼错 | 对照 05 的键表;notes 只是提示,不会让运行失败 |
 
 ## 10.2 状态是 `success_with_warning` 怎么办
@@ -25,16 +25,13 @@
 | `boundary_hit` | 有峰的三点抛物线顶点贴在 ±0.5 点边界(真峰顶可能落在三点模板之外):核对谱/窗口,或接受该定位并看 `n_boundary_hit` 计数 |
 | `duplicate_localization` | 同表出现同坐标(ppm 1e-6)的重复行:独立记录可能因存储点分辨率或亚格点精修落在同一坐标;下游不要把重复行当成两个独立观测 |
 | `direct_range_override` | 本批用了 `--allow-ext-override`/`allow_ext_override=True`,脚本直接维范围与参考冻结范围不一致:确认这是有意为之 |
-| (已移除) | `peak_not_detected` / `peak_window_edge` / `peak_out_of_range` / `window_points_fallback`:2026-09-14 起组合模式独立选峰,不再产出 |
-| (已移除) | `gaussian_fallback` / `gaussian_unsupported_ndim`:2026-09-26 起二维高斯拟合算法整体删除,边界警告改为与算法无关的 `boundary_hit` |
 
 ## 10.3 断点续跑与重跑
 
 成功运行只有在执行指纹一致时才会复用。指纹包括条件数据集、参数组合与实际
 参数、锁定相位、参考脚本/谱/峰表哈希,以及**锁定阈值、定位方式
-(`localization`,只有 `parabolic`)与选峰边距**、目标峰列表；旧版无指纹记录或任一输入
-改变都会安全重跑。缩短组合表后，活动计划
-之外的旧 `Wxxxx` 目录可以保留作历史，但不会再进入当前汇总记录。
+(`localization="parabolic"`)与选峰边距**、目标峰列表。缺少指纹或任一输入改变时，该 run
+不会复用。缩短组合表后，活动计划之外的 `Wxxxx` 目录不会进入当前汇总记录。
 
 - 已 `success`/`success_with_warning` 的 workflow × 条件会被跳过;
 - 想重跑某个组合:删掉 `study/workflows/<id>/` 下该条件目录(或整个 `<id>/`)

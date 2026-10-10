@@ -1,8 +1,7 @@
 # Python API
 
-当前公开脚本契约为 `API_VERSION = "1.1.1"`；当前软件版本为 1.0.5。
-本补丁只更新 API 版本标识，参数和 38 列峰表契约未变。1.0.5 发行提供源码与一份 Linux AppImage；
-具体产物可用性和验证状态以[发布页](https://github.com/RociferX/nmrforge/releases)为准。1.0.2 保留为历史版本。请用包含 API v1.1.1 的源码安装。
+当前公开脚本契约为 `API_VERSION = "1.1.1"`；软件版本为 1.0.5。API 参数和 38 列峰表契约按 v1.1.1 定义。
+Linux AppImage 与源码可从 [1.0.5 Release](https://github.com/RociferX/nmrforge/releases/tag/v1.0.5) 获取。源码安装请使用包含 API v1.1.1 的版本。
 
 项目里有两套 Python 接口,稳定性承诺不同。
 

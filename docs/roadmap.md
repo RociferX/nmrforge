@@ -1,54 +1,45 @@
-# Roadmap and support boundaries
+# Capabilities and limitations
 
-This page describes the current public support boundary and possible extension areas. It is not a
-release schedule or a promise that every listed idea will be implemented. For delivered changes,
-consult the public [release notes](https://github.com/RociferX/nmrforge/releases) and the source/API
-revision used for a study.
+## Processing support
 
-## Current support
+| Operation | Desktop workflow | Python/CLI API |
+| --- | --- | --- |
+| 2D uniform | Automatic and manual processing | Reference and parameter combinations |
+| 2D NUS | Automatic/manual SMILE reconstruction; SMILE optimisation and rank rerun | Reference and parameter combinations |
+| 3D uniform | Automatic and manual processing; complete spectrum or supported plane output | Reference and parameter combinations |
+| 3D NUS | Automatic and manual SMILE reconstruction | Reference construction; combination execution is rejected |
+| Batch operations | 2D data groups | Explicit workflow/condition combinations with resume |
+| Peak localisation | Three-point parabolic | Three-point parabolic; optional target subset |
+| Viewing | 1D spectra/FIDs, 2D spectra and 3D slices/projections | Spectrum/peak-table products without Qt |
 
-| Area | Current boundary |
-| --- | --- |
-| Uniform sampling | Processing supports 1D, 2D, and 3D routes. |
-| NUS | 2D NUS supports reference construction and parameter combinations through SMILE; 3D NUS currently supports reference construction only. |
-| Batch processing | Batch entry points are 2D-only. |
-| Peak localization | One supported method: three-point parabolic localization. |
-| Peak overlap/deconvolution | Not provided; peaks are selected and localized individually. |
-| Parameter execution | User-provided rows or grids are executed in order; the software does not invent a research design. |
-| Statistical inference | Outside the processing software; perform it downstream with explicit assumptions and missing-data handling. |
-| External engines | NMRPipe and, for NUS, SMILE must be installed separately. |
+NMRPipe performs conversion and conventional processing; SMILE supplies NUS reconstruction.
+Both engines must be installed separately. The processing code uses the same backend for desktop
+and API calls; the entry points have different parameter merging, output registration and resume logic.
 
-The detailed processing and API contracts are maintained in
-[Processing model](processing-model.md), [Peak picking](peak-picking.md),
-[External API](external-api/README.md), and [API contract](API_CONTRACT.md).
+## Data and parameter boundaries
 
-## Possible extension areas
+- Bruker metadata supplies dimension identities, acquisition modes, calibration and sampling evidence.
+  NUS uses a standard or explicitly named schedule; missing sample positions are not inferred from a percentage.
+- Conversion settings determine the FID. API combinations reuse the frozen reference FID and cannot
+  change conversion calibration or silently reconvert/merge sources.
+- Manual scripts expose processing commands; runs preserve the executed text and outcome.
+- API parameter rows/grids are explicit inputs. Runs execute serially with successful-work resume;
+  callers may divide a grid across separate study roots.
 
-The following are areas that may merit future work, subject to user need, scientific review, and
-compatibility with the existing contracts. They are not currently supported features:
+## Peak tables and interpretation
 
-- 3D NUS parameter-combination execution;
-- explicit selection of measurement planes for dimension-specific analyses;
-- broader parameter-key validation with clearer errors for unsupported keys;
-- additional peak-shape or overlap models, if supported by validation data and a suitable output
-  contract;
-- optional progress/status integration for external orchestration.
+Each API workflow/condition independently detects peaks and writes the 38-column table. Peak IDs
+are local to one spectrum. The software does not perform automatic assignment, cross-spectrum
+matching, overlap deconvolution, Lorentzian/Voigt/multi-peak fitting or statistical inference.
+Use full logical-axis coordinates when nuclei repeat; H/N aliases alone may be ambiguous.
+Detection thresholds, noise, phase and line shape affect candidate selection and localisation QC.
 
-New processing algorithms should be evaluated against appropriate reference data and should record
-their limitations. Do not infer scientific correctness from a successful software run or from
-engineering regression alone.
+## Checks and evidence
 
-## Validation and evidence
-
-Engineering tests check implemented software paths and record consistency. NMRPipe/SMILE execution
-must be validated separately on a system with those tools. Scientific conclusions require suitable
-ground truth and analysis criteria chosen for the question being asked.
-
-The v1.0.0 acceptance result applies only to its historical data and configuration. Current evidence
-has four completed comparisons: BMRB 27493 2D uniform against the authors' spectrum, controlled
-artificial 2D NUS from the same uniform source, BMRB 15750 3D uniform against the complete spectrum
-reconstructed with the authors' scripts, and acquired BMRB 52533 HNCO 3D NUS at 25%. For the
-artificial 2D NUS case, 75% was requested and 68/90 complex increments were retained (75.56% actual);
-it is controlled downsampling, not acquired NUS. The 15750 comparison applies fixed whole-axis shifts
-from spectrum-header CAR differences. See the [real-data evidence](evidence/real-data-comparison.md)
-for inputs, references, and limitations.
+Engineering tests exercise orchestration and records with mocked engines. Real-engine comparisons
+record inputs, reference provenance, commands, parameters and resulting spectra separately.
+[Four-route evidence](evidence/real-data-comparison.md) includes an author 2D uniform spectrum,
+controlled 2D NUS at 68/90 retained increments, an author-script full 3D uniform reference and acquired
+3D NUS at 25%. Its candidate coverage measures matched pairs/reference candidates; it does not count
+assigned 3D peak identities. See the [API support details](external-api/09-limitations-and-roadmap.md),
+[processing model](processing-model.md) and [peak picking](peak-picking.md).

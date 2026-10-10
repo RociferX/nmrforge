@@ -1,6 +1,6 @@
 # 03 · API 参考(v1.1.1)
 
-顶层导出见 `nmrforge_api/__init__.py`(`API_VERSION = "1.1.1"`;2026-10-10 当前版本标识,版本由 `nmrforge_api.session.API_VERSION` 单点定义)。本补丁不改变 API 参数或 38 列峰表契约。软件与 API 分别版本化；1.0.5 发行提供源码与一份 Linux AppImage，具体产物可用性和验证状态以[发布页](https://github.com/RociferX/nmrforge/releases)为准；1.0.2 保留为历史版本，不包含当前 API 契约。
+顶层导出见`nmrforge_api/__init__.py`，API **1.1.1**仅在`nmrforge_api.session.API_VERSION`定义。软件**1.0.5**与API分别版本化，统一峰表为38列。
 
 ## 3.1 会话与数据集
 
@@ -81,15 +81,15 @@ build_reference_peak_tables(session, reference, *, window_pts=None,
   `peak_params.previous_sigma_multiplier` /
   `peak_params.detection.sigma_multiplier` /
   `peak_params.detection.threshold_source`;
-- 峰定位只有三点抛物线一种方法(2026-09-26 用户需求⑦:二维高斯拟合算法已删除):
-  参考层不再有 `localization_method` / `gaussian_roi_*` 参数,请求 `"gaussian"`
+- 峰定位使用三点抛物线:
+  参考层不接受 `localization_method` / `gaussian_roi_*` 参数,请求 `"gaussian"`
   不是参考层的公开 API 参数。`LocalizationError` 属于内部 `core` 层,不属于
   `nmrforge_api` 的公开异常契约;公开测量入口和组合执行入口的高斯请求异常分别见下文。
 
 `ReferenceSpectrum` 关键字段:`dataset_key`、`condition`、`ndim`、`sampling`、
 `frozen_spectrum`、`script_path`、`script_sha256`、`spectrum_sha256`、`params`、
 `sweep_params`、`direct_phase`、`peak_table_path`(身份表)、`peak_count`、
-`peak_source`(`auto|external`;旧记录可能为 `shared:<条件>`,需重建)、`peak_params`、`peak_tables`
+`peak_source`(`auto|external`)、`peak_params`、`peak_tables`
 (只有 `parabolic` 一个键:路径/哈希/行数/detected 数)、`peak_localization`
 (定位 QC,只有 `parabolic` 键)、
 `stage_times_s`、`processing_audit`、`tool_versions`;方法:`direct_phase_override()`、`phase_record()`、
@@ -118,7 +118,7 @@ plan_sweep(reference, *, axes=None, combos=None, max_runs=256,
   确定性参数(提取窗口、点距目标、采样表、超时、`fid_noise*`)与未知键写
   `plan.notes` 提示但不阻断;
 - `base_overrides` 是批次级覆盖;执行每个条件时按“该条件的参考有效参数 →
-  `base_overrides` → 当前组合”合并。旧的绝对 `base_params` 入口已删除;
+  `base_overrides` → 当前组合”合并;
 - `SweepPlan.workflow_ids()` → `["W0001", ...]`。
 
 ## 3.4 批量执行
@@ -127,7 +127,7 @@ plan_sweep(reference, *, axes=None, combos=None, max_runs=256,
 run_sweep(session, plan, *, reference=None, datasets=None,
           localization="parabolic", localize_peaks=None,
           edge_margin_ppm=None,
-          sign="abs",            # 历史参数(检测符号口径固定 dominant)
+          sign="abs",            # 兼容参数，不参与检测符号决策
           resume=True,
           stop_on_error=False, progress=None, on_run=None) -> list[SweepRun]
 ```
@@ -145,7 +145,7 @@ run_sweep(session, plan, *, reference=None, datasets=None,
 - `parameters_used` 基底 = 该条件参考运行的有效参数(相位锁定),随后应用批次
   `base_overrides`,组合表最后只覆盖它显式指定的键;阈值类键(`sigma_multiplier`/`min_snr`/`threshold_sigma`/
   `detection.sigma_multiplier`)写进组合表 → `SweepError`(阈值锁定在参考);
-- `localization` 只接受 `"parabolic"`(唯一方法,2026-09-26 起);`"gaussian"` /
+- `localization` 只接受 `"parabolic"`;`"gaussian"` /
   `"both"` 抛 `SweepError`,不静默降级;逐组合可用组合表的 `localization` 键覆盖;
 - `localize_peaks`(**targeted localization**):CSV 路径(至少含 `peak_id` 列)/
   峰序号序列 / `LocalizationTargets`。只有目标峰会从检出整数格点做三点抛物线精修；
@@ -154,8 +154,8 @@ run_sweep(session, plan, *, reference=None, datasets=None,
   `failure_reason`,与 `fallback_reason` 分离;
   检出、行数、`peak_id` 编号不变；逐组合可用组合表
   `localization.targets` 覆盖;缺省 = 全谱;逐方法映射写法(如
-  `{"gaussian": …}`)已随高斯删除,给了抛 `SweepError`;
-- `localize_peaks`(**条件粒度**,2026-09-20):CSV 可带 `condition` 列,每个条件
+  `{"gaussian": …}`)不受支持，给了抛 `SweepError`;
+- `localize_peaks`(**条件粒度**):CSV 可带 `condition` 列,每个条件
   只取自己的行(`peak_id` 按该条件的谱校验);没有该列 = 整批共用(留档
   `by_condition: "all"`);某条件缺行默认**处理前**报错,放行要显式给
   `on_missing="all"`(不限定 QC)/ `"none"`(不计算额外 QC)。也接受条件映射
@@ -186,20 +186,20 @@ window_points_by_axis(axes, *, window_pts=None, window_ppm=None) -> dict
 ```
 
 - `detect_and_localize` 是组合模式的选峰入口：实验/采集参数和边缘证据 + `sigma_multiplier`
-  (同时作 `min_snr`)及实验/谱面证据决定的 auto 符号口径，再对所选目标作三点抛物线精修(不再有
-  `method=` 参数:高斯删除后没有算法选择);没有 `max_peaks`
+  (同时作 `min_snr`)及实验/谱面证据决定的 auto 符号口径，再对所选目标作三点抛物线精修(不接受
+  `method=` 参数);没有 `max_peaks`
   (锁定阈值下检出多少峰就写多少峰);`targets=(1,2,…)` 只对这些 `peak_id` 作
   抛物线精修及定位 QC，非目标峰保留检出整数格点、定位方法为 `none` 且 QC 为 NaN。
   `allow_empty_targets=True` 时显式空集合表示「这一条件不作精修及定位 QC」；
 - `refine`:`parabolic`(默认,三点抛物线顶点)|`none`(只取整数格极大值);
-  `refine="gaussian"` 抛公开异常 `MeasurementError`(高斯拟合算法已删除,不降级);
+  `refine="gaussian"` 抛公开异常 `MeasurementError`(不支持该方法，不降级);
 - 显式 `sign_mode=positive/negative/both/dominant` 按请求执行；auto 才使用模板/双符号证据。
   检测及参考测量强度/SNR 相对中位数背景，结果记录 `baseline_offset` 与
   `height_reference="global_median_baseline"`；不改变源谱。非有限输入明确失败。
 - 抛物线的定位 QC 逐峰记录在 `PeakMeasurement.localization`:
   `requested_method`(`parabolic`)/`actual_method`(`parabolic` 或未检测/跳过时 `none`)/
   `fit_success`/`failure_reason`/`fallback`/`fallback_reason`/`boundary_hit` 与按**核名**的
-  `fwhm_by_nucleus`(等效线宽 `FWHM = 2.3548σ`);`fit_rmse` 已随高斯删除;
+  `fwhm_by_nucleus`(等效线宽 `FWHM = 2.3548σ`);
 - `PeakMeasurement`:`peak_id`、`reference_peak_id`、`assignment`、`reference`、
   `positions`、`deltas`、`intensity`、`noise_sigma`、`snr`、`found`、
   `window_edge`、`boundary`、`out_of_range`、`localization`。
@@ -223,10 +223,10 @@ write_records(session, *, reference=None, references=None, plan, runs,
 
 字段与语义见 06;`write_records` 产 `manifest.json`、`sweep_plan.json`、
 `runs.json`、`workflows.json`、`measurement.json`、唯一的组合长表
-`peak_table_parabolic.csv`(38 列;`gaussian_fallback_rows` 已随高斯删除)。新增 F1/F2/F3
+`peak_table_parabolic.csv`(38 列)。新增 F1/F2/F3
 的 ppm、核名和等效 FWHM;重复核素时 H/N 兼容别名留空。
 
-## 3.9 两种模式:参考模式 / 组合模式(2026-09-14)
+## 3.9 两种模式:参考模式 / 组合模式
 
 接口把「生成参考」和「按参数组合跑处理」拆成**两个模式**,组合模式必须由外部
 **显式指定参考**。
@@ -243,7 +243,7 @@ run_parameter_study(root, dataset=None, *, datasets=None, segmented=False,
                     ...) -> StudyResult
 ```
 
-`segmented` 必须是严格的 bool，缺省为 `False`，保持原来的
+`segmented` 必须是严格的 bool，缺省为 `False`，使用
 单目录输入方式。开启时，单条件可用 `dataset=[s1, s2]` 或 `datasets=[s1, s2]`；
 其中列表是一个条件的完整有序段列表，至少两个原始目录。多条件时用
 `datasets={"A": [a1, a2], "B": [b1, b2]}`，每个值都是该条件的完整有序段列表。
@@ -257,7 +257,7 @@ run_parameter_study(root, dataset=None, *, datasets=None, segmented=False,
 - `params_by_condition` 按条件覆盖公共 `params`;未知条件报错。`peaks=` 外部峰表只登记到
   主条件,不会复制到其他条件;
 - 选峰阈值、参考峰表(外部峰表)都在这阶段确定,之后**锁定**;峰定位固定为
-  三点抛物线(2026-09-26 起不再有 `localization_method` / `gaussian_roi_*`);
+  三点抛物线;
 - 参考阶段的窗/基线**自动优化**默认开启;`params["reference_optimize"]` 可关闭或
   限定候选(仅测试/复现/审计;真实实验不可用,用后必须在记录里说明);
 - 产物:`study/reference/<key>/`(脚本/谱/`reference_peak_table_parabolic.csv`)+
@@ -343,12 +343,12 @@ run_combination_study(reference,                  # ← 必填:显式指定参�
 | --- | --- |
 | `DatasetError` | 数据目录不可识别、条件标签重复、研究里没有数据集 |
 | `ReferenceError` | 参考谱/产物缺失、峰表不存在 |
-| `MeasurementError` | 谱不存在、参数非法、请求已删除的高斯拟合方法 |
+| `MeasurementError` | 谱不存在、参数非法、请求不支持的定位方法 |
 | `SweepError` | 组合表/网格非法(锁定键、超上限、无设计输入)、不支持的数据类型 |
 
 四者都继承 `SensitivityError`。
 
-## 行为兼容清单(compat,2026-09-19/20)
+## 行为兼容清单(compat)
 
 **为什么**:接口名字没变 ≠ 行为没变(独占窗口、比值分母两次修理都是 API 表面
 不变、数值会变)。使用者要能机读地回答「这批数字由哪套行为产生、要不要重跑」。

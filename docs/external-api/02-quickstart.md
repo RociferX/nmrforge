@@ -1,6 +1,6 @@
 # 02 · Get started quickly (v1.1.1)
 
-## 1. Two modes (from 2026-09-14)
+## 1. Two modes
 
 The interface has two stages: reference mode builds the reference spectra and tables;
 combination mode processes parameter combinations against an explicitly specified reference.
@@ -41,14 +41,15 @@ for run in result.runs:
 - **Independent references and combination peak selection**: Each condition has its own reference; each combination uses the reference-locked threshold independently on its candidate spectrum
   peak selection -> the combination’s own complete peak table; `reference_peak_id`/`assignment`
   stay blank and matching against the reference peak table is done downstream;
-- Localisation uses three-point parabolic refinement. Requests for removed methods raise an error;
+- Peak-position refinement uses three-point parabolic localization. Unsupported methods raise an
+  error rather than being substituted;
 - `run_parameter_study(...)` is still a one-click convenient entry (internal = reference mode + explicit with research root
   Call combination mode) for quick trial;
 - No external peak table required;`peaks=<external peak table>` There is a public library only on the research side/Used only when the peak table has been assigned;
-- **Window function and parameter must be paired**: `window.<axis>.type` + `off/end/pow/lb/g1/g2`;
-  Writing these sub-parameters when the window type is `none` will be rejected (history will silently idle);
-- Baseline:`baseline.<axis>.mode=order` Now render `POLY -ord N -auto` realistically;
-  `mode=auto` rendering `POLY -auto`; the software will report `no_spectrum_change` when a certain condition does not change.
+- **Window type and parameters must be paired**: `window.<axis>.type` with `off/end/pow/lb/g1/g2`;
+  supplying a sub-parameter for an axis whose reference window type is `none` or `off` raises an error;
+- Baseline: `baseline.<axis>.mode=order` renders `POLY -ord N -auto`; `mode=auto` renders
+  `POLY -auto`. A condition whose spectrum does not change is recorded with `no_spectrum_change`.
 
 ## 2. The two conditions (A/B) are the same as parameter
 
@@ -121,7 +122,7 @@ python -m nmrforge_api init      --study ~/studies/segmented --segmented \
 python -m nmrforge_api reference --study ~/studies/s1
 python -m nmrforge_api peaks     --study ~/studies/s1
 python -m nmrforge_api sweep     --study ~/studies/s1 --reference ~/studies/s1 \
-    --combos design.csv --localization parabolic
+    --combos design.csv
 python -m nmrforge_api status    --study ~/studies/s1
 python -m nmrforge_api report    --study ~/studies/s1
 ```

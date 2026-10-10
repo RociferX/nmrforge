@@ -9,11 +9,11 @@ products according to the following contract.
 | What to read for your analysis | |
 | --- | --- |
 | Peak position of each parameter combination | `study/records/peak_table_parabolic.csv` (long table), or workflow by workflow `study/workflows/<id>/<condition>/peak_table_parabolic.csv` |
-| Peak identity | Reference peak table: `reference_peak_id`(R0001...); **The matching of the combined peak table is on your side** (In the combined mode, peaks are selected independently, `reference_peak_id`/`assignment` in the table are left blank, and `H_ppm`/`N_ppm` are used for matching) |
+| Peak identity | Reference tables use local `reference_peak_id` values (`R0001…`). Combination tables are detected independently and leave `reference_peak_id`/`assignment` blank; downstream analysis establishes correspondence. |
 | condition A/B | `condition` / `dataset` column (or group by directory / condition) |
-| parameter with automatic parameter actual value | `workflows/<id>/workflow.json` with `runs.json` of `parameters_requested`/`parameters_used`/`parameters_resolved` |
+| Requested and applied parameters | `study/workflows/<id>/workflow.json` and `study/records/runs.json`: `parameters_requested`, `parameters_used`, `parameters_resolved` |
 | Availability of peaks | `SNR`, `fit_success`, `boundary_hit`, `fallback` (the combined mode peak table only contains detected peaks; the reference peak table also contains the reserved rows of `detected=false`) |
-| Reference | `records/manifest.json` of `references` (script/spectrum/peak-table hashes) and `peak_identity` |
+| Reference | `study/records/manifest.json`: `references` (script/spectrum/peak-table hashes) and `peak_identity` |
 | Recalculation and citation | script / spectrum SHA-256, `grid_sha256`, `versions`, complete `log.txt` |
 
 ## 8.2 Minimum read example (read only, not calculated)
@@ -36,10 +36,9 @@ values = [
 print(len(values), values[:3])
 ```
 
-> The above only does **reading and filtering**. statistical testing should be included in your analysis code
-> Implement it according to your own statistical assumptions (sample size, distribution, and handling of missing peaks must be stated). If you just want to be fast
-> Self-test, Reusable tests/Detection aid `nmrforge_api.uncertainty` (the processing chain does not call it
-> It does not appear in records either)
+> This example only reads and filters rows. Establish cross-spectrum correspondence and missing-peak
+> handling before statistical inference. `nmrforge_api.uncertainty` is separate from the two-stage
+> processing interface; independent spectra's local `peak_id` values do not establish corresponding peaks.
 
 ## 8.3 Recommended processing conventions
 
@@ -50,8 +49,7 @@ print(len(values), values[:3])
 2. **Localisation:** successful refinement records `localization_method=parabolic`; undetected
    identities or targeted-skipped peaks record `none`. Read `detected`, `localization_requested`,
    `failure_reason` and QC together. Positive and negative peaks use symmetric QC. FWHM is an
-   equivalent curvature linewidth, not a multi-peak lineshape fit. Keep legacy Gaussian outputs
-   separate from current records.
+   equivalent curvature linewidth, not a multi-peak lineshape fit.
 3. **Missing peaks:** do not silently discard unmatched peaks. Record missingness and the analysis
    policy; it may depend on the processing parameters. Reference rows with `detected=false`
    are also retained.
@@ -68,5 +66,5 @@ explicitly. Combinations cannot repair or regenerate invalid FID inputs.
 Before joining result tables downstream, compare source and reference evidence, parameter definitions
 and behaviour fingerprints, and establish peak correspondence explicitly. Identical parameters or
 reference records do not guarantee shared peak identities. Preserve each shard's
-`records/manifest.json`. See [input and output boundaries](09-limitations-and-roadmap.md#98-input-and-output-boundaries)
-and the [FID reuse boundary](09-limitations-and-roadmap.md#99-fid-reuse-boundary).
+`records/manifest.json`. See [source, calibration and output ownership](09-limitations-and-roadmap.md#98-source-calibration-and-output-ownership)
+and the [FID reuse boundary](09-limitations-and-roadmap.md#99-frozen-fid-reuse).

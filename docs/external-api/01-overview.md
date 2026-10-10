@@ -1,98 +1,95 @@
-# 01 · Positioning and terminology (v1.1.1, 2026-10-10)
+# 01 · Positioning and terminology (API v1.1.1)
 
-## What is it
+## What it is
 
-`nmrforge_api` is NMRForge's external **parameter-combination processing executor**: no GUI, no
-dependency on Qt, so it can run in a silent environment or on a cluster. Input: raw NMR data and a
-**user-defined parameter combination table**. Output: **traceable peak tables and processing
-records**.
+`nmrforge_api` is NMRForge's Qt-free Python and command-line interface for processing user-defined
+parameter combinations. It accepts Bruker NMR data and explicit parameter combinations, then writes
+candidate spectra, peak tables, processing scripts, logs, and provenance records. It can run without
+a graphical display.
 
-It reuses NMRForge's own processing and interpretation caliber:
+The API uses NMRForge's processing and measurement conventions:
 
-- Processing: the same set of NMRPipe script generation and execution (unified phase optimisation, SMILE reconstruction, etc.);
-- Peak position: the same set as NMRForge peak selection; ppm axis mapping (ORIG preferred, CAR as
-  fallback, with `FDDIMORDER` mapping logical dimensions to data axes);
-- Records: each workflow comes with the complete script, its peak table (per the selected refinement
-  method), the complete log, the three parameter layers and a version table.
+- Processing scripts are generated and run through the NMRPipe backend; NUS processing uses SMILE.
+- Peak coordinates use the NMRPipe ppm-axis mapping. `ORIG` is preferred, `CAR` is the fallback,
+  and `FDDIMORDER` maps logical dimensions to stored data axes.
+- Each workflow records its executed script, peak table, log, requested and resolved parameters,
+  and software/tool versions.
 
-## What it does (normative process)
+## Processing flow
 
 ```text
 Raw data (A/B...)
-    ↓  independent reference workflow per condition: reference script + that condition's parabolic peak table
+    ↓  build a reference spectrum and reference peak table for each condition
 Reference workflow
-    ↓  user parameter combination table: one workflow_id per row (W0001, W0002, ...)
-User-defined workflow ensemble
-    ↓  the reference script is the template: only the parameters named for that combination are replaced, then the processing runs automatically
-Processed spectra
-    ↓  every combination detects peaks independently on its own spectrum using the **reference-locked threshold**, then applies three-point parabolic localisation
-One parabolic peak table per candidate
-    ↓
-Complete provenance + QC
+    ↓  user-defined parameter table: one workflow_id per row (W0001, W0002, ...)
+Combination workflows
+    ↓  reuse the reference FID and apply only the parameters named in each row
+Candidate spectra
+    ↓  detect peaks independently at the reference-locked threshold, then refine by three-point parabola
+Peak tables and provenance records
 ```
 
-Reference is only made to the **benchmark** for subsequent parameter perturbations, and is not required to prove the globally optimal parameter combination.
+The reference is the baseline for parameter perturbations; it is not a claim that the parameter
+combination is globally optimal.
 
-Sampling is determined from supported metadata and schedules. Only a standard `nuslist` or a file
-explicitly named by `acqus.NUSLIST` is used; the importer does not guess a schedule from arbitrary
-integer files. A valid full grid in standard order may use uniform processing. Full coverage in a
-different order still requires schedule-based placement. Explicit NUS without a recoverable
-schedule is rejected during import. Trailing zero padding is not treated as missing samples.
+Sampling classification uses the standard `nuslist` name or a schedule explicitly named by
+`acqus.NUSLIST`; the importer does not guess from arbitrary integer files. A valid full grid in
+standard order may use uniform processing. Full coverage in another order still requires schedule
+placement. Explicit NUS without a recoverable schedule is rejected during import. Trailing zero
+padding alone does not establish that a dataset is uniformly sampled.
 
-Dataset import is single-directory by default (`segmented=False`). To combine acquisition segments
-as one condition, opt in with `segmented=True` and provide the complete, ordered list of at least two
-Bruker raw data directories. The API does not discover additional segments automatically. Each
-segment must be compatible in acquisition parameters, dimensions, nuclei, effective TD, spectral
-width, sampling mode, axis layout, SFO frequency and carrier. Kinetic layouts and NUS inputs without
-a usable schedule are rejected. Segments may be in different parent directories; duplicates are not
-allowed, and their order is part of source identity.
+Dataset import uses one Bruker directory by default. To treat acquisition segments as one condition,
+pass `segmented=True` and the complete ordered list of at least two directories. Each segment must
+match in acquisition parameters, dimensions, nuclei, effective TD, spectral width, sampling mode,
+axis layout, SFO frequency, and carrier. Kinetic layouts and NUS inputs without a usable schedule
+are rejected. Duplicate paths are rejected, and segment order is part of the source identity.
 
-## What it doesn't do (software boundaries)
+## Software boundaries
 
-- **No statistical analysis or significance judgment**
-  **No scientific conclusions** -- These do not deal with contracts and records products. σ/Δδ Summary code.
-  (`nmrforge_api.uncertainty`) is left as **test/Detection aid** (the processing chain does not call it).
-  The rest is completed by subsequent independent analysis codes based on the unified peak table;
-- No peak attribution/Identify (an external peak table can be used as a reference peak, but the software does not infer the assignment);
-- No peak overlap decoupling or deconvolution; sub-grid localisation is by three-point parabola;
-- API v1.1.1 can build 3D NUS references but cannot run their parameter combinations; 2D uniform and 2D NUS support combination studies. See [05](05-inputs-and-data.md) for the input boundaries;
-- No parallel scheduling (serial + breakpoint resume);
-- The research parameter space is not automatically generated (`axes` is just a convenient expansion entry; `combos=` is executed as is)
+- The API does not perform statistical analysis, significance testing, or scientific interpretation.
+- It does not infer peak assignments, deconvolve overlapping peaks, or match peaks across spectra.
+  An external peak table can provide reference peak identities.
+- Peak-position refinement uses three-point parabolic localization.
+- 3D NUS parameter combinations are unsupported. Combination studies support 2D uniform and 2D NUS
+  data; see [input boundaries](05-inputs-and-data.md).
+- Workflows run serially and can resume completed work. `axes` expands a full-factorial grid for
+  convenience; `combos=` executes the supplied rows in order without designing a parameter space.
 
 ## Glossary
 
 | Term | Meaning |
 | --- | --- |
-| Research root (root) | A directory = a research project = a NMRForge project (`project.json`), containing `study/` |
-| Condition (condition) | A set of original data (A/B...); two-condition study is the state of two samples in the same experiment |
-| Dataset (DatasetRef) | Import one Bruker directory, or an explicitly ordered segment list, as one condition (`exp_id/data_id` + label) |
-| Reference spectrum | NMRFOrge automatic optimisation spectrum run out, frozen in `study/reference/<key>/reference.ft2` |
-| Reference script | Reference run **actually executed** NMRPipe script, frozen as `process.com` (with SHA-256) |
-| Reference peak table | `reference.list` (peak identity R0001...) plus `reference_peak_table_parabolic.csv`, generated by automatic picking or an external peak table |
-| `reference_peak_id` | The stable peak identity in the **reference peak table** `R0001`…; the combined peak table leaves it blank (combinations pick peaks independently), and matching peaks back to the reference identity is **downstream** work |
-| workflow_id | parameter combination table row = one workflow, number `W0001`, `W0002`… |
-| `parameters_requested` | The line given by user parameter |
-| `parameters_used` | The complete parameter actually fed to the backend (reference base + combined coverage) |
-| `parameters_resolved` | the **actual outcome** of the automatic parameter optimisation (`actual_p0/actual_p1`, SMILE's actual nSigma/thresh, the spectral noise σ) |
-| candidate spectrum | The spectrum that runs out of a certain workflow x under a certain condition, save `study/workflows/<id>/<condition>/spectrum.ft2`, **not replace** active spectrum |
-| Peak table | `peak_table_parabolic.csv` (each combination detects its own peaks and uses this spectrum's `peak_id`; see 06) |
-| Status | `success` / `success_with_warning` / `failed` |
+| Study root | A directory containing the NMRForge project (`project.json`) and `study/` products |
+| Condition | One dataset or one ordered list of acquisition segments, labelled A/B/... |
+| Dataset (`DatasetRef`) | A Bruker dataset registered to a condition and project entry (`exp_id/data_id`) |
+| Reference spectrum | The condition's reference spectrum at `study/reference/<key>/reference.ft2` |
+| Reference script | The NMRPipe script actually run to make the reference, stored as `process.com` with SHA-256 |
+| Reference peak table | The condition's `reference.list` identities (`R0001`...) and `reference_peak_table_parabolic.csv` |
+| `reference_peak_id` | An identity local to a reference peak table. Combination peak tables leave it blank; matching across spectra is downstream work. |
+| `workflow_id` | The identifier for one row of the parameter-combination table (`W0001`, `W0002`, ...) |
+| `parameters_requested` | The parameter values supplied by the user for that row |
+| `parameters_used` | The complete parameter mapping passed to the backend (reference base plus overrides) |
+| `parameters_resolved` | Values resolved during processing, including actual phase, SMILE settings, and spectrum noise |
+| Candidate spectrum | The spectrum for one workflow and condition, stored under `study/workflows/<id>/<condition>/spectrum.ft2`; it does not replace the active project spectrum |
+| Peak table | `peak_table_parabolic.csv`; `peak_id` is local to that spectrum |
+| Status | `success`, `success_with_warning`, or `failed` |
 
-## Runtime semantics (hard constraints)
+## Runtime semantics
 
-1. **Do not import Qt / Do not change GUI status** -- Can be run in the cluster, with special test protection;
-2. **Workflows process only the reference-stage FID** -- no re-import, conversion or merge occurs in
-   combination mode. A missing or damaged FID, mismatched source/conversion evidence, or a requested
-   parameter that would require conversion or merging raises an error and requires rebuilding the
-   reference with `force=True`. Single-file FIDs, 3D uniform slice directories and merged multi-segment
-   FIDs are supported. Combination mode does not delete source data, alter the reference FID or change
-   the sampling schedule; the GUI's default conversion behavior is unchanged. See the
-   [FID reuse boundary](09-limitations-and-roadmap.md#99-fid-reuse-boundary);
-3. ** phase lock reference value ** -- direct dimension skips phase search, indirect dimension follows reference optimisation phase; artificial deviation.
-   Use `phase_delta.<axis>.p0|p1` (relative reference) or `phase.<axis>.p0|p1` (absolute value);
-4. ** candidate spectrum does not replace the active spectrum** -- only write `study/workflows/`, the project status is not affected;
-5. **Resume running from breakpoint** -- Write `run.json` if each workflow x condition is successful, and skip it when re-running;
-6. **No interruption if single condition fails** -- Status `failed` + Reason Place order, continue with the next combination;
-7. **The two conditions are the same parameter ** -- The same workflow uses the same copy `parameters_requested` for A/B.
-   Each condition has its own independently selected reference peaks and output peak table;
-   peak IDs do not establish cross-condition correspondence.
+1. The API does not import Qt or change GUI state.
+2. Combination workflows use the FID created during reference construction. They do not re-import,
+   reconvert, or merge data. Missing or damaged FIDs, inconsistent input/conversion evidence, or a
+   requested change that requires reconversion raises an error; rebuild the reference with
+   `force=True`. Single-file, 3D uniform slice-directory, and merged multi-segment FID inputs are
+   supported. See the [FID reuse boundary](09-limitations-and-roadmap.md#99-frozen-fid-reuse).
+3. The reference locks the phase baseline. Direct-dimension phase search is skipped and indirect
+   dimensions use the reference phase. Use `phase_delta.<axis>.p0|p1` for offsets from the reference
+   or `phase.<axis>.p0|p1` for absolute values.
+4. Candidate spectra are written under `study/workflows/`; they do not replace the active spectrum
+   or change the desktop project's active state.
+5. A successful workflow/condition writes `run.json`; matching successful runs are skipped on
+   resume.
+6. A failed condition is recorded as `failed`, and processing continues with the next combination
+   unless the caller requests stop-on-error behavior.
+7. All conditions in one workflow use the same `parameters_requested` row and produce their own
+   peak tables. This does not assign shared peak identities or establish cross-spectrum matches.

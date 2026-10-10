@@ -1,9 +1,12 @@
 # nmrforge_api/
 
-The API v1.1 scripting surface builds independent reference spectra and peak tables, then
+The API v1.1.1 scripting surface builds independent reference spectra and peak tables, then
 generates candidate spectra and tables from user-specified parameter combinations for downstream
 analysis. It does not match peaks across spectra or compute relationships between tables.
 It can be imported without pulling in Qt or touching GUI state.
+
+API v1.1.1 defines its parameters and 38-column table contract. The API is versioned separately
+from the software.
 
 Import defaults to a single directory. Explicit `segmented=True` accepts the complete ordered
 list of at least two original Bruker data directories as one condition; multiple conditions use

@@ -2,7 +2,7 @@
 
 ### nmrForge 会取代 NMRPipe 吗?
 
-不会,而且设计上就假定永远不会。nmrForge 决定**该跑什么**、并记录**为什么**,
+不会。nmrForge 决定**该跑什么**、并记录**为什么**,
 然后驱动 NMRPipe 去执行。你需要一套 NMRPipe 安装。
 
 ### 用 nmrForge 必须装 Python 吗?
@@ -12,12 +12,12 @@
 ### 能在 Windows 或 macOS 上跑吗?
 
 Linux 是目标运行平台，Windows 仅作为编辑环境；macOS 未验证。
-当前版本为 1.0.5，API v1.1.1；本补丁不改变 API 参数或 38 列峰表契约。1.0.5 发行提供源码与一份 Linux AppImage，具体产物可用性和验证状态以[发布页](https://github.com/RociferX/nmrforge/releases)为准；1.0.2 保留为历史版本。
+当前软件版本为 1.0.5，公开 API 版本为 v1.1.1。Linux AppImage 与源码可从 [1.0.5 Release](https://github.com/RociferX/nmrforge/releases/tag/v1.0.5) 获取；API 参数和 38 列峰表契约见 [Python API](python-api.md)。
 
 ### nmrForge 会把我的数据发到什么地方吗?
 
 不会。没有遥测、没有上传、不需要账号。处理全在本地,应用自身不发起网络请求。
-开发或日后的打包可能会用网络安装依赖或获取 AppImage 运行时。
+源码安装需要网络获取依赖；AppImage 自带运行时。
 
 ### 它会改我的原始数据吗?
 
@@ -56,37 +56,32 @@ SMILE 扫描与「按名次重跑」控件只对 2D NUS 开放。
 排在设置之前(所以 `NMRFORGE_LANG=zh ./NMRForge.AppImage` 这类临时钉死不会被陈旧设置压掉),
 而 `LANG=en_US.UTF-8` 只是系统区域,**不会**盖掉你在设置里选的中文。
 
-### HSQC CSP 分析功能去哪了?
+### nmrForge 是否包含 HSQC CSP 分析?
 
-该功能已于 2026 年 9 月按决定移除,移除过程(包括如何从 git 历史里找回代码)记录在
-维护者私有仓库里的 CHANGELOG 条目。
-下游的 CSP 分析预期由一个独立项目完成,消费 `nmrforge_api` 的产物。
+当前不提供 HSQC CSP 分析；`nmrforge_api` 可供下游分析代码使用。
 
 ### 版本号是怎么管的?
 
-`core/__init__.py` 定义 `__version__`,这是它存在的唯一位置。`pyproject.toml` 动态读取它,
-AppImage 构建脚本读取它,运行记录也存它 —— 因此应用里的版本、包的版本与溯源记录里的版本
-不会各说各话。
+`core/__init__.py` 定义软件 `__version__`。`pyproject.toml` 和AppImage构建读取它，运行记录也会保存它。
+脚本API版本由 `nmrforge_api.API_VERSION` 单独管理。
 
 ### 怎么引用 nmrForge?
 
-引用元数据见 [CITATION.cff](../../CITATION.cff):作者李宣锋(Xuanfeng Li),单位中国科学技术大学
-(University of Science and Technology of China)。1.0.0 起每个发布版本都有 DOI —— 版本 DOI
-[10.5281/zenodo.22909416](https://doi.org/10.5281/zenodo.22909416),全部版本用概念 DOI
-[10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415);不需要区分版本时引用仓库地址即可。
+引用元数据见 [CITATION.cff](../../CITATION.cff)：作者李宣锋(Xuanfeng Li)，单位中国科学技术大学
+(University of Science and Technology of China)。概念DOI为
+[10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415)。引用时附上所用软件版本；
+需要版本专属DOI时，从对应发布的归档记录获取。
 如果你发表了结果,请同时引用 NMRPipe 与 SMILE —— 见 [THIRD_PARTY.md](../../THIRD_PARTY.md)。
 
 ### 能商用吗?
 
 可以:本项目自己的源码是 Apache-2.0,正文见根目录 [LICENSE](../../LICENSE),版权行与 SPDX 标识在
 [NOTICE](../../NOTICE)。打包产物里捆绑的 Qt/PySide6 单独按 LGPL-3.0 授权,义务落在那些库上,不限制你
-对本项目源码的使用(源码安装由你自己拉取 Qt,不触发 LGPL 义务)。许可选择与「源码宽松、产物里
-捆绑库 LGPL」的分离理由见 [LICENSE_OPTIONS.md](../../LICENSE_OPTIONS.md),第三方组件的许可见
+对本项目源码的使用。源码及打包依赖的许可说明见 [LICENSE_OPTIONS.md](../../LICENSE_OPTIONS.md),第三方组件的许可见
 [THIRD_PARTY.md](../../THIRD_PARTY.md)。
 
 ### 怎么确认一个已发表的结果能从 nmrForge 复现?
 
-每次运行都记录了解析后的参数、用到的脚本、软件版本、外部工具版本与告警,
-生成的脚本与谱图也都保留。这是**机制**,并不等于宣称历史上每一次运行都被完美记录过。
+运行记录包含解析后的参数、所用脚本、软件和外部工具版本及告警；生成的脚本和谱图也会保留。
 见 [processing-model.md](processing-model.md) 与
 [external-api/06-outputs-and-records.md](external-api/06-outputs-and-records.md)。

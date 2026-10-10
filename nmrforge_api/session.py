@@ -51,7 +51,7 @@ from ui_support.i18n import tr
 
 STUDY_DIRNAME = "study"
 STUDY_STATE_FILENAME = "study.json"
-# Public API contract version (single definition point, 2026-10-03): v1.1 fixes the
+# Public API version (single definition point, 2026-10-10): v1.1.1 retains the
 # independent-reference model, the 38-column peak table, and the complete cache-input
 # contract. v1.0/0.2 callers should follow the migration notes for columns, audits, and
 # reference caches. This is the **contract** version, not the package version (see

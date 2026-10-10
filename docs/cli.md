@@ -7,11 +7,10 @@ implementation as the desktop application. It does not require Qt:
 python -m nmrforge_api --help
 ```
 
-The current CLI version is API v1.1.1 / software 1.0.5. This patch changes the API version
-identifier only; parameters and the 38-column peak-table contract are unchanged. The 1.0.5 release
-provides the source and one Linux AppImage; see the [release page](https://github.com/RociferX/nmrforge/releases)
-for artifact availability and validation status. Version 1.0.2 is retained as a historical release.
-Install from a source checkout containing this version. See
+The current CLI uses API v1.1.1 / software 1.0.5. API parameters and the 38-column peak-table
+contract are documented in the [Python API](python-api.md). Download the Linux AppImage or source
+from the [1.0.5 Release](https://github.com/RociferX/nmrforge/releases/tag/v1.0.5).
+Install from a source checkout containing API v1.1.1. See
 [Installation](installation.md). Processing requires separately installed NMRPipe; NUS
 reconstruction also requires SMILE.
 
@@ -80,7 +79,7 @@ are never silently written into a separate read-only reference root.
 
 Supply exactly one of `--grid` and `--combos`. Combination order follows the input table/grid
 order. Peak localization supports only the three-point parabolic method; Gaussian and mixed-method
-flags were removed. Use `--localize-peaks` to target peaks without changing detection, row count,
+flags are unsupported. Use `--localize-peaks` to target peaks without changing detection, row count,
 or per-spectrum `peak_id` numbering. A target CSV may include `condition` to provide condition-
 specific peak IDs.
 

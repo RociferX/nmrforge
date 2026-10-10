@@ -3,10 +3,8 @@
 Entry:`python -m nmrforge_api <Order> --study <Research roots>`.
 Public parameter:`--study`(required), `--name`(new research name), `--condition <A|B|…>`.
 (Default = all conditions).
-This source release is software 1.0.5 with API v1.1.1. API parameters and the 38-column peak-table
-contract are unchanged. The 1.0.5 release provides the source and one Linux AppImage; see the
-[release page](https://github.com/RociferX/nmrforge/releases) for artifact availability and
-validation status. Version 1.0.2 is retained as a historical release.
+The CLI uses API **1.1.1** and software **1.0.5**, with the 38-column peak-table contract.
+Install the source or wheel to use this entry point; see [installation](../installation.md).
 
 ## Init -- Create the study and import the dataset
 
@@ -62,9 +60,7 @@ rebuild). In multi-condition runs all references are checked before the engine s
 `--rebuild-peak-tables` recomputes only the parabolic reference peak table from the existing frozen
 spectrum and `reference.list` (the spectrum and the peak identities are untouched and their
 SHA-256 values are re-checked), and it **refreshes `software_version` / `software_commit` in the
-record plus the study-level aggregate `records/reference.json`** (fixed 2026-09-19: an upgraded
-study root used to keep claiming the old version with an empty commit, and the aggregate kept a
-stale peak-table SHA).
+record plus the study-level aggregate `records/reference.json`**.
 
 ## Peaks -- reference peak table (identity + parabolic localisation table)
 
@@ -131,7 +127,7 @@ python -m nmrforge_api report --study ~/studies/s1
 
 Reassemble `study/records/`(long list/manifest/workflows/runs/measurement).
 Does not call the backend. It also **refreshes the `records/reference.json` aggregate** (version,
-commit and peak-table SHA-256 taken from disk, 2026-09-19). Outputs the workflow count and status
+commit and peak-table SHA-256 taken from disk). Outputs the workflow count and status
 count.
 
 ## Status -- current situation

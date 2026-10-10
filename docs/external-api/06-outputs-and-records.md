@@ -55,13 +55,10 @@ authentication. Legacy references without this evidence require an explicit `for
 calling reference mode again with its default cache policy is not enough. Resume fingerprints include
 the frozen FID evidence and strict input policy, so older permissive runs are not silently reused.
 
-The v1.1.1 unified table has currently **38 columns**, in the order below. Older 29-, 27-, and
-36-column tables are historical formats, not a current compatibility promise; rebuild old reference
-peak tables from the frozen reference spectrum before reuse.
-
-The reference and combination modes use three-point parabolic localisation and write one peak table.
-Rerunning without resume replaces the corresponding run products. The table schema is declared by
-`nmrforge_api.peak_tables.PEAK_TABLE_COLUMNS`.
+The unified API v1.1.1 table has currently **38 columns**, in the order below. Reference peak tables must
+match `nmrforge_api.peak_tables.PEAK_TABLE_COLUMNS`. Both modes use three-point parabolic refinement
+and write one table. `rebuild_reference_peak_tables()` can rebuild tables from the frozen spectrum;
+a missing or invalid input fingerprint requires explicit reference rebuilding with `force=True`.
 
 ```text
 workflow_id, condition, dataset,
@@ -84,8 +81,6 @@ intensity_ratio_vs_picked, shift_vs_picked_H, shift_vs_picked_N
   NaN and `failure_reason` is empty. An attempted failure (e.g. `no_local_peak_above_threshold`)
   has its own `failure_reason`; it is not silently treated as fallback.
 - `fallback` / `fallback_reason` remain distinct audit fields for actual fallback behavior.
-  Gaussian fitting and `fit_rmse` are removed; no compatibility promise is made for the old
-  frozen API v0.2 table.
 - `cell_low_H`, `cell_high_H`, `cell_low_N`, `cell_high_N`, and `cell_edge` are always
   NaN. Joint multidimensional Voronoi ownership cannot be represented as independent per-axis
   bounds. Physical search bounds are recorded in
@@ -94,7 +89,7 @@ intensity_ratio_vs_picked, shift_vs_picked_H, shift_vs_picked_N
   `candidate_ownership_conflict` audit flag.
 - `intensity_ratio_vs_picked` (float): **|measured intensity| / |the identity
   table's Height|** (both sides in magnitude - a negative-peak `.list` carries a
-  negative Height; fixed 2026-09-19); NaN when the Height is missing or zero. About 1
+  negative Height); NaN when the Height is missing or zero. About 1
   means the record
   stopped on its own peak top, clearly above 1 means a shoulder of a stronger peak;
 - `shift_vs_picked_H` / `shift_vs_picked_N` (float, ppm, sign = measured - picked, same
@@ -105,7 +100,7 @@ intensity_ratio_vs_picked, shift_vs_picked_H, shift_vs_picked_N
   cannot be represented by independent axis bounds. Physical search bounds are stored separately
   in `reference.peak_localization.search_windows.search_bounds_by_axis`; candidate ownership
   conflicts use `candidate_ownership_conflict`. Intensity ratio and shift deltas remain when measured.
-- `duplicate_localization` (bool, P2-5, 2026-09-19): true when the row shares its
+- `duplicate_localization` (bool): true when the row shares its
   coordinates with another row of the same table (ppm to 1e-6); every row of a
   duplicated group is flagged and no row is dropped or removed from the peak set.
   Both reference and combination tables carry the marker; it does not imply shared Voronoi cells.
@@ -130,9 +125,9 @@ intensity_ratio_vs_picked, shift_vs_picked_H, shift_vs_picked_N
   `fallback=false`). A targeted refinement failure is recorded in `failure_reason`. The resolved targets are recorded
   in `run.json.parameters_resolved.detection.localization_targets`; the method summary is under
   `peak_localization.parabolic`;
-- **Condition granularity (2026-09-20)**: when the target list is written per condition (a CSV `condition` column or a condition mapping), the same `localization_targets` record keeps `path`/`sha256` for the **whole source** (whole-file hash) while `peak_ids`/`n_targets`/`n_skipped` describe **this run (this condition)**, adds `condition` (this run's condition) and `on_missing` (the missing-row policy), and gives per-condition detail in `by_condition` `{peak_ids, n_targets, line_ranges, path + sha256, from}`; without a `condition` column (shared by the batch) `by_condition` is `"all"`, and `peak_localization.<method>` counts stay **per run**;
+- **Condition granularity**: when the target list is written per condition (a CSV `condition` column or a condition mapping), the same `localization_targets` record keeps `path`/`sha256` for the **whole source** (whole-file hash) while `peak_ids`/`n_targets`/`n_skipped` describe **this run (this condition)**, adds `condition` (this run's condition) and `on_missing` (the missing-row policy), and gives per-condition detail in `by_condition` `{peak_ids, n_targets, line_ranges, path + sha256, from}`; without a `condition` column (shared by the batch) `by_condition` is `"all"`, and `peak_localization.<method>` counts stay **per run**;
 - `peak_id` is the peak number of **this spectrum** (the detection order of the spectrum of this combination);
-- `reference_peak_id`(`R0001`…) belongs to the **reference peak table** only; since 2026-09-14 the
+- `reference_peak_id`(`R0001`…) belongs to the **reference peak table** only; the
   combination mode picks peaks independently, so the combined peak table leaves
   `reference_peak_id`/`assignment` **blank** (`detected` is always true - the table holds only the
   peaks detected in this combination); matching the combined peaks back to reference peak
@@ -150,7 +145,7 @@ intensity_ratio_vs_picked, shift_vs_picked_H, shift_vs_picked_N
 - `condition`/`dataset` lets downstream analysis group the A/B tables by condition;
 - Direct dimension range: `reference.json.params.ext_lo/ext_hi` (reference layer) and
   `reference.json.direct_range` = `{ext_lo, ext_hi, unit, source}` with `source` in
-  `{explicit, params, default}` (P1-4, 2026-09-19; `default` means the caller gave no
+  `{explicit, params, default}` (`default` means the caller gave no
   range and the backend/config default was used, with a `warning` attached); each
   `run.json.parameters_resolved.direct_range` (`ext_lo`/`ext_hi` + `source`:
   `reference_or_base` / `combo`). In combination mode a `--direct-range` that disagrees
@@ -210,7 +205,7 @@ intensity_ratio_vs_picked, shift_vs_picked_H, shift_vs_picked_N
 | `script_diff` | Reference script vs this workflow script difference (`n_changed` + first 20 lines diff): used for auditing "only change the rows specified in the combination table" |
 | `log_path` | Full log path |
 | `versions` | nmrforge / python / dependencies / NMRPipe / SMILE (after real machine registration) |
-| `behavior_digest` / `token_digest` | **Behaviour fingerprints** (2026-09-19): the first hashes the content of `core/`+`backend/`+`workflow/`+`nmrforge_api/` plus the shipped data, the second normalises through the AST with comments/docstrings stripped (comparable across editions) |
+| `behavior_digest` / `token_digest` | **Behaviour fingerprints**: the first hashes the content of `core/`+`backend/`+`workflow/`+`nmrforge_api/` plus the shipped data, the second normalises through the AST with comments/docstrings stripped (comparable across editions) |
 | `compat_level` / `compat_affected` / `compat_verified` | which behaviour produced this run: `same`/`additive`/`behavior_changed`/`contract_changed` (plus `unverified`); `compat_affected` names the downstream steps a behaviour change touches; `compat_verified` false means the working tree disagrees with the declaration (do not reuse) |
 | `status` / `warnings` / `message` | Three-value status + warning code and count |
 
@@ -220,32 +215,27 @@ intensity_ratio_vs_picked, shift_vs_picked_H, shift_vs_picked_N
 | --- | --- |
 | `success` | Processing and the parabolic peak table completed without warning |
 | `success_with_warning` | Completed but needing attention (see below, the results are available but need to be reviewed) |
-| `failed` | deal with/Measurement failed; reason for writing `message` and log, not silent |
+| `failed` | Processing or measurement failed; the reason is recorded in `message` and the log. |
 
 | Warning code | trigger |
 | --- | --- |
 | `peak_count_zero` | This combination did not detect a single peak under the locking threshold (Check threshold/data) |
 | `processing_script_not_found` | The complete processing script of this workflow was not found (`process.com` is missing in the running directory); the processing results and peak tables are still valid, but the traceability of the script is incomplete. You need to check the back-end placement location |
 | `no_spectrum_change` | This combination does not change the spectrum under **this condition** (identical to the reference spectrum bit by bit): indicating that these parameters are ignored on the data (window type/gate mismatch, etc.) or have no effect; the formal plan should not regard this axis as a real disturbance |
-
-> Starting from 2026-09-14, the combined mode selects peaks independently (does not track the reference peak table), so it no longer outputs
-> `peak_not_detected` / `peak_window_edge` / `peak_out_of_range` /
-> `window_points_fallback`. Requests for removed localisation methods raise an explicit error.
+| `boundary_hit` | A parabolic vertex reaches the ±0.5-point refinement boundary; review the local spectrum. |
+| `duplicate_localization` | Rows in one table share the complete logical-axis coordinates to 1e-6 ppm. |
+| `direct_range_override` | An explicitly permitted direct range differs from the frozen reference range. |
 
 ## 6.5 `records/` and borders
 
-`manifest.json` (combination mode) summary: data conditions, condition-by-condition reference (script / spectrum / parabolic peak-table hashes).
-Explicitly specified reference writing (`reference_spec`) and `mode="combination"`, plan and grid.
-Hash, peak identity scheme (`peak_identity.matching`: matching of combined peaks to reference peaks **outside**).
-Workflow state count, software/rely/External tool version, and **boundary declaration**.
-(`manifest["boundary"]`: The software only performs processing and archiving; Statistical inference and scientific conclusions are yours.
-Analysis program is completed).
+`manifest.json` records datasets and conditions, each reference’s script/spectrum/peak-table hashes,
+`reference_spec`, `mode="combination"`, the plan/grid hash, workflow status counts, and software/tool
+versions. `peak_identity.matching` records that cross-spectrum matching belongs to downstream
+analysis. `manifest["boundary"]` describes the processing and analysis interface.
 
-The software **does not produce** any statistics or significance product: the old
-`uncertainty.csv`/`uncertainty_summary.json` have been removed from `records/`. The σ/Δδ summary
-code is kept as a **test/detection aid** (`nmrforge_api.uncertainty`; the processing chain does not
-call it), and downstream analysis reads `records/peak_table_parabolic.csv` when needed, computing
-the summary itself or reusing the helper. See [Methods and metrics](07-methods-and-metrics.md).
+Records contain processing and peak-table products. Cross-spectrum peak matching and statistical
+inference belong to downstream analysis; `nmrforge_api.uncertainty` is separate from the processing
+chain. See the [shared API contract](../API_CONTRACT.md).
 
 ## 6.6 Reference input fingerprint
 
@@ -260,8 +250,7 @@ direct-dimension range. Equivalent dotted and nested parameter forms normalize t
 Reference reuse requires the complete fingerprint to match. Any mismatch, or a missing or invalid
 legacy fingerprint, requires an explicit `force=True` / CLI `--force` rebuild; references are never
 rebuilt automatically. Multi-condition requests preflight every condition before any backend
-processing starts. Legacy 36-column reference peak tables no longer satisfy the current contract and
-can be rebuilt from the frozen reference spectrum with `rebuild_reference_peak_tables()`; a
+processing starts. Reference tables that do not match the schema can be rebuilt from the frozen reference spectrum with `rebuild_reference_peak_tables()`; a
 reference missing its input fingerprint must itself be force-rebuilt.
 
 ## 6.7 Reference processing audit, conversion provenance and timing

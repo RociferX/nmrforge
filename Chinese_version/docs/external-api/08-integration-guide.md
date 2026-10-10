@@ -10,9 +10,9 @@
 | 每个参数组合的峰位 | `study/records/peak_table_parabolic.csv`(唯一的组合长表),或逐 workflow 的 `study/workflows/<id>/<条件>/peak_table_parabolic.csv` |
 | 峰身份 | 参考峰表:`reference_peak_id`(R0001…);**组合峰表的匹配在你这侧**(组合模式独立选峰,表里 `reference_peak_id`/`assignment` 留空；API 不建立跨谱对应) |
 | 条件 A/B | `condition` / `dataset` 列(或按目录/条件分组) |
-| 参数与自动参数实际值 | `workflows/<id>/workflow.json` 与 `runs.json` 的 `parameters_requested`/`parameters_used`/`parameters_resolved` |
+| 参数与自动参数实际值 | `study/workflows/<id>/workflow.json` 与 `study/records/runs.json` 的 `parameters_requested`/`parameters_used`/`parameters_resolved` |
 | 峰的可用性 | `SNR`、`fit_success`、`boundary_hit`、`fallback`(组合模式峰表只含检出的峰;参考峰表另带 `detected=false` 的保留行) |
-| 参考基准 | `records/manifest.json` 的 `references`(脚本/谱/参考峰表哈希)与 `peak_identity` |
+| 参考基准 | `study/records/manifest.json` 的 `references`(脚本/谱/参考峰表哈希)与 `peak_identity` |
 | 复算与引用 | 脚本/谱 SHA-256、`grid_sha256`、`versions`、完整 `log.txt` |
 
 ## 8.2 最小读取示例(只读,不计算)
@@ -47,11 +47,10 @@ print(len(values), values[:3])
    仅凭 H/N 坐标匹配时须检查峰拥挤、重叠和歧义，不能视为 API 已自动追踪峰;
 2. **定位口径**:成功精修时 `localization_method=parabolic`；未检出或 targeted 跳过为
    `none`，结合 `detected`、`localization_requested`、`failure_reason` 和 QC 判断。
-   正负峰采用对称 QC；FWHM 为等效曲率线宽，不是多峰线形拟合结果。若沿用旧研究根里残留的
-   `gaussian` 峰表,请当作历史产物另行标注,不要和新表混用;
+   正负峰采用对称 QC；FWHM 为等效曲率线宽，不是多峰线形拟合结果;
 3. **权重/缺失**:某组合没匹配到某参考峰时**不要静默删除**——在分析里明确标注
    (缺失机制可能与被扫参数相关;参考峰表里的 `detected=false` 行同样保留);
-4. **可复算**:分析产物里附上 `records/manifest.json` 里的脚本/谱哈希与
+4. **可复算**:分析产物里附上 `study/records/manifest.json` 里的脚本/谱哈希与
    `grid_sha256`,以及所用软件的 `versions`;
 5. **不要回写研究根**:分析结果请落在你自己的目录(软件产物是执行记录,
    分析不应改写它们)。
@@ -64,4 +63,4 @@ print(len(values), values[:3])
 边界见 [09-limitations-and-roadmap.md](09-limitations-and-roadmap.md) §9.8–9.9；完整逻辑轴坐标
 仍须按 F1/F2/F3 身份使用，不能把同核轴或 H/N 别名混为一谈。每片独立建立/校验参考，
 不要并发写同一研究根；组合中不能以重转 FID 兜底。
-要点:分片时把 `records/manifest.json` 一起归档,便于核对是否同一参考。
+要点:分片时把 `study/records/manifest.json` 一起归档,便于核对是否同一参考。

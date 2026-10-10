@@ -95,7 +95,7 @@ max_runs: 128
 | --- | --- |
 | `zero_fill` | 填零倍数(只改点距,不改物理峰位) |
 | `window.<轴>.type` + `off/end/pow/c/lb/g1/g2` | 窗函数:**必须成对给**——`type=none/off` 时该轴不插窗行,子参数会被忽略(API 直接报错);`sine_bell`(`off/end/pow/c`)、`sine_bell_squared`、`gaussian`(`g1/g2`)、`exp`(`lb`) |
-| `baseline` | 基线校正(`{enabled, mode: auto|order, order, axes}`):`mode=order` 渲染 `POLY -ord N -auto`(NMRPipe `-auto` 自动挑基线点,2026-09-16 起真实生效);`mode=auto` 渲染 `POLY -auto`;`mode≠order` 时 `order` 被忽略(API 提示) |
+| `baseline` | 基线校正(`{enabled, mode: auto\|order, order, axes}`):`mode=order` 渲染 `POLY -ord N -auto`;`mode=auto` 渲染 `POLY -auto`;`mode≠order` 时 `order` 被忽略并写入提示 |
 | `reference_optimize` | **仅测试/复现/审计**用的参考优化开关(见 §5.10);真实实验不要使用 |
 | `ext_lo`/`ext_hi`/`extract` | 提取窗口(确定性参数,一般不必进网格) |
 | `points_per_line` | 目标点距/线宽点数(确定性参数) |
@@ -144,69 +144,37 @@ run_parameter_study(..., peaks="library.list")   # 或 peak_id,H_ppm,N_ppm CSV
 - 一切影响结果的参数都必须可追溯:`parameters_requested` →
   `parameters_used` → `parameters_resolved`(自动参数实际结果)。
 
-## 5.9 按维指定参数(组合表)
+## 5.7 选峰阈值(生成参考时可选,随后锁定)
 
-组合表/网格键支持**点号路径**,因此两个维度(以及 3D 的第三维)可以分别指定;
-`parameters_requested` 保留用户原样的键,`parameters_used` 是合并后的逐轴结构。
-
-| 处理环节 | 逐轴写法(示例) | 语义 |
-| --- | --- | --- |
-| 窗函数 | `window.F1.off`、`window.F2.off`、`window.F1.type` | 每个逻辑维一套(类型/端值) |
-| 基线 | `baseline.F1.enabled`、`baseline.F2.mode`、`baseline.F1.order` | 每维开关/模式/阶数 |
-| 填零 | `zero_fill.F1=2`、`zero_fill.F1.size=512`、`zero_fill.F1.mode=none` | 裸标量 = **k×TD**(与全局 `zero_fill=k` 同义);显式 SI 用 `.size` |
-| 线宽(Hz) | `linewidth_hz.F1=12`、`linewidth_hz.F2=9` | 每维线宽:影响自动填零目标与物理宽度换算 |
-| 目标数字分辨率 | `points_per_line.F1=4`、`points_per_line.F2=2` | 每维“每线宽点数”(自动 SI 的目标) |
-| 相位 | `phase.F1.p0`、`phase_delta.F2.p0` | 逐轴绝对相位 / 相对参考的偏差 |
-| FT-neg 候选 | `sampling.ft_neg`, `sampling.ft_neg_f1/f2`, `sampling.flip_f1/f2` | 显式布尔值；全局 ft_neg 优先，更改不自动重新优化相位 |
-| 锁定采样设置 | `sampling.auto_phase`, `sampling.ft_alt` | 写入组合会报错；须在重建参考时修改 |
-
-```csv
-window.F1.off,window.F2.off,zero_fill.F1,baseline.F2.enabled,points_per_line.F1
-0.35,0.45,2,false,4
-0.45,0.45,4,true,2
-```
-
-- 峰定位配置(config `peaks.localization`,2026-09-26 起)使用
-  `method: parabolic`(三点抛物线顶点,与 `peak_detection` 同一实现);
-  2026-09-26(用户需求⑦)删掉了二维高斯拟合,原有的 `gaussian_roi_*` /
-  `gaussian_max_nfev` 预算键一并删除——没有「拟合迭代预算」这回事,
-  抛物线是确定性闭式解;
-- 直接维范围 `ext_lo`/`ext_hi` 只作用于**直接维**;3D 数据请用 `window.F3.*` 等
-  逐轴键(若该轴是直接维);
-- 参考层的逐轴参数(参考谱定义)用参考模式的 `params=`/`direct_range=` 指定,
-  组合表里的键只覆盖**该组合**;
-- 未知轴的键(如 `window.F9.off`)不会报错,但也不会生效:请对照上表核对轴名;
-- **窗型与窗参数必须成对**:该轴有效 `type=none/off` 时写 `window.<轴>.off/end/…`
-  会被 `SweepError` 拒绝(真机实例:参考窗型选到 none 后,`window.F1.off`
-  全程没有渲染出任何窗函数行);基底没有 `type` 时给提示(会按默认 sine_bell 渲染)。
-
-## 5.10 参考优化开关(**仅测试/复现/审计;真实实验不可用**)
-
-> ⚠️ **真实实验请保持默认(参考自动优化)**。下面这些开关会关掉/限定参考阶段的
-> 自动优化,使参考不再“自动优化生成”;一旦使用,必须在处理记录与论文方法里
-> 明确写出“参考未做自动优化/优化被限定”,否则参考的合法性不成立。
+参考峰表的选峰阈值 = **噪声 σ 倍数**(`sigma_multiplier`,内部同时作为
+`min_snr` 传给检测)。缺省 35σ(既有默认,行为不变);**在生成参考时可以
+由外部指定**:
 
 ```python
-run_reference_study(
-    root, dataset,
-    params={
-        "reference_optimize": {
-            "baseline": "off",            # off / auto / {"grid": [["off",0],["auto",1],["order",2],["order",3]]}
-            "window": "off",              # off / auto / {"direct_candidates": [...], "indirect_candidates": [...]}
-        },
-        "baseline": {"F1": {"enabled": False}},   # 关掉优化时,这份配置被终跑直接使用
-        "window": {"F1": {"type": "sine_bell", "off": 0.45, "end": 0.98}},
-    },
-)
+pick_reference_peaks(session, sigma_multiplier=20)          # 生成参考峰表
+ensure_reference_peaks(session, reference, sigma_multiplier=20)
+run_parameter_study(root, datasets=..., combos=..., sigma_multiplier=20)
 ```
 
-- `baseline="off"` / `window="off"`:跳过对应优化器,参考终跑直接用你给的
-  `baseline` / `window` 配置;`{"grid": …}` / `{…_candidates: …}` 只限定候选集合,
-  仍由评分挑最优;
-- 开关原样落档在 `reference.json.params.reference_optimize`(可审计),**不会**
-  进入组合基底(sweep_params);
-- 组合模式(参数扰动阶段)本来就逐组合显式控制窗/基线,不需要这个开关。
+```bash
+python -m nmrforge_api peaks --study ~/studies/s1 --sigma 20
+```
 
+- **阈值是参考定义的一部分**:参考峰表一旦冻结,后续所有 workflow/参数扰动
+  只能沿用参考的阈值;此时再给**不同**阈值会直接报 `ReferenceError`(CLI
+  退出码 2),不会悄悄重选峰;
+- 与参考一致(或与参考默认 35σ 一致)的阈值可以显式给 → 复用,不重复选峰;
+- 想换阈值属于**重建参考**:显式 `force=True`(CLI `--force`)重跑参考;
+- 实际用量落档:`reference.json.peak_params.sigma_multiplier`(生成参考时
+  选定的值)、`previous_sigma_multiplier`(force 重建时的上一版)、
+  `detection.sigma_multiplier` 与 `detection.threshold_source`
+  (`user` / `default(35sigma)`);每条 workflow 记录另记
+  `parameters_resolved.detection`(`source="reference(locked)"`、实际 σ、边距、
+  噪声 σ、定位方式 `parabolic`;`independent=true`、`reference_matching="external"`);
+- 阈值过高导致选不出峰 → 明确报错(不静默产出空峰表);
+- 阈值写进 workflow 参数组合表 → 直接报错(`SweepError`),提示「要改阈值请重建
+  参考」;
+- 组合模式**没有** `max_peaks`:该组合在锁定阈值下检出多少峰就是多少峰。
 
 ## 5.8 直接维范围(可由外部指定)
 
@@ -283,7 +251,7 @@ python -m nmrforge_api reference --study ~/studies/s3 \
   条件仍先使用自己的参考有效参数,逐组合还可用 `ext_lo`/`ext_hi` 最后覆盖
   (`plan.notes` 会说明口径);覆盖值与参考冻结范围**不一致时默认报错**——必须显式
   `allow_ext_override=True`(CLI `--allow-ext-override`)才放行,放行后每条 run 留
-  `direct_range_override` 警告码(2026-09-19 P1-4);
+  `direct_range_override` 警告码;
 - 留档:参考记录 `params.ext_lo/ext_hi` 与 `direct_range`(`ext_lo`/`ext_hi`/`unit`/
   `source`,`source` ∈ `explicit|params|default`;`default` = 没给范围、用后端/配置
   缺省值,附 `warning`);每条 `run.json` 的
@@ -294,39 +262,69 @@ python -m nmrforge_api reference --study ~/studies/s3 \
   解析成同一份范围并统一留档。
 
 
-## 5.7 选峰阈值(生成参考时可选,随后锁定)
+## 5.9 按维指定参数(组合表)
 
-参考峰表的选峰阈值 = **噪声 σ 倍数**(`sigma_multiplier`,内部同时作为
-`min_snr` 传给检测)。缺省 35σ(既有默认,行为不变);**在生成参考时可以
-由外部指定**:
+组合表/网格键支持**点号路径**,因此两个维度(以及 3D 的第三维)可以分别指定;
+`parameters_requested` 保留用户原样的键,`parameters_used` 是合并后的逐轴结构。
+
+| 处理环节 | 逐轴写法(示例) | 语义 |
+| --- | --- | --- |
+| 窗函数 | `window.F1.off`、`window.F2.off`、`window.F1.type` | 每个逻辑维一套(类型/端值) |
+| 基线 | `baseline.F1.enabled`、`baseline.F2.mode`、`baseline.F1.order` | 每维开关/模式/阶数 |
+| 填零 | `zero_fill.F1=2`、`zero_fill.F1.size=512`、`zero_fill.F1.mode=none` | 裸标量 = **k×TD**(与全局 `zero_fill=k` 同义);显式 SI 用 `.size` |
+| 线宽(Hz) | `linewidth_hz.F1=12`、`linewidth_hz.F2=9` | 每维线宽:影响自动填零目标与物理宽度换算 |
+| 目标数字分辨率 | `points_per_line.F1=4`、`points_per_line.F2=2` | 每维“每线宽点数”(自动 SI 的目标) |
+| 相位 | `phase.F1.p0`、`phase_delta.F2.p0` | 逐轴绝对相位 / 相对参考的偏差 |
+| FT-neg 候选 | `sampling.ft_neg`, `sampling.ft_neg_f1/f2`, `sampling.flip_f1/f2` | 显式布尔值；全局 ft_neg 优先，更改不自动重新优化相位 |
+| 锁定采样设置 | `sampling.auto_phase`, `sampling.ft_alt` | 写入组合会报错；须在重建参考时修改 |
+
+```csv
+window.F1.off,window.F2.off,zero_fill.F1,baseline.F2.enabled,points_per_line.F1
+0.35,0.45,2,false,4
+0.45,0.45,4,true,2
+```
+
+- 峰定位配置(config `peaks.localization`)使用
+  `method: parabolic`(三点抛物线顶点,与 `peak_detection` 同一实现);
+  峰位亚像素精修使用确定性的三点抛物线方法;
+- 直接维范围 `ext_lo`/`ext_hi` 只作用于**直接维**;3D 数据请用 `window.F3.*` 等
+  逐轴键(若该轴是直接维);
+- 参考层的逐轴参数(参考谱定义)用参考模式的 `params=`/`direct_range=` 指定,
+  组合表里的键只覆盖**该组合**;
+- 未知轴的键(如 `window.F9.off`)不会报错,但也不会生效:请对照上表核对轴名;
+- **窗型与窗参数必须成对**:该轴有效 `type=none/off` 时写 `window.<轴>.off/end/…`
+  会被 `SweepError` 拒绝(真机实例:参考窗型选到 none 后,`window.F1.off`
+  全程没有渲染出任何窗函数行);基底没有 `type` 时给提示(会按默认 sine_bell 渲染)。
+
+## 5.10 参考优化开关(**仅测试/复现/审计;真实实验不可用**)
+
+> ⚠️ **真实实验请保持默认(参考自动优化)**。下面这些开关会关掉/限定参考阶段的
+> 自动优化,使参考不再“自动优化生成”;一旦使用,必须在处理记录与论文方法里
+> 明确写出“参考未做自动优化/优化被限定”,否则参考的合法性不成立。
 
 ```python
-pick_reference_peaks(session, sigma_multiplier=20)          # 生成参考峰表
-ensure_reference_peaks(session, reference, sigma_multiplier=20)
-run_parameter_study(root, datasets=..., combos=..., sigma_multiplier=20)
+run_reference_study(
+    root, dataset,
+    params={
+        "reference_optimize": {
+            "baseline": "off",            # off / auto / {"grid": [["off",0],["auto",1],["order",2],["order",3]]}
+            "window": "off",              # off / auto / {"direct_candidates": [...], "indirect_candidates": [...]}
+        },
+        "baseline": {"F1": {"enabled": False}},   # 关掉优化时,这份配置被终跑直接使用
+        "window": {"F1": {"type": "sine_bell", "off": 0.45, "end": 0.98}},
+    },
+)
 ```
 
-```bash
-python -m nmrforge_api peaks --study ~/studies/s1 --sigma 20
-```
+- `baseline="off"` / `window="off"`:跳过对应优化器,参考终跑直接用你给的
+  `baseline` / `window` 配置;`{"grid": …}` / `{…_candidates: …}` 只限定候选集合,
+  仍由评分挑最优;
+- 开关原样落档在 `reference.json.params.reference_optimize`(可审计),**不会**
+  进入组合基底(sweep_params);
+- 组合模式(参数扰动阶段)本来就逐组合显式控制窗/基线,不需要这个开关。
 
-- **阈值是参考定义的一部分**:参考峰表一旦冻结,后续所有 workflow/参数扰动
-  只能沿用参考的阈值;此时再给**不同**阈值会直接报 `ReferenceError`(CLI
-  退出码 2),不会悄悄重选峰;
-- 与参考一致(或与参考默认 35σ 一致)的阈值可以显式给 → 复用,不重复选峰;
-- 想换阈值属于**重建参考**:显式 `force=True`(CLI `--force`)重跑参考;
-- 实际用量落档:`reference.json.peak_params.sigma_multiplier`(生成参考时
-  选定的值)、`previous_sigma_multiplier`(force 重建时的上一版)、
-  `detection.sigma_multiplier` 与 `detection.threshold_source`
-  (`user` / `default(35sigma)`);每条 workflow 记录另记
-  `parameters_resolved.detection`(`source="reference(locked)"`、实际 σ、边距、
-  噪声 σ、定位方式 `parabolic`;`independent=true`、`reference_matching="external"`);
-- 阈值过高导致选不出峰 → 明确报错(不静默产出空峰表);
-- 阈值写进 workflow 参数组合表 → 直接报错(`SweepError`),提示「要改阈值请重建
-  参考」;
-- 组合模式**没有** `max_peaks`:该组合在锁定阈值下检出多少峰就是多少峰。
 
-## 5.11 限定峰的定位(targeted localization,2026-09-19)
+## 5.11 限定峰的定位（targeted localization）
 
 目标列表限定哪些已检出峰进行三点抛物线亚像素精修。非目标峰保留在表中，位置停在
 检出的整数格点，`localization_method` 为 `none`，定位 QC 列留空/NaN（表示未计算，
@@ -352,9 +350,7 @@ zero_fill,localization,localization.targets
 2,parabolic,
 ```
 
-> 2026-09-26(用户需求⑦):二维高斯拟合算法整体删除,峰定位只剩三点抛物线。
-> 因此 `localization` 只接受 `parabolic`,`localization.targets` 只有上面这一种
-> 方法无关写法;逐方法键见 §5.12(已删除)。
+`localization` 当前支持 `parabolic`。目标列表与定位方法分开指定；多条件目标列表的写法见 §5.12。
 
 目标列表 CSV 至少一列 `peak_id`(可另带 `reference_peak_id` 供留档;单列文本、
 每行一个序号也接受;重复 id 去重并保留首次出现顺序)。语义:
@@ -364,8 +360,8 @@ zero_fill,localization,localization.targets
 - 未列入目标的峰**保留在表里**,位置取检出阶段的整数格点;`localization_method=none`,定位 QC 列
   (`fit_success`/`FWHM_H`/`FWHM_N`/`boundary_hit`)写 `NaN`(没计算该 QC,**不是**
   失败),`fallback` 为 false;
-- 逐峰失败照常记录(`fit_success=false` + `fallback_reason`),**不会**换候选
-  重新拟合;`n_fallback` 只统计真正做过精修的峰;
+- 逐峰失败照常记录(`fit_success=false` + `failure_reason`),**不会**换候选
+  重新拟合;`fallback`与`fallback_reason`只记录实际回退;
 - 留档:`run.json.parameters_resolved.detection.localization_targets` =
   `{scope, source, path, sha256, n_targets, peak_ids, reference_peak_ids?}`
   (风格同 `direct_range.source`);`peak_localization.parabolic` 另有
@@ -379,22 +375,7 @@ zero_fill,localization,localization.targets
   workflow × 条件一张自己的谱),不会静默忽略、也不会换峰;
 - 不给目标 = 现在的全谱行为(`scope=all`),对既有研究根与记录零影响。
 
-## 5.12 逐方法目标键(**已删除**,2026-09-26)
-
-旧版(2026-09-20)允许按方法分别限定目标峰,常用组合是「parabolic 全谱 + 只对
-指定目标峰做 gaussian」。二维高斯拟合算法整体删除后**单方法下没有「逐方法」这
-回事**,这些写法全部取消,命中即报 `SweepError`:
-
-- API 映射写法 `localize_peaks={"gaussian": "truth_peaks.csv"}`(以及 `"both"` 键);
-- 组合表键 `localization.targets.<方法>`(含 `localization.targets.all` 之外的方法名);
-- CLI `--localize-peaks-gaussian` / `--localize-peaks-parabolic`(两个选项已删除,
-  只留 `--localize-peaks`)。
-
-替代写法就是 §5.11 的方法无关形式:`localize_peaks=<CSV>` /
-`localization.targets = <CSV>`(映射里只剩 `all`/`*` 作公共默认值)。留档因此不再有
-`by_method` 明细,`scope` 也不再出现 `mixed`。
-
-## 5.13 条件粒度(按 (workflow, 条件) 限定,2026-09-20)
+## 5.12 按条件指定目标
 
 A/B 是两张不同的谱,**检出峰集不同** → 同一个组合行在两个条件下的目标峰序号不同,
 一份清单服务不了两个条件。目标 CSV 因此可以带一列 `condition`:
@@ -412,19 +393,19 @@ B,41
 - 没有该列 → 与不带条件粒度时**逐位一致**(整批共用),留档写 `by_condition: "all"`;
 - 某条件在文件里**没有任何行** → **处理前**报错(默认 `on_missing="error"`);
   要放行必须显式声明 `on_missing="all"`（该条件全谱计算额外 QC）或
-  `on_missing="none"`（不额外计算 QC，但仍保留检出阶段的抛物线坐标），策略写进留档;
+  `on_missing="none"`（不做精修及定位QC，保留检出整数格点），策略写进留档;
 - 出现**不属于该研究**的条件名 → 报错(不静默忽略);
 - 空文件 / 缺 `peak_id` 列 → 沿用既有报错口径。
 
-`on_missing` 写在映射写法里(用例参数或逐行组合表):
+`on_missing` 写在映射参数或组合表单元格的条件映射里:
 
 ```python
 run_combination_study(f"{root}", combos=...,
                       localize_peaks={"path": "targets.csv", "on_missing": "none"})
 ```
 
-**一个条件一份文件**(映射写法;CLI 保持只收单个文件,用 `condition` 列即可服务
-A/B,不必为每个条件再跑一次 sweep):
+**每个条件单独使用一份文件**时，可用映射写法。CLI 的 `--localize-peaks` 接收单个文件；
+同一个文件可用 `condition` 列区分多个条件:
 
 ```python
 run_combination_study(f"{root}", combos=...,
@@ -434,18 +415,17 @@ run_combination_study(f"{root}", combos=...,
                                       "by_condition": {"A": "a.csv"}})
 ```
 
-组合表里同样能写(CSV 单元格用花括号写法,相对路径仍按组合表目录解析):
+组合表也接受条件映射（CSV 单元格使用花括号写法，相对路径按组合表所在目录解析）:
 
 ```csv
 zero_fill,localization,localization.targets
 1,parabolic,"{A: a.csv, B: b.csv}"
 ```
 
-留档:`run.json.parameters_resolved.detection.localization_targets` 顶层保留
+留档：`run.json.parameters_resolved.detection.localization_targets` 顶层保留
 `path`/`sha256`(整文件)与本 run 实际生效的 `peak_ids`/`n_targets`/`n_skipped`,
 按条件写时另有 `condition`/`on_missing`,新增 `by_condition`(逐条件:
 `peak_ids`/`n_targets`/`line_ranges` 行号范围/`path` + `sha256` 来源文件/`from`);
 整批共用时 `by_condition` 写 `"all"`。`peak_localization.parabolic.n_targeted` /
-`n_skipped` **仍是逐 run 口径**。断点续跑指纹带**解析后的逐条件清单**,且只带本
-条件那一份:改 A 的行不会让 B 重跑(映射写法各自文件另带自己的 SHA-256)。指纹
-载荷形状变了 → 既有断点缓存会失效**一次**并重算一遍同样数字(数值不变)。
+`n_skipped` 是逐 run 计数。断点续跑指纹包含解析后的本条件目标清单，因此目标列表变化时
+只会使受影响条件的 workflow 重新运行。

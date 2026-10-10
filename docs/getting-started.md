@@ -1,9 +1,8 @@
 # Getting started
 
-This guide covers a source installation, first data inspection, and the processing boundary. A
-Linux AppImage may also be available from the [releases page](https://github.com/RociferX/nmrforge/releases);
-each binary belongs to its stated release and source revision. Updating a checkout does not update
-an already downloaded AppImage.
+This guide covers first data inspection and the processing boundary. Linux desktop users can
+download the AppImage from the [NMRForge 1.0.5 Release](https://github.com/RociferX/nmrforge/releases/tag/v1.0.5).
+For source installation, follow the steps below.
 
 ## Install from source
 

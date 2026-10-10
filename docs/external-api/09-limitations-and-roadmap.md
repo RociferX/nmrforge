@@ -1,145 +1,104 @@
-# 09 - Limits and extension paths (v1.1.1)
+# 09 · Support and execution boundaries (v1.1.1)
 
 ## 9.1 Support matrix
 
-| Item | v1.1.1 | Notes |
+| Item | Support | Implementation boundary |
 | --- | --- | --- |
-| uniform 1D/2D/3D data | yes, combinations run | goes through NMRPipe `process()`; studies are mostly 2D |
-| NUS **2D** data | yes, combinations run | goes through `reconstruct_nus()` (SMILE); candidates are isolated; SMILE parameters can be swept |
-| NUS 3D data | reference spectrum only | running combinations raises `SweepError` (see 9.2) |
-| reference workflow (script + parabolic peak table) | yes | the reference is a baseline, not a claimed optimum |
-| batch execution by `workflow_id` | yes | `W0001...`; each condition uses its own reference defaults and independently detects peaks |
-| peak localisation | yes | three-point parabolic method only |
-| multiple conditions (A/B) | yes | independent reference and peak table per condition; common parameters may be overridden per condition; no cross-condition peak matching |
-| full sampling labelled as NUS | schedule-dependent | a valid full grid in standard order may use uniform processing; full coverage in a different order still requires schedule-based placement |
-| peak overlap / deconvolution | no | localisation uses a detected extremum and three-point parabola only |
-| Lorentzian / Voigt / multi-peak fitting | no | on the roadmap |
-| parallel or cluster scheduling | no | serial with resume; shard along a parameter axis (see 8.4) |
-| validation of parameter-axis keys | partial | locked keys raise, deterministic and unknown keys warn; key validity is mostly reported in `notes` |
-| Statistical inference and scientific conclusions | no **(not this software)** | computed downstream from the unified peak table |
+| Uniform 1D/2D/3D | Reference and combinations | Backend `process()` through NMRPipe |
+| 2D NUS | Reference and combinations | SMILE `reconstruct_nus()`, isolated candidate products |
+| 3D NUS | Reference only | Combination execution raises `SweepError` |
+| Multiple conditions | Independent reference/table per condition | Common parameters can be overlaid per condition |
+| Peak localisation | Three-point parabolic | Optional target subset; independent IDs per spectrum |
+| Full schedule labelled NUS | Depends on order | Standard full grid may use uniform; reordered coverage needs placement |
+| Overlap/deconvolution and Lorentzian/Voigt/multi-peak fitting | Not provided | Detection/localisation acts on extrema |
+| Parallel/cluster scheduling | Not provided | Serial execution with resume; callers can shard separate study roots |
+| Parameter-key validation | Partial | Locked keys raise; deterministic/unknown keys produce warnings/notes |
+| Cross-spectrum matching, assignment and statistical inference | Not provided | Implemented by downstream analysis |
 
-## 9.2 What NUS support covers
+## 9.2 NUS execution
 
-> Sampling is not inferred from a nominal percentage or data length alone. Only a standard
-> `nuslist` or the file explicitly named by `acqus.NUSLIST` is used. A valid complete schedule in
-> standard order may use uniform processing; a complete but reordered schedule still needs
-> schedule-based placement. Explicit NUS without a recoverable schedule is rejected at import.
-> Trailing zero padding is not treated as a missing sample.
+Only standard `nuslist` or a file explicitly named by `acqus.NUSLIST` supplies sample positions.
+A nominal sampling percentage or raw-data length alone is not a schedule. Full coverage in another
+order still needs schedule-based placement. Explicit NUS without recoverable positions is rejected
+at import; trailing zero padding is not a missing sample.
 
-**Supported: 2D NUS.** Both the reference and the workflows call `reconstruct_nus()`; the only
-difference is that batch execution isolates the candidate output per combination:
+Both 2D reference and combination execution call `reconstruct_nus()` with indirect `phases` and
+direct `direct_phase`. A combination writes isolated products under
+`study/workflows/<workflow_id>/<condition>/spectrum.ft2`, preserving the active/reference spectrum.
+SMILE parameters include `nsigma` (`nSigma` alias), `thresh`, `nthread` and `smile_scaling`;
+automatically selected values are recorded in `parameters_resolved.smile`.
+The 3D NUS reference route supports reconstruction/finalisation; API combinations do not execute it.
 
-- phase locking: `phases` (indirect dimensions) plus a flat `direct_phase` (direct dimension);
-- candidate output at `study/workflows/<id>/<condition>/spectrum.ft2` (the backend
-  `out_file`/`script_name` semantics); the final spectrum in the working directory is never
-  overwritten;
-- sweepable parameters: `nsigma` (alias `nSigma`), `thresh`, `nthread`, `smile_scaling` and
-  others; when the value is chosen automatically the actual one is written to
-  `parameters_resolved.smile`.
+## 9.3 Batches and resume
 
-**Not yet supported: 3D NUS** in combination mode (the slice stream buckets by plane directory
-and finalises with independent names).
+The default combination limit is 256 (`max_runs`). Larger grids can be split across study roots
+or submitted in batches. Re-running a study skips workflow/condition pairs whose successful result
+matches the current request/reference evidence. For multiple machines, assign a sub-grid and a
+separate root to each worker and combine output tables downstream. `grid_sha256` in plan/manifest
+identifies the combination design; source segment order is part of the condition input.
 
-## 9.3 Splitting long batches
+## 9.4 Parameter validation
 
-- the number of combinations defaults to a maximum of 256 (`max_runs`); beyond that, split into
-  several study roots or run in batches;
-- a study root can be re-run; workflow x condition pairs that already succeeded are skipped
-  (resume);
-- for several machines, shard along a **parameter axis** (each machine takes a sub-grid and its
-  own study root) and merge the long table afterwards;
-- record `grid_sha256` (present in the plan and the manifest) before changing a parameter table,
-  so you can check that two runs used the same design.
+Conversion calibration and source binding are reference-stage operations. A combination cannot
+change them. Phase routes and FT-alt are locked; boolean FT-neg and flip aliases can be candidates.
+FT-neg candidates do not trigger phase reoptimisation. Unknown or deterministic keys may produce
+warnings rather than an invalid-key exception, so inspect `notes`, warnings, resolved parameters
+and executed scripts when checking a parameter effect.
 
-## 9.4 Roadmap
+## 9.5 Checks and evidence
 
-| Priority | Item | Deliverable shape |
-| --- | --- | --- |
-| high | 3D NUS in combination mode | slice stream keyed by `workflow_id` plus isolated finalise output |
-| medium | extend peak fitting to Lorentzian/Voigt/multi-peak | current sub-grid localisation is a three-point parabola |
-| medium | schema validation of parameter keys | raise instead of only warning about unknown keys |
-| medium | progress file | update `records/progress.json` per combination for external monitoring |
-| medium | explicit 3D plane selection | measure on a named plane when the peak table fixes the dimension values |
+The ordinary pytest suite checks orchestration and records with mocked engine boundaries.
+Real-engine comparisons separately record input, tool versions, script/parameter provenance and
+resulting spectra. [Four-route evidence](../evidence/real-data-comparison.md) includes controlled
+2D downsampling at 68/90 increments and acquired 3D NUS at 25%, alongside uniform author references.
+Candidate coverage measures detected/matched candidates, not assigned-peak recovery. Three-dimensional
+projection counts do not establish independent peak identities or resolve every overlap.
 
-When filing a request, attach `records/manifest.json` and the `status` output so it can be
-reproduced.
+## 9.6 Shared processing components
 
-## 9.5 Validation and evidence
+The API reuses the desktop application's NMRPipe/SMILE chain, axis mapping and peak components.
+API-specific orchestration handles parameter merging, reference freezing, independent detection,
+serialization and resume. Check these entry-point records as well as the processed spectrum.
+The API operates without Qt and does not write GUI presentation state.
 
-The ordinary pytest suite checks processing orchestration and records through mocked engine
-boundaries. It does not run NMRPipe or SMILE. Real-engine verification separately records the
-input, software revision, engine versions, parameters, and resulting spectra/QC.
+## 9.7 Interpreting records
 
-[Four-route real-data evidence](../evidence/real-data-comparison.md) compares 2D/3D uniform/NUS
-results with identified references. The artificial 2D example is controlled downsampling of
-uniform data (75% requested, 68/90 retained), while the 3D NUS example was acquired at 25%.
-The main signals agree well in these cases. Candidate coverage is a detection-and-matching
-measure, not assigned-peak recovery or a guarantee for every experiment.
+Read status, warnings, requested/resolved parameters and spectrum products together. Compatibility
+metadata identifies processing code/contracts; localisation QC describes the numerical measurement,
+not peak assignment. The unified table retains complete F1/F2/F3 coordinates, nuclei and equivalent
+linewidths. H/N aliases are empty where a repeated nucleus makes them ambiguous.
 
-Record the software/API version, compatibility manifest, and processing parameters when citing
-results. Biological interpretations and experiment-specific scientific acceptance remain the
-responsibility of downstream analysis.
+Targeted localisation refines selected peaks while retaining detection, row count and IDs.
+Non-targeted detected peaks keep integer-grid positions, `localization_method="none"` and uncomputed
+QC as `NaN`. Their normal skip has an empty `failure_reason`; detection/numerical failure has its
+own reason, separate from actual fallback.
 
-## 9.6 Relationship to the desktop application: shared processing, separate entry-point validation
+## 9.8 Source, calibration and output ownership
 
-- The API reuses the NMRPipe/SMILE processing chain, spectrum-axis mapping and peak components;
-  it does not implement a second processing engine.
-- Parameter merging, reference freezing, independent detection, table serialization and resume
-  remain API-specific orchestration and require their own validation. Shared components do not
-  prove that entry-point parameters are applied or that exported axes and QC are correct.
-- The main application's current real-data evidence is in the
-  [real-data comparisons](../evidence/real-data-comparison.md). Two-dimensional positions cannot
-  validate a three-dimensional carbon axis; projections cannot cover all three-dimensional
-  overlap or artifacts. Projection candidate-match fractions are not true-peak recovery rates.
+Each condition has an independent reference and peak table. An external identity table applies
+only to the main condition. `reference_peak_id` and `assignment` are empty in combination tables;
+local peak IDs do not create cross-spectrum links.
 
-## 9.7 Interpreting run records
+Positive finite reference `sweep_width_hz` and explicit `carrier_ppm` are applied/audited per axis.
+`params_by_condition`/`--condition-params` overlay common reference parameters. Segment shifts are
+conversion-time settings. Conversion provenance retains digital-filter inputs, script hashes and
+commands; requested/resolved/actual FT commands and stage timing are distinguished. An unverified
+applied correction is recorded as `unknown`, rather than inferred from input metadata.
 
-Review the run status, warnings, resolved parameters, and resulting spectrum together.
-A compatibility manifest identifies software behavior; an accepted QC result does not establish
-peak identity or an experiment-specific scientific conclusion.
+CLI `--study` and `--reference` must resolve to the same root before any writing. Within that root,
+combination execution writes workflow/result records and candidate products; only its frozen
+reference FID/schedule are read-only.
 
-## 9.8 Input and output boundaries
+## 9.9 Frozen FID reuse
 
-- Each condition builds an independent reference spectrum and peak table; an external identity
-  table applies only to the main condition. IDs are local to each table, not cross-spectrum links.
-- The unified 38-column table retains F1/F2/F3 coordinates, nuclei and equivalent linewidths.
-  H/N aliases are blank for ambiguous repeated nuclei. Use complete logical-axis identity.
-- Targeted localisation refines only selected peaks; other detected peaks retain integer-grid
-  positions, actual method `none` and uncomputed localisation QC (`NaN`).
-- Reference-only positive finite `sweep_width_hz` and explicit `carrier_ppm` are audited by axis.
-  Combinations cannot change conversion calibration. `params_by_condition`/`--condition-params`
-  can overlay common reference parameters independently for each condition.
-- Boolean FT-neg values and flip aliases may be combination candidates; phase routes and FT-alt
-  remain locked. Reference construction applies FT flags before phase optimisation. FT-neg
-  changes in combinations do not automatically reoptimise phase.
-- CLI rejects different `--study` and `--reference` roots before writing. Within one root,
-  combinations write workflow/results records; they are not an entirely read-only API call.
-- Conversion provenance records raw digital-filter parameters, script hashes and conversion
-  commands; reference audit separates requested/resolved/actual FT commands and stage timing.
-  An unverified correction method is `unknown`, not inferred as executed from metadata.
+Reference construction imports sources as needed, converts each segment, merges and freezes the FID,
+conversion evidence and sampling schedule. Combination execution processes those artefacts and
+independently selects peaks. Supported inputs include a single FID, 3D uniform slices and a merged
+multi-segment FID. It does not automatically reconvert/re-merge, delete sources, alter the reference
+FID or rewrite its schedule.
 
-Legacy shared-identity or incomplete-axis references must be rebuilt. The API generates independent
-spectra/tables and processing records only; matching, missingness policies and statistical analysis
-are downstream responsibilities. Historical uncertainty helpers are not part of this two-stage
-processing interface, and local peak IDs cannot be treated as corresponding peaks without matching.
-
-## 9.9 FID reuse boundary
-
-Reference mode imports sources when needed, converts each segment and merges them, then freezes the
-FID, conversion evidence and sampling schedule for combination runs. Combination mode processes only
-these existing reference artefacts and performs independent peak selection. It supports a single-file
-FID, a 3D uniform slice directory and a merged multi-segment FID. It must not automatically reconvert
-or re-merge, delete raw sources, modify the reference FID or rewrite the sampling schedule.
-
-If the reference FID is missing or damaged, the source or conversion evidence differs from the
-reference, or the requested parameters would require conversion or merging, combination mode raises
-an error and asks the user to rebuild the reference with `force=True` (CLI: `reference --force`).
-`force` rebuilds at the reference stage; it does not cause combination mode to convert on demand.
-Conversion-time settings such as an explicit segment shift must be set when rebuilding the reference.
-The GUI's default conversion behavior is unchanged by this API boundary.
-
-Strict reuse for single-file FIDs, 3D uniform slices and merged segments passed Linux engineering
-regression. Older references without a frozen-FID record require one explicit rebuild with
-`force=True`. Fingerprints use content SHA-256 up to 8 MiB and `size + mtime_ns` for larger files;
-they are not content-level authentication. This does not establish real NMRPipe/SMILE engine
-validation; engineering regression is not a substitute for real-engine acceptance.
+Missing/damaged FID, changed source/conversion evidence, absent frozen evidence or parameters that
+require conversion/merge raise an error requiring `force=True` at reference construction
+(`reference --force` on the CLI). `force` does not enable conversion on demand during combinations.
+Fingerprints use content SHA-256 up to 8 MiB and `size + mtime_ns` for larger files; the latter
+detects metadata changes rather than authenticating full file content.

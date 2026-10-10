@@ -100,14 +100,10 @@ Implementation details:
   the stripes worse than the original is rejected; a correction that visibly improves an already
   stripy baseline is allowed. When the stripes are a data/acquisition artefact rather than a
   baseline offset, the report says so instead of prescribing a correction that cannot work.
-- **Signal-to-noise follows the same sign convention as phase (fixed 2026-09-20).** The combined
-  verdict derived S/N from a peak search that only looked for positive peaks while the phase
-  component was already sign-mode aware, so a mixed experiment lost its negative peaks a second
-  time. `evaluate(sign_mode=...)` now maps `mixed` to `both` - the same choice the peak-picking
-  step makes for mixed templates - and hands that peak list to `snr.compute`. Property tests
-  (`tests/test_qc_metrics.py`) pin the S/N sub-score to that peak list and show the positive-only
-  one understates it by a factor of ~1.6 on a negative-dominant mixed fixture.
-- **Single-sign experiments are positive by construction (same fix).** `uniform` maps to
+- **Signal-to-noise follows the same sign convention as phase.** `evaluate(sign_mode=...)`
+  maps `mixed` to `both`, matching mixed-template peak picking, and passes that same peak list
+  to `snr.compute`. Positive and negative signals participate according to the declared mode.
+- **Single-sign experiments are positive by construction .** `uniform` maps to
   `positive`, because the processing chain resolves the +-180 ambiguity of single-sign data
   towards positive absorption (`core/optimization/phase_consensus` only skips that step for
   `mixed`). A uniform spectrum whose peaks are negative dominant is therefore an anomaly - flipped
@@ -115,7 +111,7 @@ Implementation details:
   ("negative signal dominates") instead of adapting to the negated peaks and reporting a valid
   spectrum. The score also drops, because the S/N term no longer finds the signal; the phase term
   flags it as well.
-- **The standalone tool judges the convention; the pipeline states it (2026-09-20).** The two
+- **The standalone tool judges the convention; the pipeline states it .** The two
   entry points differ on purpose. Anything that knows the experiment type - the processing
   report, the optimisation paths, `optimize_post_parameters(..., sign_mode=...)`, the
   parameter-optimisation CLI - passes `uniform` or `mixed` and gets the strict reading above.
@@ -128,7 +124,7 @@ Implementation details:
   graded after being flipped, so a user's all-negative single-sign spectrum is reported as that -
   a valid spectrum in a different polarity - rather than as flipped data, and it scores the same
   as its mirror image.
-- **Unusable input is reported, not raised (2026-09-20).** An empty array, a spectrum containing
+- **Unusable input is reported, not raised .** An empty array, a spectrum containing
   `NaN`/`Inf`, a constant (all-zero) spectrum or a zero noise estimate returns
   `decision=rollback`, `overall=0` and a specific reason instead of raising a numpy reduction
   error or handing a zero-information spectrum a "warning" score.

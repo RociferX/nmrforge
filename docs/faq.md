@@ -2,7 +2,7 @@
 
 ### Is nmrForge a replacement for NMRPipe?
 
-No, and the design assumes it never will be. nmrForge decides *what* to run and records *why*,
+No. nmrForge decides *what* to run and records *why*,
 then drives NMRPipe to do the processing. You need an NMRPipe installation.
 
 ### Do I need Python to use nmrForge?
@@ -13,16 +13,15 @@ editable repository checkout.
 ### Can I run it on Windows or macOS?
 
 Linux is the target runtime; Windows is an editing environment. macOS has not been validated.
-The current version is software 1.0.5 / API v1.1.1. This patch leaves API parameters and the
-38-column peak-table contract unchanged. The 1.0.5 release provides the source and one Linux AppImage;
-see the [release page](https://github.com/RociferX/nmrforge/releases) for artifact availability and
-validation status. Version 1.0.2 is retained as a historical release.
+The current version is software 1.0.5 / API v1.1.1. Download the Linux AppImage or source from the
+[1.0.5 Release](https://github.com/RociferX/nmrforge/releases/tag/v1.0.5). API parameters and the
+38-column peak-table contract are documented in the [Python API](python-api.md).
 
 ### Does nmrForge send my data anywhere?
 
 No. There is no telemetry, upload or account requirement. Processing is local, and the
-application itself makes no network calls. Development or future packaging may use network
-access to install dependencies or fetch an AppImage runtime.
+application itself makes no network calls. Source installation downloads dependencies; the AppImage
+includes its runtime.
 
 ### Does it modify my raw data?
 
@@ -69,27 +68,23 @@ deliberately comes before the setting so that `NMRFORGE_LANG=zh ./NMRForge.AppIm
 overriding a stale setting for one run - while `LANG=en_US.UTF-8` is only the system locale and
 does **not** override the Chinese you picked in the settings.
 
-### What happened to the HSQC CSP analysis features?
+### Does nmrForge include HSQC CSP analysis?
 
-They were removed in September 2026 by decision, and the removal (including how to recover the
-code from git history) is recorded in
-the CHANGELOG entry for the 2026-09-12 analysis removal.
-Downstream CSP analysis is expected to be done by a separate project that consumes
+No. nmrForge does not provide HSQC CSP analysis. Downstream analysis code can consume
 `nmrforge_api` output.
 
 ### How is the version number managed?
 
-`core/__init__.py` defines `__version__`, and that is the only place it exists. `pyproject.toml`
-reads it dynamically, the AppImage build script reads it, and run records store it - so the
-version in the application, the package and the provenance record cannot drift apart.
+`core/__init__.py` defines `__version__`. `pyproject.toml` and the AppImage build read it, and run
+records store it. The scripting API version is managed separately by `nmrforge_api.API_VERSION`.
 
 ### How do I cite nmrForge?
 
 Citation metadata is in [CITATION.cff](../CITATION.cff): author Xuanfeng Li, affiliation University
-of Science and Technology of China. Every release from 1.0.0 has a DOI - the version DOI
-[10.5281/zenodo.22909416](https://doi.org/10.5281/zenodo.22909416) for one release, the concept DOI
-[10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415) for all of them; cite the
-repository URL if you do not need a version. If you publish results, also cite NMRPipe and SMILE -
+of Science and Technology of China. The concept DOI is
+[10.5281/zenodo.22909415](https://doi.org/10.5281/zenodo.22909415). Include the software version;
+obtain a version-specific DOI from that release’s archive record when needed.
+If you publish results, also cite NMRPipe and SMILE;
 see [THIRD_PARTY.md](../THIRD_PARTY.md).
 
 ### Can I use nmrForge commercially?
@@ -102,8 +97,7 @@ the source. [LICENSE_OPTIONS.md](../LICENSE_OPTIONS.md) records the source/binar
 
 ### How do I know a published result is reproducible from nmrForge?
 
-Each run records the resolved parameters, the scripts used, the software version, the external
-tool versions and the warnings, and the generated scripts and spectra are kept. That is the
-mechanism; it is not a claim that every historical run was recorded perfectly. See
+Run records contain the resolved parameters, the scripts used, the software version, the external
+tool versions and the warnings; generated scripts and spectra are kept. See
 [processing-model.md](processing-model.md) and
 [external-api/06-outputs-and-records.md](external-api/06-outputs-and-records.md).

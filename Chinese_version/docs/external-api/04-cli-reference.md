@@ -54,10 +54,9 @@ NaN/Inf、空映射、未知轴或超过数据维数的轴拒绝。未指定轴�
 `{"A":{"zero_fill":2},"B":{"sampling":{"ft_neg_f1":true}}}`;未知条件会报错。
 参考模式每个条件独立生成峰表;外部 `--peak-table` 只应用到主条件,不会传播。
 
-`--rebuild-peak-tables` 只重算参考峰表(用已有的冻结参考谱 + `reference.list`,不动谱与
-峰身份,调用前后断言 SHA-256 不变),并**刷新记录里的 `software_version` / `software_commit`
-与研究级聚合 `records/reference.json`**(2026-09-19 修:此前升级过的研究根仍写着旧版本号
-与空 commit,聚合里还挂着旧峰表 SHA)。
+`--rebuild-peak-tables` 只重算参考峰表(使用已有的冻结参考谱与 `reference.list`，不修改谱或
+峰身份；调用前后校验 SHA-256)，并刷新记录中的 `software_version`、`software_commit` 及
+研究级聚合 `records/reference.json`。
 
 ## peaks — 参考峰表(身份 + 一张统一峰表)
 
@@ -70,12 +69,8 @@ python -m nmrforge_api peaks --study ~/studies/s1 --peak-table external.list
 每个条件都在自己的参考谱上独立选峰并生成 `reference.list` 和
 `reference_peak_table_parabolic.csv`;外部 `--peak-table` 只登记主条件,不传播到其他条件。
 `R0001…` 是所属参考峰表的局部身份,不代表跨条件或参考/组合谱间存在对应关系。
-组合表的 `reference_peak_id` 留空,本谱 `peak_id` 只在本谱有效。
-峰定位只有三点抛物线一种
-方法,2026-09-26 起二维高斯拟合算法已删除,`--localization` /
-`--localize-peaks-gaussian` / `--localize-peaks-parabolic` /
-`--gaussian-roi-f1-ppm` / `--gaussian-roi-f2-ppm` 选项一并取消)。输出峰表路径/
-哈希/来源/峰数 + 峰表摘要与定位 QC。
+组合表的 `reference_peak_id` 留空,本谱 `peak_id` 只在本谱有效。峰位亚像素精修采用
+三点抛物线。输出峰表路径、哈希、来源、峰数、峰表摘要与定位 QC。
 
 `--sigma N` 是**选峰阈值**(噪声 σ 倍数,缺省 35σ):在参考峰表**尚未生成**时
 指定 = 生成参考时选阈值;参考已冻结后再指定不同阈值会被拒绝(退出码 2,
@@ -123,12 +118,10 @@ python -m nmrforge_api sweep --study ~/studies/s1 \
 `sweep_width_hz` 按逻辑轴显式覆盖谱宽(Hz),每个值须为正有限数;组合使用已转换 FID,
 不得改变该谱宽。
 
-每个组合 = 一个 `workflow_id`
-(`W0001`…);对全部条件跑处理,再在**该组合自己的谱**上用参考锁定阈值独立选峰,
-做三点抛物线精修出一张 `peak_table_parabolic.csv`(峰定位只有这一种方法;
-`--localization`、`--localize-peaks-gaussian` / `--localize-peaks-parabolic` 与
-`--gaussian-roi-*` 已于 2026-09-26 删除)+ 完整日志 + 参数三层
-+ 版本。阈值键(`sigma_multiplier`/`min_snr`/`threshold_sigma`/
+每个组合对应一个 `workflow_id`(`W0001`…);对全部条件运行处理,再在**该组合自己的谱**上
+用参考锁定阈值独立选峰,做三点抛物线精修并生成 `peak_table_parabolic.csv`、完整日志、
+参数三层记录与版本信息。`--localize-peaks` 可限定需要精修的已检出峰；它不改变检出数或
+`peak_id` 编号。阈值键(`sigma_multiplier`/`min_snr`/`threshold_sigma`/
 `detection.sigma_multiplier`)写进组合表会直接报错(阈值锁定在参考)。
 `--direct-range` 与参考冻结范围不一致时默认**报错**(退出码 2):参考谱不会重建,
 峰位与峰集却会随窗口变。确认要覆盖时显式加 `--allow-ext-override`,每条 run 的
@@ -143,9 +136,8 @@ stdout;进度、日志和错误写到 stderr,便于管道读取 JSON。
 python -m nmrforge_api report --study ~/studies/s1
 ```
 
-重新拼装 `study/records/`(长表 `peak_table_parabolic.csv`/manifest/workflows/runs/measurement),
-不调用后端;**并刷新 `records/reference.json` 参考聚合**(版本/提交/峰表 SHA 取磁盘现状,
-2026-09-19)。输出 workflow 数与状态计数。
+重新拼装 `study/records/`(长表 `peak_table_parabolic.csv`、manifest、workflows、runs 与
+measurement)，不调用后端，并刷新 `records/reference.json` 参考聚合。输出 workflow 数与状态计数。
 
 ## status — 现状
 

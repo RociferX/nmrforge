@@ -1,12 +1,25 @@
 # Installation
 
-## Source and binary releases
+Linux is the target runtime; Windows may be used to edit source but is not a supported runtime
+environment. Linux desktop users can use the AppImage from the [NMRForge 1.0.5 Release](https://github.com/RociferX/nmrforge/releases/tag/v1.0.5).
+Install the Python API and command-line tools separately by following the source steps below.
 
-The GitHub repository contains source. Linux is the target runtime; Windows may be used to edit
-source but is not a supported runtime environment. The [releases page](https://github.com/RociferX/nmrforge/releases)
-may also provide a versioned Linux AppImage. An AppImage contains the source revision named in its
-release; later source changes do not update that binary automatically. For the current source tree,
-use an editable install:
+## AppImage (Linux)
+
+Download `NMRForge-1.0.5-x86_64.AppImage` and `SHA256SUMS-v1.0.5.txt` from the release, then verify
+and start the AppImage in the same directory:
+
+```bash
+sha256sum -c SHA256SUMS-v1.0.5.txt
+chmod +x NMRForge-1.0.5-x86_64.AppImage
+./NMRForge-1.0.5-x86_64.AppImage --licenses
+./NMRForge-1.0.5-x86_64.AppImage
+```
+
+The AppImage includes third-party licence notices, including those for PySide6/Qt. See the
+release assets and [THIRD_PARTY.md](../THIRD_PARTY.md) for distribution information.
+
+## Source installation
 
 ```bash
 git clone https://github.com/RociferX/nmrforge.git
@@ -21,21 +34,6 @@ Packaged installs and wheels include runtime resources (`nmrforge_data/config`,
 `nmrforge_data/presets`, `gui/assets`, `ui_support/locales`). Real processing requires a separately
 installed NMRPipe; NUS reconstruction also requires SMILE. Neither tool is downloaded or bundled
 by nmrForge.
-
-## AppImage (Linux)
-
-When an AppImage is available on the releases page, it bundles its interpreter and Qt. The release
-notes identify its version and checksums. For example:
-
-```bash
-sha256sum NMRForge-<version>-x86_64.AppImage  # compare with the release notes
-chmod +x NMRForge-<version>-x86_64.AppImage
-./NMRForge-<version>-x86_64.AppImage --licenses
-./NMRForge-<version>-x86_64.AppImage
-```
-
-The AppImage includes third-party licence notices, including those for PySide6/Qt. See the
-release assets and [THIRD_PARTY.md](../THIRD_PARTY.md) for distribution information.
 
 ## Developers: editable source install
 

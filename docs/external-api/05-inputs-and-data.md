@@ -96,7 +96,7 @@ The upper limit of the number of combinations `max_runs` (default 256); combinat
 | --- | --- |
 | `zero_fill` | zero filling multiple (only the point distance is changed, the physical peak position is not changed) |
 | `window.<axis>.type` + `off/end/pow/c/lb/g1/g2` | Window function: ** must be given in pairs** -- `type=none/off` When the axis does not insert a window row, the sub-parameter will be ignored (API will report an error directly); `sine_bell`(`off/end/pow/c`), `sine_bell_squared`, `gaussian`(`g1/g2`), `exp`(`lb`) |
-| `baseline` | baseline correction (`{enabled, mode: auto|order, order, axes}`):`mode=order` render `POLY -ord N -auto`(NMRPipe `-auto` automatically picks the baseline point, effective from 2026-09-16);`mode=auto` render `POLY -auto`;`mode≠order` `order` is ignored (API prompt) |
+| `baseline` | baseline correction (`{enabled, mode: auto\|order, order, axes}`):`mode=order` render `POLY -ord N -auto`(NMRPipe `-auto` automatically picks the baseline point);`mode=auto` render `POLY -auto`;`mode≠order` `order` is ignored (API prompt) |
 | `reference_optimize` | **Test only/Recurrence/audit** Reference optimisation switch used (see §5.10); do not use | for real experiments
 | `ext_lo`/`ext_hi`/`extract` | Extraction window (deterministic parameter, generally no need to enter the grid) |
 | `points_per_line` | Target point distance/line width points(deterministic parameter) |
@@ -133,7 +133,7 @@ run_parameter_study(..., peaks="library.list")   # or a peak_id,H_ppm,N_ppm CSV
 - An external peak table is given: the peak identity table as the main condition is frozen (`peak_source="external"`), other conditions
   The **reference peak table** follows the same identity (the peak table in combined mode does not track it -- the combined peak table selects peaks independently.
   `reference_peak_id` leave blank);
-- Accepted formats: Poky/Sparky `.list`, NMRForge old CSV, research project
+- Accepted formats: Poky/Sparky `.list`, NMRForge CSV, research project
   `peak_id,H_ppm,N_ppm,height,linewidth,volume`.
 
 ## 5.6 parameter principle (software does not cross boundaries)
@@ -176,6 +176,78 @@ resolved widths, source, and consistency ratio are recorded; sweeps reuse the co
 cannot change its spectral width. This applies to any logical F axis, including an axis acquired
 for 15N; use its F-axis key rather than a nucleus-name key.
 
+## 5.7 Peak selection threshold (optional when generating reference, then locked)
+
+Peak selection threshold of the reference peak table = **noise σ multiple** (`sigma_multiplier`,
+passed to detection internally as `min_snr`). Default 35σ;
+**can be specified externally when generating the reference**:
+
+```python
+pick_reference_peaks(session, sigma_multiplier=20)          # builds the reference peak tables
+ensure_reference_peaks(session, reference, sigma_multiplier=20)
+run_parameter_study(root, datasets=..., combos=..., sigma_multiplier=20)
+```
+
+```bash
+python -m nmrforge_api peaks --study ~/studies/s1 --sigma 20
+```
+
+- **Threshold is part of the reference definition**: Once the reference peak table is frozen, all subsequent workflow/parameter disturbances
+  Only the reference threshold can be used; if you give a different threshold at this time, it will directly report `ReferenceError`(CLI.
+  Exit code 2), peak reselection will not occur silently;
+- The threshold value that is consistent with the reference (or consistent with the reference default 35σ) can be explicitly given to -> multiplexed, without repeated peak selection;
+- The threshold you want to change belongs to **Reconstruction Reference**: Explicit `force=True`, or delete the condition
+  `study/reference/<key>/` Post-rerun reference;
+- Actual usage fallback: `reference.json.peak_params.sigma_multiplier` (when generating reference
+  Selected value), `previous_sigma_multiplier`(force previous version when rebuilding).
+  `detection.sigma_multiplier` and `detection.threshold_source`.
+  (`user` / `default(35sigma)`); each workflow record is recorded separately.
+  `parameters_resolved.detection`(`source="reference(locked)"`, actual σ, margin.
+  Noise σ, refinement method list; `independent=true`, `reference_matching="external"`);
+- The threshold is too high and peaks cannot be selected -> clearly report an error (do not silently produce an empty peak table);
+- The threshold is written into the workflow parameter combination table -> an error is reported directly (`SweepError`), prompting "If you want to change the threshold, please rebuild."
+  Refer to";
+- Combination mode **None** `max_peaks`: This combination detects as many peaks as possible under the locking threshold
+
+## 5.8 direct dimension range (can be specified externally)
+
+The direct dimension extraction window is specified with **ppm**, and NMRPipe `EXT -x1/-xn` and config.
+`processing.ext_lo/ext_hi` Same sequence:
+
+- `ext_lo` = direct dimension **High-end** (larger ppm, corresponding to `EXT -x1`);
+- `ext_hi` = direct dimension **low end** (smaller ppm, corresponding to `EXT -xn`)
+
+The three writing methods can be combined, and the priority is `params` < `direct_range` < explicit `ext_lo/ext_hi`:
+
+```python
+run_reference_study(root, dataset, direct_range=(10.5, 6.5))       # (high, low)
+run_reference_study(root, dataset, direct_range=(6.5, 10.5))       # reversed: swapped back automatically
+run_reference_study(root, dataset, ext_lo="10.5", ext_hi="6.5")    # explicit
+```
+
+```bash
+python -m nmrforge_api reference --study ~/studies/s1 --direct-range 10.5 6.5
+python -m nmrforge_api sweep --study ~/studies/s1 --reference ~/studies/s1 \
+    --combos design.csv --direct-range 9 7
+```
+
+- **Reference mode**: the range is part of the reference definition; when it disagrees with the
+  established reference, the reference spectrum and its parabolic peak table are rebuilt (stated
+  in the log), and `force=True` rebuilds unconditionally;
+- **Combination mode**: `direct_range=` writes this batch's `base_overrides` (the reference spectrum is not
+  rebuilt); every condition still starts from its own reference parameters and each combination may override with
+  `ext_lo`/`ext_hi` (`plan.notes` states the wording). An override that **disagrees** with the frozen reference range
+  raises by default - pass `allow_ext_override=True` (CLI `--allow-ext-override`) to confirm it, and every run then
+  carries the `direct_range_override` warning code;
+- Archive: the reference record keeps `params.ext_lo/ext_hi` plus `direct_range` (`ext_lo`/`ext_hi`/`unit`/`source`
+  with `source` in `explicit|params|default`; `default` = no range was given so the backend/config default was used,
+  with a `warning`); each `run.json` keeps `parameters_resolved.direct_range` (`ext_lo`/`ext_hi` + `source`:
+  `reference_or_base` / `combo`);
+- Illegal input (only given to one end, both ends are the same, non-numeric) directly reports `SweepError`;
+- Also effective in config/`params`: `params={"ext_lo": "10.5", "ext_hi": "6.5"}` will be
+  Parse into the same range and keep files in a unified way.
+
+
 ## 5.9 Specify parameter by dimension (combination table)
 
 Combination table/Grid key support**Dot number path**, so the two dimensions (and the third dimension of 3D) can be specified separately;
@@ -199,8 +271,7 @@ window.F1.off,window.F2.off,zero_fill.F1,baseline.F2.enabled,points_per_line.F1
 ```
 
 - Peak localization has one supported method, `parabolic`: a deterministic three-point vertex
-  calculation. Gaussian-fitting ROI and iteration-budget settings were removed and are not
-  accepted configuration keys.
+  calculation. Gaussian-fitting ROI and iteration-budget settings are not accepted configuration keys.
 - The direct dimension range `ext_lo`/`ext_hi` only applies to ** direct dimension **; please use `window.F3.*` for 3D data, etc
   Axis-by-axis key (if the axis is a direct dimension);
 - The axis-by-axis parameter (reference spectrum definition) of the reference layer is specified with `params=`/`direct_range=` of the reference mode
@@ -238,79 +309,7 @@ run_reference_study(
 - The combination mode (parameter perturbation stage) inherently controls the explicit control window/baseline one by one and does not require this switch
 
 
-## 5.8 direct dimension range (can be specified externally)
-
-The direct dimension extraction window is specified with **ppm**, and NMRPipe `EXT -x1/-xn` and config.
-`processing.ext_lo/ext_hi` Same sequence:
-
-- `ext_lo` = direct dimension **High-end** (larger ppm, corresponding to `EXT -x1`);
-- `ext_hi` = direct dimension **low end** (smaller ppm, corresponding to `EXT -xn`)
-
-The three writing methods can be combined, and the priority is `params` < `direct_range` < explicit `ext_lo/ext_hi`:
-
-```python
-run_reference_study(root, dataset, direct_range=(10.5, 6.5))       # (high, low)
-run_reference_study(root, dataset, direct_range=(6.5, 10.5))       # reversed: swapped back automatically
-run_reference_study(root, dataset, ext_lo="10.5", ext_hi="6.5")    # explicit
-```
-
-```bash
-python -m nmrforge_api reference --study ~/studies/s1 --direct-range 10.5 6.5
-python -m nmrforge_api sweep --study ~/studies/s1 --reference ~/studies/s1 \
-    --combos design.csv --direct-range 9 7
-```
-
-- **Reference mode**: the range is part of the reference definition; when it disagrees with the
-  established reference, the reference spectrum and its parabolic peak table are rebuilt (stated
-  in the log), and `force=True` rebuilds unconditionally;
-- **Combination mode**: `direct_range=` writes this batch's `base_overrides` (the reference spectrum is not
-  rebuilt); every condition still starts from its own reference parameters and each combination may override with
-  `ext_lo`/`ext_hi` (`plan.notes` states the wording). An override that **disagrees** with the frozen reference range
-  raises by default - pass `allow_ext_override=True` (CLI `--allow-ext-override`) to confirm it, and every run then
-  carries the `direct_range_override` warning code (P1-4, 2026-09-19);
-- Archive: the reference record keeps `params.ext_lo/ext_hi` plus `direct_range` (`ext_lo`/`ext_hi`/`unit`/`source`
-  with `source` in `explicit|params|default`; `default` = no range was given so the backend/config default was used,
-  with a `warning`); each `run.json` keeps `parameters_resolved.direct_range` (`ext_lo`/`ext_hi` + `source`:
-  `reference_or_base` / `combo`);
-- Illegal input (only given to one end, both ends are the same, non-numeric) directly reports `SweepError`;
-- Also effective in config/`params`: `params={"ext_lo": "10.5", "ext_hi": "6.5"}` will be
-  Parse into the same range and keep files in a unified way.
-
-
-## 5.7 Peak selection threshold (optional when generating reference, then locked)
-
-Peak selection threshold of the reference peak table = **noise σ multiple** (`sigma_multiplier`,
-passed to detection internally as `min_snr`). Default 35σ (existing default, unchanged behaviour);
-**can be specified externally when generating the reference**:
-
-```python
-pick_reference_peaks(session, sigma_multiplier=20)          # builds the reference peak tables
-ensure_reference_peaks(session, reference, sigma_multiplier=20)
-run_parameter_study(root, datasets=..., combos=..., sigma_multiplier=20)
-```
-
-```bash
-python -m nmrforge_api peaks --study ~/studies/s1 --sigma 20
-```
-
-- **Threshold is part of the reference definition**: Once the reference peak table is frozen, all subsequent workflow/parameter disturbances
-  Only the reference threshold can be used; if you give a different threshold at this time, it will directly report `ReferenceError`(CLI.
-  Exit code 2), peak reselection will not occur silently;
-- The threshold value that is consistent with the reference (or consistent with the reference default 35σ) can be explicitly given to -> multiplexed, without repeated peak selection;
-- The threshold you want to change belongs to **Reconstruction Reference**: Explicit `force=True`, or delete the condition
-  `study/reference/<key>/` Post-rerun reference;
-- Actual usage fallback: `reference.json.peak_params.sigma_multiplier` (when generating reference
-  Selected value), `previous_sigma_multiplier`(force previous version when rebuilding).
-  `detection.sigma_multiplier` and `detection.threshold_source`.
-  (`user` / `default(35sigma)`); each workflow record is recorded separately.
-  `parameters_resolved.detection`(`source="reference(locked)"`, actual σ, margin.
-  Noise σ, refinement method list; `independent=true`, `reference_matching="external"`);
-- The threshold is too high and peaks cannot be selected -> clearly report an error (do not silently produce an empty peak table);
-- The threshold is written into the workflow parameter combination table -> an error is reported directly (`SweepError`), prompting "If you want to change the threshold, please rebuild."
-  Refer to";
-- Combination mode **None** `max_peaks`: This combination detects as many peaks as possible under the locking threshold
-
-## 5.11 Targeted localization (2026-09-19)
+## 5.11 Targeted localization
 
 By default localization covers **every detected peak** of the spectrum. To localize only named
 peaks, provide a target list; detection and peak numbering remain unchanged:
@@ -351,7 +350,7 @@ merged keeping first-seen order). Semantics:
 - record: `run.json.parameters_resolved.detection.localization_targets` =
   `{scope, source, path, sha256, n_targets, peak_ids, reference_peak_ids?}` (same style as
   `direct_range.source`); `peak_localization.<method>` also carries `localization_scope`
-  (`all`/`subset`), `n_targeted` and `n_skipped`;
+  (`all`/`subset`/`none`), `n_targeted` and `n_skipped`;
 - the resume fingerprint includes the **resolved** target list (path + SHA-256 + ids), so
   swapping the list -- or editing the content behind the same path -- re-runs instead of
   reusing the old run;
@@ -361,49 +360,9 @@ merged keeping first-seen order). Semantics:
   lands on that (workflow, condition): the run is marked `failed` with a message naming the
   undetected ids and the detected count (`peak_id` is a **per-spectrum** number, one spectrum
   per workflow x condition), and nothing is silently ignored or substituted;
-- no targets = today's whole-spectrum behaviour (`scope=all`), with zero impact on existing
-  study roots and records.
+- omitting targets refines every detected peak (`scope=all`).
 
-## 5.12 Legacy per-method target keys (removed)
-
-The following section documents removed syntax only. Do not use these examples: `localization`
-now accepts only `parabolic`, and method-specific target mappings/columns raise an error. Use
-the method-independent `localize_peaks=` argument or `localization.targets` column instead.
-
-The old method-specific syntax was removed when Gaussian fitting was deleted:
-
-```python
-run_combination_study(f"{root}#A", combos=..., localization="both",
-                      localize_peaks={"gaussian": "truth_peaks.csv"})
-```
-
-```bash
-python -m nmrforge_api sweep --study ~/studies/s1 --reference ~/studies/s1 \
-    --combos design.csv --localization both \
-    --localize-peaks-gaussian truth_peaks.csv
-```
-
-A combination table writes it per row (`localization.targets.<method>`; relative paths still
-resolve against the table directory):
-
-```csv
-zero_fill,localization,localization.targets.gaussian,localization.targets.parabolic
-1,both,truth_peaks.csv,
-2,both,""
-```
-
-The semantics match the single-key form exactly (**detection unchanged, unlisted peaks kept,
-defaults unchanged**), plus three rules:
-
-- priority: `localization.targets.<method>` > `localization.targets.all` (or an `all`/`*`/`both`
-  key) > `localization.targets` > the call argument `localize_peaks=`; a per-method key
-  overrides only that method and the others keep the call argument;
-- an explicit empty string means **unlimited** for that method (distinct from "not given",
-  which inherits the method-independent list);
-- record: `parameters_resolved.detection.localization_targets` stores the resolved target list;
-  `peak_localization.parabolic` summarizes the method's targeted and skipped counts.
-
-## 5.13 Condition granularity (2026-09-20)
+## 5.12 Condition-specific targets
 
 A and B are two different spectra with **different detected peak sets**, so the same combination
 row has different target peak numbers per condition and one list cannot serve both. The target

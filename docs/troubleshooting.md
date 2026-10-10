@@ -74,9 +74,9 @@ grid, or the sampling list contains duplicate or out-of-range coordinates.
 3. Fixing the classification matters more than it looks: uniform and NUS change the meaning of
    every processing parameter, which is why there is no "process anyway" flag.
 
-## A call requests a removed peak-localization method
+## A call requests an unsupported peak-localization method
 
-Only three-point parabolic localization is supported. Older Gaussian-fitting or combined-method
+Only three-point parabolic localization is supported. Gaussian-fitting and combined-method
 requests are rejected rather than silently substituted; use the supported `parabolic` method.
 
 ## The AppImage does not start

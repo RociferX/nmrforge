@@ -48,7 +48,7 @@ quality assessment), `Settings` (software settings), `Help` (usage tutorial, abo
 **`Help -> Usage tutorial`** opens the tutorial that ships with the program (what it does and how to use it, in the current interface language); the text lives in `nmrforge_data/tutorial/{zh,en}.md`.
 
 `Settings -> Software settings` covers: the interface language (follow the system / Chinese /
-English, since 2026-09-21), the NMRPipe path, the data directory, the per-nucleus default line
+English), the NMRPipe path, the data directory, the per-nucleus default line
 widths and alignment tolerances, and the SMILE thread count (plus "simple mode" in a source
 checkout). All of it goes into the local override config
 (`nmrforge_data/config/nmrforge.local.yaml`; `~/.config/NMRForge/nmrforge.local.yaml` inside

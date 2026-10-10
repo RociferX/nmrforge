@@ -1,50 +1,54 @@
 # Architecture
 
-NMRForge separates the desktop interface, processing workflows, external
-engine integration, and reusable scientific data operations. The published
-source tree keeps these components in one project.
+NMRForge 1.0.5 combines a Qt desktop application, a reusable data and processing core, workflow
+orchestration, an NMRPipe backend, and a separate Python/CLI API (API 1.1.1). The components share
+the same project and processing capabilities, but have different entry points and output records.
 
-    GUI and viewer
-         |
-         v
-    workflow and nmrforge_api
-         |
-         v
-    core data and processing operations
-         |
-         v
-    backend integrations -> NMRPipe / SMILE
+```text
+Desktop: gui/ ──> ProcessingController ──> workflow/ ──> core/ data, planning and project services
+                                             │                    │
+                                             └──── backend/ <─────┘
+                                                   │
+                                                   └── NMRPipe / SMILE
 
-## Responsibilities
+Python/CLI API: nmrforge_api/ ──> core/, workflow/ and backend/
+Viewer: viewer/ ──> NMRPipe spectrum files (.ft1/.ft2/.ft3)
+```
 
-- gui/ and viewer/ provide the desktop application and spectrum viewing.
+This is a responsibility map rather than a strict dependency ladder: workflows coordinate core
+domain operations and backend execution, while selected workflow and core operations also use
+backend runtime or configuration services. NMRPipe-specific command semantics live at the backend
+boundary and in its script generator.
 
-- nmrforge_api/ exposes the versioned Python and command-line interface. It
-  records study inputs, outputs, and processing provenance.
+## Components and data flow
 
-- workflow/ coordinates processing routes and user-requested operations.
+- `gui/` contains the main window, project tree, pipeline and group panels, import and script
+  dialogs, settings, and logs. It accesses project state through `core.project` and invokes
+  processing through `gui.processing.ProcessingController`.
+- `nmrforge_api/` provides the Qt-free Python and CLI entry points for version 1.1.1. It builds
+  reference products and runs explicit parameter combinations; its records and outputs belong to
+  API sessions rather than the active desktop project. See the [API contract](API_CONTRACT.md).
+- `workflow/` implements application operations: Bruker import, the import/FID/spectrum steps,
+  batch runs, manual scripts, processing routes, peak picking, and export. It combines domain
+  objects and plans from `core/` with the backend protocol.
+- `core/` parses Bruker metadata and data, models experiments and sampling, classifies experiments,
+  selects processing plans, and provides project, workspace, optimization, QC, and peak services.
+  `read_dataset()` builds an `Experiment` from acquisition files, detects sampling, and classifies
+  its experiment type. Project services own project records and paths.
+- `backend/` implements `ProcessingBackend`. The factory currently selects `NMRPipeBackend`, which
+  converts Bruker inputs, runs uniform processing or NUS reconstruction, and returns result paths,
+  effective parameters, metrics, and logs.
+- `viewer/` reads processed NMRPipe files and renders 1D, 2D, or 3D spectra. It can run embedded in
+  the desktop application or from its standalone viewer entry point.
+- `nmrforge_data/` supplies packaged defaults, presets, and other runtime resources. User-local
+  paths and settings are resolved by the configuration layer.
 
-- core/ contains data handling, experiment interpretation, processing,
-  optimization, quality checks, and project records.
+In the desktop path, import stores or references Bruker input under a project data entry and writes
+metadata and run records through project services. The FID step calls backend conversion. The
+spectrum step selects the uniform `process()` or NUS `reconstruct_nus()` route, then registers the
+result under the data entry's spectra directory. The viewer reads those spectrum files for display.
+The API reuses lower-level data and processing services but creates its own study/session products.
 
-- backend/ integrates processing with external engines and generates or runs
-  their commands.
-
-- nmrforge_data/ contains packaged configuration and preset resources.
-
-The interface and processing code communicate through explicit data
-structures and API contracts. GUI code owns presentation; engine-specific
-command handling belongs at the backend boundary. NMRPipe and SMILE are
-external dependencies and are not part of the Python package distribution.
-
-## Data flow
-
-Bruker input is read and interpreted by core data modules. A selected
-workflow delegates conversion or processing to the backend, which produces
-spectrum files and run records. The viewer reads spectrum data for display.
-The public scripting API follows its documented reference-and-combination
-workflow and writes study products separately from the active desktop project.
-
-See the [API contract](API_CONTRACT.md) for the scripting boundary, the
-[processing model](processing-model.md) for user-visible routes, and
-[external dependencies](external-dependencies.md) for engine requirements.
+NMRPipe and SMILE are external programs. `backend/runtime.py` runs their C-shell commands as
+subprocesses and returns output for progress and run logs. See [external dependencies](external-dependencies.md),
+the [GUI architecture](gui/architecture.md), and the [backend architecture](backend/architecture.md).

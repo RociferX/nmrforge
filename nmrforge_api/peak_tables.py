@@ -1,7 +1,7 @@
 """Unified peak table CSV with stable per-spectrum peak identities and localisation QC.
 
 Each workflow independently picks peaks on its own spectrum and writes one fixed-schema table.
-The current v1.1 contract has 38 columns: workflow and dataset identity, 1H/15N compatibility
+The current v1.1.1 contract has 38 columns: workflow and dataset identity, 1H/15N compatibility
 coordinates, logical F1/F2/F3 coordinates and nuclei, requested and actual localisation method,
 failure/fallback details, fit QC, duplicate-coordinate flags, and per-peak cell diagnostics.
 Gaussian fitting and ``fit_rmse`` were removed; localisation uses three-point parabolic

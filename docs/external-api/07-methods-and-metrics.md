@@ -9,16 +9,16 @@
 
 1. `generate_fid`(bruker `-AUTO`/fid.com conversion) -> `generate_spectrum`.
    (NMRPipe pipeline + unified phase route; NUS go SMILE reconstruction);
-2. Freeze **reference spectrum** and **reference script **(`process.com`, with SHA-256) -- reference script is the condition.
-   Template for all subsequent workflows;
+2. Freeze the **reference spectrum** and **reference script** (`process.com`, with SHA-256),
+   which provide the condition’s base for parameter combinations;
 3. Reference peak position: the software selects peaks on the reference spectrum (threshold
    `sigma_multiplier` is set when **generating the reference**, default 35σ; API `sigma_multiplier=` /
    CLI `peaks --sigma`). Automatic axial screening requires compatible experiment/acquisition
    priors and evidence from many narrow, aligned candidates at original spectrum edges; it does
    not use a blanket edge margin. An explicit margin is a manual override. Peaks receive stable
    identities in row order `R0001…`;
-   **The threshold is frozen together with the reference**: All subsequent workflows can only use the reference threshold and give different thresholds.
-   An error will be reported (if you want to change the threshold, you must rebuild the reference);
+   **The threshold is frozen with the reference**. A different threshold raises an error and
+   requires explicit reference rebuilding;
 4. Apply the single supported localisation method, a **three-point parabola**, and write
    `reference_peak_table_parabolic.csv`;
 5. The reference is only used as a benchmark for parameter perturbation and does not claim global optimality.
@@ -34,7 +34,7 @@
   source or conversion evidence, or parameters requiring conversion/merge raises an error and requires
   rebuilding the reference. Single-file FIDs, 3D uniform slice directories and merged multi-segment
   FIDs are supported. Candidate spectra are written to `study/workflows/<id>/<condition>/` and do not
-  replace the active spectrum; see [FID reuse boundary](09-limitations-and-roadmap.md#99-fid-reuse-boundary);
+  replace the active spectrum; see [FID reuse boundary](09-limitations-and-roadmap.md#99-frozen-fid-reuse);
 - Phase/window function/zero filling/baseline/NUS parameters are all executed according to the table, and all parameters that affect the results are dropped in three layers
 
 ## 7.2b Sampling route: coverage and schedule order
@@ -53,7 +53,7 @@ for 3D NUS remains limited as described in [09](09-limitations-and-roadmap.md).
 | `parabolic` | Refine the detected maximum independently along each requested axis using the local three points | Any dimension; only method |
 
 - **Reference mode**: refine each peak in the reference peak table and write one parabolic table;
-- **Combination mode** (2026-09-14): each combination first picks peaks independently on **its own
+- **Combination mode**: each combination first picks peaks independently on **its own
   candidate spectrum** with the reference-locked threshold, then refines them with the parabola.
   `reference_peak_id` stays blank in the peak table --
   matching peaks between combinations, and against the reference, is downstream work.
@@ -62,7 +62,7 @@ Localisation is a deterministic closed-form calculation, not an iterative fit. `
 marks a vertex offset at ±0.5 points. `fit_success` indicates whether a finite equivalent linewidth
 could be calculated; it differs from the localisation record's `success` (which indicates that
 localisation ran). `fallback` and `fallback_reason` remain compatibility fields and do not imply
-an algorithm switch. Removed method requests such as `gaussian` or `both` raise an error.
+an algorithm switch. Unsupported method requests such as `gaussian` or `both` raise an error.
 
 Parabolic localisation needs only the local three-point neighbourhood on each axis. There is no
 ROI size or iterative evaluation budget.
@@ -93,15 +93,13 @@ low-confidence experiment types, strong evidence for both signs can be used as a
 explicit API request (`positive`, `negative`, `both` or `dominant`) takes precedence. The
 low-level detector uses `sign_mode="auto"` by default.
 
-### Baseline correction caliber (corrected on 2026-09-16)
+### Baseline correction
 
-- Time domain: direct dimension DC offset is handled by `POLY -time` (determined by automatic diagnosis, written to the reference base
-  `direct_poly_time`, the combination is inherited);
-- Frequency domain:`mode=order` render **`POLY -ord N -auto`**(NMRPipe `-auto` automatically select baseline point
-  Then do N-order fitting). Historical defects: NMRPipe naked `POLY -ord N` default `-nc 0` and none.
-  `-first/-last` -> No baseline node -> **Identity operation** (bit-by-bit verification on real machine), resulting in "turning off the axis spectrum remains unchanged";
-- Therefore the reference baseline optimisation score (memory robust polynomial fit) and the final run script now have the same origin;
-- `mode=auto` still renders `POLY -auto` (NMRPipe comes with the default order)
+- Time-domain DC correction uses `POLY -time` when diagnostics select `direct_poly_time`.
+- Frequency-domain `mode=order` renders **`POLY -ord N -auto`**, selecting baseline points
+  automatically before an Nth-order fit. Reference optimisation scores robust polynomial
+  candidates in memory; the final script applies the corresponding baseline settings.
+- `mode=auto` renders `POLY -auto` with the engine's default order.
 
 ### Axis effects are reported according to conditions
 
@@ -115,8 +113,8 @@ The same parameter may be completely different under different conditions (diffe
 | --- | --- |
 | `detected` | Whether the peak is detected on the spectrum (combination mode: only the detected peaks are in the table -> constant true; refer to the peak table
 Unmeasured reference peaks in tracking mode retain rows and `detected=false`) |.
-| `intensity` / `SNR` | Signed peak height relative to the global median background and `|height|/σ` (σ = robust MAD noise) |
-| `fit_success` / `FWHM_H` / `FWHM_N` / `boundary_hit` | Three-point parabolic localisation QC; the equivalent linewidth is a local-curvature estimate (`FWHM = 2.3548 sigma`, `sigma^2 = H/(2|a|)`) |
+| `intensity` / `SNR` | Signed peak height relative to the global median background and `\|height\|/σ` (σ = robust MAD noise) |
+| `fit_success` / `FWHM_H` / `FWHM_N` / `boundary_hit` | Three-point parabolic localisation QC; the equivalent linewidth is a local-curvature estimate (`FWHM = 2.3548 sigma`, `sigma^2 = H/(2\|a\|)`) |
 | `duplicate_localization` | The row shares its coordinates with another row of the same table (ppm to 1e-6): every row of a group is flagged true and no row is dropped; `peak_localization.parabolic.n_duplicate` counts extra rows and `run.json.warnings` gains `duplicate_localization` |
 | `localization_requested` / `localization_method` | Requested method versus actual result: `parabolic` or `none` when not detected/skipped |
 | `failure_reason` / `fallback_reason` | Independent localization failure reason versus actual fallback reason |
@@ -126,22 +124,8 @@ Unmeasured reference peaks in tracking mode retain rows and `detected=false`) |.
 `cell_edge` is always NaN in the current contract; physical search windows and ownership-conflict
 audit are recorded separately. It is not a boolean boundary detector.
 
-`window_edge` and `cell_edge` were previously described as distinct search boundaries in
-a reference-measurement record. They do not by themselves establish that a peak is an artifact.
-
-**Historical v1.0 wording (superseded; not current behavior):** the following discussion treated
-`cell_edge` as an exclusive-cell marker. Current v1.1.1 always writes this field as NaN.
-**How to read `cell_edge` (owner's wording, 2026-09-19 - historical)**: it fires very
-often because an exclusive cell can be narrow in a crowded spectrum
-only 1-2 points wide, so an extremum sitting on the cell bound is normal for crowded spectra. It is
-therefore **not a criterion, only a necessary-condition filter**: the caller's own criteria are
-`intensity_ratio_vs_picked` (for example >1.10) and `shift_vs_picked_*` (for example >1.5 points),
-with `cell_edge` confirming that a suspicious row really was cut by a neighbour (no false
-negatives were observed). Making the marker readable on its own would need a directional test (the
-cell bound was hit **and** the in-cell extremum is clearly higher than the identity height) or a
-continuous quantity (in-cell maximum / physical-window maximum), with the threshold left to the
-the downstream reader.
-
+Reference-measurement `window_edge` describes a physical search-window boundary;
+it does not imply that the peak is an artefact. `cell_edge` remains uncomputed (`NaN`).
 
 Reference-measurement records may include additional location and boundary fields; the public
 peak-table columns and meanings are listed in [outputs and records](06-outputs-and-records.md).

@@ -5,11 +5,8 @@ typical session from importing data all the way to a peak table. Menu and button
 text the program shows (the interface language can be changed under `Settings → Software settings`,
 and this document follows it).
 
-This guide follows software 1.0.5 and API v1.1.1. This patch release packages existing phase/NUS
-fixes and evidence organization; API parameters and the 38-column peak-table contract are unchanged.
-The 1.0.5 release provides the source and one Linux AppImage. See the [release page](https://github.com/RociferX/nmrforge/releases)
-for artifact availability and validation status. Version 1.0.2 is retained as a historical release
-and does not include the current API contract.
+This guide follows software 1.0.5 and API v1.1.1. The API uses the documented parameters and
+38-column peak-table contract. Download the Linux AppImage or source from the [1.0.5 Release](https://github.com/RociferX/nmrforge/releases/tag/v1.0.5).
 
 ## 1. What the program does
 

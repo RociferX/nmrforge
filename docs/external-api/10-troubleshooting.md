@@ -8,11 +8,10 @@
 | `DatasetError: condition label 'A' is taken by ...` | two datasets were bound to one label | use another label (B/C/...) or a second study root |
 | `ReferenceError: reference artefacts are missing; rebuild with force=True` | `study/reference/<key>/` was moved or deleted | remove that directory, or call `build_reference(..., force=True)` |
 | A combination run reports that the reference FID is missing, damaged, or inconsistent | the frozen FID, source fingerprint, conversion evidence or requested settings no longer match | rebuild the reference with `force=True` / `reference --force`; combination runs do not reconvert or merge automatically |
-| `ReferenceError: a non-primary condition needs the primary condition picked first` | peaks were picked for B while the primary condition A had none | call `ensure_reference_peaks` on A first |
-| `MeasurementError` or `SweepError` mentions a removed localisation method | a caller requested Gaussian or another removed peak-fitting method | use the supported three-point parabolic method; the API does not silently substitute a method |
+| `MeasurementError` or `SweepError` mentions an unsupported localisation method | a caller requested an unsupported peak-fitting method | use the supported three-point parabolic method; the API does not silently substitute a method |
 | `SweepError: ... exceeds the max_runs limit` | too many combinations | shrink the grid, raise `max_runs` explicitly, or run in batches |
-| `SweepError: 'phases'/'direct_phase' in the grid would break phase locking` | a phase dictionary was given directly | use `phase_delta.<axis>.p0|p1` or `phase.<axis>.p0|p1` |
-| `SweepError: only 2D NUS parameter combinations are supported` | 3D NUS | build the reference only; combination execution is on the roadmap |
+| `SweepError: 'phases'/'direct_phase' in the grid would break phase locking` | a phase dictionary was given directly | use `phase_delta.<axis>.p0\|p1` or `phase.<axis>.p0\|p1` |
+| `SweepError: only 2D NUS parameter combinations are supported` | 3D NUS | 3D NUS supports reference construction; parameter-combination execution is unsupported |
 | `plan.notes` mentions "not in the list of parameters the backend reads" | a key name is misspelled | check the key table in 05; notes only warn and never fail a run |
 
 ## 10.2 The status is `success_with_warning`
@@ -23,7 +22,9 @@ block of `log.txt`):
 | Code | What to do |
 | --- | --- |
 | `peak_count_zero` | this combination detected no peak at the locked threshold: check that its spectrum is sound, or rebuild the reference with a different threshold |
-| (removed) | `peak_not_detected` / `peak_window_edge` / `peak_out_of_range` / `window_points_fallback`: combination mode has picked independently since 2026-09-14 and no longer emits them |
+| `boundary_hit` | Review the local spectrum: the parabolic vertex reaches the ±0.5-point boundary. |
+| `duplicate_localization` | Complete coordinates coincide within one table; do not count duplicate rows as independent observations. |
+| `direct_range_override` | Confirm the permitted direct-range difference from the frozen reference is intentional. |
 
 ## 10.3 Resuming and re-running
 
@@ -32,8 +33,7 @@ the condition dataset, the parameter combination and its actual parameters, the 
 the reference script/spectrum/peak-table hashes, and the **locked threshold, the parabolic
 localisation setting and the manual picking margin**. A record
 without a fingerprint, or any changed input, re-runs safely. After shortening a combination
-table, old `Wxxxx` directories outside the active plan may be kept as history; they no longer
-enter the current summary.
+table, `Wxxxx` directories outside the active plan are excluded from the current summary.
 
 - workflow x condition pairs that are already `success`/`success_with_warning` are skipped;
 - to re-run one combination, delete that condition directory under `study/workflows/<id>/` (or

@@ -1,11 +1,24 @@
 # 安装
 
-## 源码与二进制发布
+Linux 是目标运行平台；Windows 可用于编辑源码，但不属于支持的运行环境。Linux 桌面用户可直接使用
+[NMRForge 1.0.5 Release](https://github.com/RociferX/nmrforge/releases/tag/v1.0.5) 中的 AppImage。
+Python API 和命令行工具请按下方源码步骤单独安装。
 
-GitHub 仓库提供源码；[Releases](https://github.com/RociferX/nmrforge/releases) 页面也可能提供
-带版本号的 Linux AppImage。Linux 是目标运行平台；Windows 可用于编辑源码，但不属于支持的运行环境。
-AppImage 对应其发布页标出的源码 tag，后续源码变更不会自动进入该二进制。使用当前源码请按下面步骤
-进行可编辑安装；选择 AppImage 时，请以对应 Release 页面和 tag 为准。
+## AppImage(Linux)
+
+下载 `NMRForge-1.0.5-x86_64.AppImage` 与 `SHA256SUMS-v1.0.5.txt`，在同一目录校验并启动：
+
+```bash
+sha256sum -c SHA256SUMS-v1.0.5.txt
+chmod +x NMRForge-1.0.5-x86_64.AppImage
+./NMRForge-1.0.5-x86_64.AppImage --licenses
+./NMRForge-1.0.5-x86_64.AppImage
+```
+
+它们捆绑 PySide6/Qt,这些库按 LGPL-3.0 随产物分发(许可与 nmrForge 源码的 Apache-2.0
+并行有效);构建与验收信息以对应 Release 资产和说明为准。
+
+## 源码安装
 
 ```bash
 git clone https://github.com/RociferX/nmrforge.git
@@ -16,23 +29,9 @@ python -m pip install -e ".[test]"
 python main.py
 ```
 
-`pip install .` 与 wheel 自 2026-09-21 起可用:随包数据(`nmrforge_data/config`、
-`nmrforge_data/presets`、`gui/assets`、`ui_support/locales`)随包分发,源码检出与安装态的
-相对位置一致。真实处理需要另行安装 NMRPipe;NUS 重构还需要 SMILE。
-
-## AppImage(Linux)
-
-如果发布页提供 AppImage,产物自带解释器与 Qt；Release 页面会标明版本及校验和。校验方式:
-
-```bash
-sha256sum NMRForge-<version>-x86_64.AppImage      # 与对应 Release 说明的校验和对比
-chmod +x NMRForge-<version>-x86_64.AppImage
-./NMRForge-<version>-x86_64.AppImage --licenses  # 产物内的第三方许可与构建溯源
-./NMRForge-<version>-x86_64.AppImage
-```
-
-它们捆绑 PySide6/Qt,这些库按 LGPL-3.0 随产物分发(许可与 nmrForge 源码的 Apache-2.0
-并行有效);构建与验收信息以对应 Release 资产和说明为准。
+`pip install .` 与 wheel 也包含运行资源(`nmrforge_data/config`、`nmrforge_data/presets`、
+`gui/assets`、`ui_support/locales`)，源码检出与安装态的相对位置一致。真实处理需要另行安装
+NMRPipe；NUS 重构还需要 SMILE。nmrForge 不下载或捆绑这两个工具。
 
 ## 开发者:可编辑源码安装
 
@@ -62,7 +61,7 @@ AppImage 使用随构建固定的内置入口。
 | `nmrforge-viewer` | 独立谱图查看器(`python -m viewer` 也可以) |
 
 主 GUI 在源码检出里用 `python main.py`；独立查看器也提供上面的命令行入口。
-运行资源由 `nmrforge_data` 随包分发，不再要求只能可编辑安装（旧 PACK-015 限制已解除）。
+运行资源由 `nmrforge_data` 随包分发。
 
 处理命令行在 `nmrforge_api` 包里:
 

@@ -23,12 +23,12 @@ from typing import Any
 
 #: declared behaviour level (see the module doc; meaning matches nmrforge_api.compat)
 DECLARATION: dict[str, Any] = {'schema': 'nmrforge_api.compat.declaration.v1',
- 'digest': '27f57abe8233f52f493749a48a241ceb1fd3d984a348cba93a64b61f4fa0887b',
+ 'digest': 'd7cfa3c003c68e99789f9e0c5b0d85f9af53e5293697f0defdb96de0bb37e1c8',
  'token_digest': '40686f68f9cb79511d6652fccb92f549294840abd2ca0bbbd54417866ffe48ca',
- 'compat_level': 'contract_changed',
- 'affected': ['records', 'api_surface', 'cli'],
+ 'compat_level': 'same',
+ 'affected': [],
  'updated': '2026-10-10',
- 'note': 'Version metadata 1.0.5/API 1.1.1; signatures and 38 columns unchanged',
+ 'note': 'Current technical documentation; executable tokens unchanged',
  'golden': {'name': 'conformance_v1',
             'spectrum_sha256': '382b330926da93d856feef40ca33c2df1eec21b61e50db471bdf7aa4bb2fb311',
             'peak_table_sha256': 'e9ef45f2cae32bc580fc1bdeea1928ceb8406154848f8aca3c4558285e532242',

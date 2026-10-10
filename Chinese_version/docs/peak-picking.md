@@ -12,7 +12,7 @@
 | `sigma_multiplier` | 噪声倍数阈值，默认 35σ；实际值及来源留档。 |
 | `edge_margin_ppm` | 显式人工排除边距，单位 ppm；默认不设置无条件边带遮罩。 |
 | `edge_margin_points` | 显式人工点数边距；填零改变点距，不宜用于跨分辨率比较。 |
-| `localization_method` | 仅接受 `parabolic`；已删除的方法会明确报错。 |
+| `localization_method` | 仅接受 `parabolic`；不支持的方法会明确报错。 |
 | `ref_peaks`、`ref_nuclei`、`tolerance_ppm` | 可选参考峰表约束，见下节。 |
 
 噪声使用稳健估计，阈值、峰高与 S/N 相对谱数组的全局中位数背景；这只是度量口径，

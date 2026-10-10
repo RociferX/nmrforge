@@ -6,8 +6,8 @@
 python -m nmrforge_api --help
 ```
 
-当前命令行属于 API v1.1.1；参数和 38 列峰表契约未变。请在含该契约的源码检出里完成可编辑安装后使用。
-1.0.5 发行提供源码与一份 Linux AppImage；具体产物可用性和验证状态以[发布页](https://github.com/RociferX/nmrforge/releases)为准，1.0.2 保留为历史版本；见
+当前命令行属于 API v1.1.1，统一峰表为38列。安装源码或wheel后使用命令行入口。
+Linux AppImage 与源码可从 [1.0.5 Release](https://github.com/RociferX/nmrforge/releases/tag/v1.0.5) 获取；见
 [installation.md](installation.md)。
 
 ## 子命令
@@ -76,9 +76,7 @@ window.F1.off: [0.35, 0.45, 0.55]
 | --- | --- |
 | `parabolic` | 唯一方法。三点抛物线精修,适用于任意维度。 |
 
-二维高斯拟合算法与其 CLI 表面(`--localization`、`--localize-peaks-gaussian`、
-`--localize-peaks-parabolic`、`--gaussian-roi-*`)已于 2026-09-26(用户需求⑦)
-整体删除;`localization` 只接受 `"parabolic"`,`"gaussian"`/`"both"` 报
+当前不提供二维高斯拟合;`localization` 只接受 `"parabolic"`,`"gaussian"`/`"both"` 会报
 `SweepError`。想限定只精修部分峰,用 `--localize-peaks`(普通 CSV)。
 
 ## 采样判定是硬门槛

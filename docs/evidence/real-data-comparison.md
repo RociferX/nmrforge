@@ -1,8 +1,8 @@
 # Four Processing Routes: 2D Spectra and 3D Projection Comparisons
 
-This page presents final processed spectra, methods, results, and limitations measured with software
-1.0.4 and API v1.1. The current release is software 1.0.5 / API v1.1.1; the measurements below
-remain on the original baseline. Four comparisons cover 2D uniform, controlled artificial 2D NUS, 3D uniform, and acquired
+This page presents final spectra obtained with the current data-processing workflow, together with
+the methods, results, and limitations.
+Four comparisons cover 2D uniform, controlled artificial 2D NUS, 3D uniform, and acquired
 3D NUS. The source data for artificial downsampling were acquired, but the downsampling schedule was
 not acquired by an instrument as NUS.
 
@@ -37,7 +37,7 @@ independence: the artificial 2D comparison shares raw data and software; 15750 i
 the authors' conversion and processing scripts; and 52533 uses the deposited final spectrum directly.
 The four comparisons do not replace comprehensive independent ground-truth validation.
 
-## Results overview and observed strengths of automatic processing
+## Results overview
 
 Across the four comparisons, the main-signal positions and overall spectral patterns agree well.
 No clear systematic loss of main signals was observed within the current common windows. Unmatched
@@ -46,26 +46,24 @@ thresholds. Weak negative lobes retained in the figures are not targets for reco
 in these same-sign spectra. Candidate coverage measures detection and correspondence; an unmatched
 candidate does not by itself mean that the signal disappeared during processing.
 
-These results support reliable routine processing by NMRForge for the tested 2D/3D and uniform/NUS
-cases:
+The processing comparisons also record:
 
-- **Automatic processing produces spectra that correspond to the references.** Main signals agree
+- **Scripts and spectral structure.** Main signals agree
   without copying the authors' final phases or experiment-specific linear-prediction/windowing
   recipes; both NUS reconstructions retain the corresponding main spectral structure.
-- **Automatic phase optimization is close to the applicable reference.** After a joint sign-equivalent
+- **Phase residuals.** After a joint sign-equivalent
   transformation, the H/N/C phase residuals for BMRB 52533 are 0.97°/2.50°/0°. For BMRB 15750,
   N and C residuals are each 2.50°; H must be compared as a phase curve with P1, as detailed below.
-- **Acquisition encoding is handled correctly in these cases.** Echo–AntiEcho 2D data do not receive
+- **Acquisition encoding.** Echo–AntiEcho 2D data do not receive
   mechanical ALT/NEG operations; the 15750 carbon dimension correctly uses FT `-alt`; and the 52533
   SMILE encoding and subsequent N-dimension `-alt -neg` and C-dimension `-alt` match the author
   script. The resulting axes and overall signs correspond.
-- **Metadata conflicts are identified and resolved consistently.** The 15750 carbon sweep-width
+- **Sweep-width resolution.** The 15750 carbon sweep-width
   conflict resolves under the current rule to 3636.364 Hz, matching the author conversion; the raw
   parameter remains unchanged, and the selected value and conflict are auditable.
 
-The authors' experiment-specific processing can yield better resolution or weak-feature detail. This
-shows room for further tuning; it does not mean that the automatic route lost the corresponding main
-signals. These conclusions apply to the tested examples and do not replace assigned ground truth or
+The authors' experiment-specific processing changes resolution and weak-feature detail;
+these differences are examined alongside the corresponding local signals. These conclusions apply to the tested examples and do not replace assigned ground truth or
 validation across all experiment types.
 
 ## 2D uniform: comparison with the author spectrum

@@ -26,8 +26,9 @@ license = { text = "Apache-2.0" }
 #       (see docs/evidence/real-data-comparison.md);
 #   (2) a compatibility promise carried by the compat process (the behaviour digests and the
 #       four levels plus a golden vector, see nmrforge_api/compat_declaration.py).
-# - `nmrforge_api` has a v1.1 public source contract (2026-10-03), separate from the software/AppImage version.
-#   Updating source docs/API does not update the existing 1.0.2 AppImage binary.
+# - `nmrforge_api` is v1.1.1 (2026-10-10), with unchanged parameters and the 38-column table contract;
+#   it is versioned separately from the software/AppImage. AppImage 1.0.5 is released;
+#   the historical 1.0.2 AppImage does not include the current API contract.
 # - Linux is the validation and release target. Windows is an editing environment only;
 #   runtime compatibility with Windows or macOS is not claimed.
 classifiers = [

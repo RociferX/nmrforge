@@ -1,8 +1,6 @@
 # 快速开始
 
-本页介绍当前 1.0.5 源码安装与首次处理。1.0.5 发行提供源码与一份 Linux AppImage；
-具体产物可用性和验证状态以[发布页](https://github.com/RociferX/nmrforge/releases)为准。
-1.0.2 保留为历史版本（自带环境，界面中英运行时切换），不包含当前 API v1.1.1。
+本页介绍 1.0.5 的安装与首次处理。Linux 桌面用户可从 [1.0.5 Release](https://github.com/RociferX/nmrforge/releases/tag/v1.0.5) 下载 AppImage；源码安装见下方步骤。公开 API 版本为 v1.1.1。
 
 ## 路线 A —— 源码安装与 GUI
 
@@ -19,9 +17,6 @@ python main.py
 引擎。如果它们不在,数据检查仍然可用,程序会明确报出处理能力不可用。
 
 第一次打开程序,先看 **`帮助 → 使用教程`**:一份从导入数据走到峰表的完整走查,界面语言换了正文也跟着换。
-
-将来的 AppImage 路径及其额外的 PySide6/Qt 分发检查,预留在
-维护者私有仓库里的发布检查清单。
 
 ## 路线 B —— 开发者:不装 NMRPipe 也能检查数据集
 
