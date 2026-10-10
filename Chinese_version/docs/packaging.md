@@ -1,7 +1,7 @@
 # 打包
 
-NMRForge 软件版本为 **1.0.5**，脚本 API 版本为 **1.1.1**，两者分别版本化。本次发布提供源码和
-Linux AppImage。AppImage 是最便捷的桌面安装方式；NMRPipe 与 SMILE 需要另行获取和安装。
+v1.0.5 源码与 AppImage 发布使用 NMRForge 软件 **1.0.5** 和脚本 API **1.1.1**，两者分别版本化。
+AppImage 是最便捷的桌面安装方式；NMRPipe 与 SMILE 需要另行获取和安装。
 NMRPipe 用于转换和处理，SMILE 用于 NUS 重构。
 
 ## Linux AppImage
@@ -56,4 +56,5 @@ bash packaging/linux/build_appimage.sh
 ```
 
 替换 wheel 需匹配构建平台，且 PySide6 与 shiboken6 版本应配套。可通过公开的构建脚本和 spec 使用这些库
-重新构建应用。组件与来源详情见随包的[第三方声明](../../packaging/linux/THIRD_PARTY_LICENSES/NOTICE.md)。
+重新构建应用。组件与来源详情见随包的[第三方声明](../../packaging/linux/THIRD_PARTY_LICENSES/NOTICE.md)，
+许可文本来源见[来源记录](../../packaging/linux/THIRD_PARTY_LICENSES/PROVENANCE.txt)。

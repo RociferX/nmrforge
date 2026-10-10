@@ -1,7 +1,7 @@
 # Packaging
 
-NMRForge software **1.0.5** and scripting API **1.1.1** have separate version numbers. The release
-provides source and a Linux AppImage. The AppImage is the simplest desktop installation path;
+The v1.0.5 source and AppImage release uses NMRForge software **1.0.5** and scripting API **1.1.1**,
+which have separate version numbers. The AppImage is the simplest desktop installation path;
 NMRPipe and SMILE must be obtained and installed separately. NMRPipe handles conversion and
 processing, while SMILE performs NUS reconstruction.
 
@@ -68,4 +68,5 @@ bash packaging/linux/build_appimage.sh
 The replacement wheel must match the build platform and the PySide6/shiboken6 pair. The script and
 spec provide the inputs to rebuild the application with those libraries. See the bundled
 [third-party notice](../packaging/linux/THIRD_PARTY_LICENSES/NOTICE.md) for component and source
-details.
+details. The [provenance record](../packaging/linux/THIRD_PARTY_LICENSES/PROVENANCE.txt) identifies
+the sources of the bundled licence texts.
